@@ -222,6 +222,10 @@ struct TerminalContainerView: View {
                 startAutoHideTimer()
             }
         }
+        // Shake device to clear the terminal screen
+        .onShake {
+            terminalViewModel.clearScreen()
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
@@ -460,6 +464,27 @@ class TerminalViewModel: ObservableObject {
         surfaceView?.setCtrlToggle(active)
     }
     
+    /// Increase terminal font size
+    func increaseFontSize() {
+        surfaceView?.increaseFontSize()
+    }
+    
+    /// Decrease terminal font size
+    func decreaseFontSize() {
+        surfaceView?.decreaseFontSize()
+    }
+    
+    /// Reset terminal font size to default
+    func resetFontSize() {
+        surfaceView?.resetFontSize()
+    }
+    
+    /// Clear the terminal screen (Ctrl+L)
+    func clearScreen() {
+        // Send Ctrl+L (form feed / clear screen)
+        send(text: "\u{0c}")
+    }
+    
     enum SpecialKey {
         case escape, tab, up, down, left, right, enter, backspace
     }
@@ -576,46 +601,99 @@ struct TerminalToolbar: View {
     @State private var ctrlPressed = false
     
     var body: some View {
-        HStack(spacing: 0) {
-            // Common key shortcuts
-            ToolbarButton(symbol: "escape", label: "ESC") {
-                viewModel.sendSpecialKey(.escape)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                // Common key shortcuts
+                ToolbarButton(symbol: "escape", label: "ESC") {
+                    viewModel.sendSpecialKey(.escape)
+                }
+                
+                ToolbarButton(symbol: "arrow.right.to.line", label: "Tab") {
+                    viewModel.sendSpecialKey(.tab)
+                }
+                
+                ToolbarButton(
+                    symbol: ctrlPressed ? "control.fill" : "control",
+                    label: "Ctrl"
+                ) {
+                    ctrlPressed.toggle()
+                    // Notify the surface view about Ctrl toggle state
+                    viewModel.setCtrlToggle(ctrlPressed)
+                }
+                
+                // Arrow keys
+                ToolbarButton(symbol: "arrow.up", label: "↑") {
+                    viewModel.sendSpecialKey(.up)
+                }
+                
+                ToolbarButton(symbol: "arrow.down", label: "↓") {
+                    viewModel.sendSpecialKey(.down)
+                }
+                
+                ToolbarButton(symbol: "arrow.left", label: "←") {
+                    viewModel.sendSpecialKey(.left)
+                }
+                
+                ToolbarButton(symbol: "arrow.right", label: "→") {
+                    viewModel.sendSpecialKey(.right)
+                }
+                
+                Divider()
+                    .frame(height: 24)
+                    .padding(.horizontal, 4)
+                
+                // Common special characters hard to type on iOS keyboard
+                CharacterButton(char: "|", label: "pipe") {
+                    viewModel.send(text: "|")
+                }
+                
+                CharacterButton(char: "~", label: "tilde") {
+                    viewModel.send(text: "~")
+                }
+                
+                CharacterButton(char: "`", label: "tick") {
+                    viewModel.send(text: "`")
+                }
+                
+                CharacterButton(char: "\\", label: "bslash") {
+                    viewModel.send(text: "\\")
+                }
+                
+                Spacer()
+                
+                // Font size controls
+                ToolbarButton(symbol: "minus.magnifyingglass", label: "A-") {
+                    viewModel.decreaseFontSize()
+                }
+                
+                ToolbarButton(symbol: "plus.magnifyingglass", label: "A+") {
+                    viewModel.increaseFontSize()
+                }
+                
+                ToolbarButton(symbol: "keyboard", label: "KB") {
+                    // Toggle keyboard visibility
+                }
             }
-            
-            ToolbarButton(
-                symbol: ctrlPressed ? "control.fill" : "control",
-                label: "Ctrl"
-            ) {
-                ctrlPressed.toggle()
-                // Notify the surface view about Ctrl toggle state
-                viewModel.setCtrlToggle(ctrlPressed)
-            }
-            
-            ToolbarButton(symbol: "arrow.up", label: "↑") {
-                viewModel.sendSpecialKey(.up)
-            }
-            
-            ToolbarButton(symbol: "arrow.down", label: "↓") {
-                viewModel.sendSpecialKey(.down)
-            }
-            
-            ToolbarButton(symbol: "arrow.left", label: "←") {
-                viewModel.sendSpecialKey(.left)
-            }
-            
-            ToolbarButton(symbol: "arrow.right", label: "→") {
-                viewModel.sendSpecialKey(.right)
-            }
-            
-            Spacer()
-            
-            ToolbarButton(symbol: "keyboard", label: "KB") {
-                // Toggle keyboard visibility
-            }
+            .padding(.horizontal, 8)
         }
-        .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(Color(UIColor.systemGray6))
+    }
+}
+
+/// Button for character input
+struct CharacterButton: View {
+    let char: String
+    let label: String
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(char)
+                .font(.system(size: 18, weight: .medium, design: .monospaced))
+                .frame(minWidth: 36, minHeight: 44)
+        }
+        .foregroundStyle(.primary)
     }
 }
 
@@ -635,6 +713,46 @@ struct ToolbarButton: View {
             .frame(minWidth: 44, minHeight: 44)
         }
         .foregroundStyle(.primary)
+    }
+}
+
+// MARK: - Shake to Clear
+
+/// UIViewController subclass that detects shake gestures
+class ShakeDetectingViewController: UIViewController {
+    var onShake: (() -> Void)?
+    
+    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        if motion == .motionShake {
+            // Haptic feedback
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+            onShake?()
+        }
+    }
+    
+    override var canBecomeFirstResponder: Bool { true }
+}
+
+/// SwiftUI wrapper for shake detection
+struct ShakeDetector: UIViewControllerRepresentable {
+    let onShake: () -> Void
+    
+    func makeUIViewController(context: Context) -> ShakeDetectingViewController {
+        let vc = ShakeDetectingViewController()
+        vc.onShake = onShake
+        return vc
+    }
+    
+    func updateUIViewController(_ uiViewController: ShakeDetectingViewController, context: Context) {
+        uiViewController.onShake = onShake
+    }
+}
+
+/// View modifier for adding shake detection
+extension View {
+    func onShake(perform action: @escaping () -> Void) -> some View {
+        self.background(ShakeDetector(onShake: action))
     }
 }
 
