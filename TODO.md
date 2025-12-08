@@ -153,6 +153,11 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 - [ ] External display mirroring
 
 ### Settings
+- [x] **Font family selection**
+  - [x] Font picker UI (Departure Mono, SF Mono, Menlo, Courier New)
+  - [x] Live font updates (ghostty_surface_update_config)
+  - [x] ghostty_config_load_string API for config loading
+  - [x] Font preference persistence (UserDefaults)
 - [ ] Font size adjustment
 - [ ] Theme/color scheme selection
 - [ ] Terminal type (xterm-256color, etc.)
