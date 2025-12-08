@@ -215,16 +215,18 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 These are small improvements that would have big impact:
 
 ### Input/Keyboard
-- [ ] Add Tab key to accessory bar (very common in terminal)
-- [ ] Add pipe `|` and tilde `~` buttons (hard to type on iOS keyboard)
-- [ ] Haptic feedback on Ctrl toggle activation
+- [x] Add Tab key to accessory bar (very common in terminal)
+- [x] Add pipe `|` and tilde `~` buttons (hard to type on iOS keyboard)
+- [x] Haptic feedback on Ctrl toggle activation
 - [ ] Visual indicator when Ctrl is active (pulsing or colored border)
 
 ### Terminal UX
-- [ ] Double-tap to select word
-- [ ] Triple-tap to select line
-- [ ] Pinch to zoom (font size)
-- [ ] Shake to clear screen (send Ctrl+L)
+- [x] Double-tap to select word
+- [x] Triple-tap to select line
+- [x] Pinch to zoom (font size)
+- [x] Shake to clear screen (send Ctrl+L)
+- [x] Two-finger double-tap to reset font size
+- [x] Font size buttons in toolbar (A+ / A-)
 
 ### Connection UX
 - [ ] Connection timeout setting
