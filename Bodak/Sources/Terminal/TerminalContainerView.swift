@@ -39,11 +39,12 @@ struct TerminalContainerView: View {
         GeometryReader { geometry in
             ZStack {
                 // Main terminal surface (full screen)
-                // NOTE: Don't dynamically change ignoresSafeArea - it causes flashing
-                // Instead, use a fixed safe area and adjust content within it
+                // When status bar is hidden, use full screen
+                // When status bar is shown, add top padding to avoid overlap
                 BodakTerminalView(viewModel: terminalViewModel)
                     .environmentObject(ghosttyApp)
                     .ignoresSafeArea(.all)
+                    .padding(.top, settings.showStatusBar ? geometry.safeAreaInsets.top : 0)
                 
                 // Overlay for detecting taps on edges to reveal chrome
                 VStack {
@@ -78,17 +79,19 @@ struct TerminalContainerView: View {
                             
                             Spacer()
                             
-                            // Title and duration
-                            VStack(spacing: 2) {
-                                Text(terminalTitle)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                
-                                // Connection duration badge
-                                if terminalViewModel.connectionDuration > 0 {
-                                    Text(terminalViewModel.formattedDuration)
-                                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                        .foregroundStyle(.secondary)
+                            // Title and duration (only if enabled in settings)
+                            if settings.showConnectionInfo {
+                                VStack(spacing: 2) {
+                                    Text(terminalTitle)
+                                        .font(.headline)
+                                        .lineLimit(1)
+                                    
+                                    // Connection duration badge
+                                    if terminalViewModel.connectionDuration > 0 {
+                                        Text(terminalViewModel.formattedDuration)
+                                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                             
@@ -180,9 +183,8 @@ struct TerminalContainerView: View {
             .animation(.easeInOut(duration: 0.3), value: showChrome)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        // NOTE: Don't hide status bar dynamically - it causes screen flash on iPadOS
-        // Instead keep it always visible (it auto-hides in fullscreen anyway)
-        .persistentSystemOverlays(.hidden) // Hides home indicator, less intrusive than statusBarHidden
+        .statusBarHidden(!settings.showStatusBar)
+        .persistentSystemOverlays(.hidden) // Hides home indicator
         .navigationBarHidden(true)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
