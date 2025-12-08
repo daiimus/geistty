@@ -11,6 +11,7 @@ import Metal
 import QuartzCore
 import GhosttyKit
 import ObjectiveC
+import UserNotifications
 
 /// Ghostty namespace containing all Ghostty-related types
 enum Ghostty {
@@ -164,9 +165,56 @@ extension Ghostty {
             self.app = ghosttyApp
             readiness = .ready
             logger.info("Ghostty app initialized successfully")
+            
+            // Subscribe to app lifecycle notifications for focus tracking
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appDidBecomeActive),
+                name: UIApplication.didBecomeActiveNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appWillResignActive),
+                name: UIApplication.willResignActiveNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appDidEnterBackground),
+                name: UIApplication.didEnterBackgroundNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appWillEnterForeground),
+                name: UIApplication.willEnterForegroundNotification,
+                object: nil
+            )
+        }
+        
+        @objc private func appDidBecomeActive() {
+            guard let app = app else { return }
+            ghostty_app_set_focus(app, true)
+            logger.debug("🟢 App became active - focus set")
+        }
+        
+        @objc private func appWillResignActive() {
+            guard let app = app else { return }
+            ghostty_app_set_focus(app, false)
+            logger.debug("🟡 App will resign active - focus cleared")
+        }
+        
+        @objc private func appDidEnterBackground() {
+            logger.debug("🟠 App entered background")
+        }
+        
+        @objc private func appWillEnterForeground() {
+            logger.debug("🟢 App will enter foreground")
         }
         
         deinit {
+            NotificationCenter.default.removeObserver(self)
             if let app = app {
                 ghostty_app_free(app)
             }
@@ -223,6 +271,250 @@ extension Ghostty {
                             offset: scrollbar.offset,
                             len: scrollbar.len
                         )
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_MOUSE_OVER_LINK:
+                // Handle hover over link (OSC 8 hyperlinks or detected URLs)
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let linkData = action.action.mouse_over_link
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        if linkData.len > 0, let urlPtr = linkData.url {
+                            let urlData = Data(bytes: urlPtr, count: linkData.len)
+                            surfaceView.hoverUrl = String(data: urlData, encoding: .utf8)
+                        } else {
+                            surfaceView.hoverUrl = nil
+                        }
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_OPEN_URL:
+                // Handle URL open request (user clicked a link)
+                let urlData = action.action.open_url
+                
+                guard urlData.len > 0, let urlPtr = urlData.url else {
+                    return false
+                }
+                
+                let urlStr = String(cString: urlPtr)
+                logger.info("🔗 Opening URL: \(urlStr)")
+                
+                DispatchQueue.main.async {
+                    // Try to create URL, handling both full URLs and file paths
+                    if let url = URL(string: urlStr), url.scheme != nil {
+                        UIApplication.shared.open(url)
+                    } else {
+                        // Treat as file path - show in Files or alert
+                        logger.warning("Cannot open non-URL path on iOS: \(urlStr)")
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_PWD:
+                // Handle working directory change
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let pwdData = action.action.pwd
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        if let pwdPtr = pwdData.pwd {
+                            let pwdString = String(cString: pwdPtr)
+                            surfaceView.pwd = pwdString
+                            logger.debug("📁 PWD changed to: \(pwdString)")
+                        }
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_CELL_SIZE:
+                // Handle cell size change - useful for layout calculations
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let cellSizeData = action.action.cell_size
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.cellSize = CGSize(
+                            width: CGFloat(cellSizeData.width),
+                            height: CGFloat(cellSizeData.height)
+                        )
+                        logger.debug("📐 Cell size: \(cellSizeData.width)x\(cellSizeData.height)")
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_MOUSE_SHAPE:
+                // Handle mouse cursor shape change (for trackpad/mouse users)
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let shape = action.action.mouse_shape
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.currentMouseShape = shape
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_MOUSE_VISIBILITY:
+                // Handle mouse cursor visibility (hide while typing)
+                // iOS handles this automatically, but we track it for consistency
+                return true
+                
+            case GHOSTTY_ACTION_RENDERER_HEALTH:
+                // Handle renderer health status
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let health = action.action.renderer_health
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.healthy = (health == GHOSTTY_RENDERER_HEALTH_OK)
+                        if health != GHOSTTY_RENDERER_HEALTH_OK {
+                            logger.warning("⚠️ Renderer health issue: \(health.rawValue)")
+                        }
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_COLOR_CHANGE:
+                // Handle dynamic color palette change
+                // Ghostty handles this internally, but we could update UI chrome if needed
+                logger.debug("🎨 Color palette changed")
+                return true
+                
+            case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
+                // Handle desktop notification request
+                let notification = action.action.desktop_notification
+                
+                if let bodyPtr = notification.body {
+                    let body = String(cString: bodyPtr)
+                    let title = notification.title != nil
+                        ? String(cString: notification.title!)
+                        : "Terminal"
+                    
+                    logger.info("🔔 Notification: \(title) - \(body)")
+                    
+                    // Request notification permission and send
+                    DispatchQueue.main.async {
+                        let content = UNMutableNotificationContent()
+                        content.title = title
+                        content.body = body
+                        content.sound = .default
+                        
+                        let request = UNNotificationRequest(
+                            identifier: UUID().uuidString,
+                            content: content,
+                            trigger: nil
+                        )
+                        
+                        UNUserNotificationCenter.current().add(request) { error in
+                            if let error = error {
+                                logger.error("Failed to send notification: \(error)")
+                            }
+                        }
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_START_SEARCH:
+                // Handle start search request
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let searchData = action.action.start_search
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.isSearching = true
+                        if let needlePtr = searchData.needle {
+                            surfaceView.searchQuery = String(cString: needlePtr)
+                        }
+                        logger.debug("🔍 Search started with query: \(surfaceView.searchQuery)")
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_END_SEARCH:
+                // Handle end search request
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.isSearching = false
+                        surfaceView.searchQuery = ""
+                        surfaceView.searchTotal = 0
+                        surfaceView.searchSelected = 0
+                        logger.debug("🔍 Search ended")
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_SEARCH_TOTAL:
+                // Handle search results count update
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let totalData = action.action.search_total
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.searchTotal = Int(totalData.total)
+                        logger.debug("🔍 Search total: \(totalData.total)")
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_SEARCH_SELECTED:
+                // Handle selected search result update
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let selectedData = action.action.search_selected
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.searchSelected = Int(selectedData.selected)
+                        logger.debug("🔍 Search selected: \(selectedData.selected)")
                     }
                 }
                 return true
@@ -380,6 +672,18 @@ extension Ghostty {
         /// Scrollbar state (total rows, offset, visible length)
         @Published var scrollbar: (total: UInt64, offset: UInt64, len: UInt64)? = nil
         
+        /// URL being hovered over (OSC 8 hyperlinks or detected URLs)
+        @Published var hoverUrl: String? = nil
+        
+        /// Current mouse cursor shape (for trackpad/mouse users)
+        var currentMouseShape: ghostty_action_mouse_shape_e = GHOSTTY_MOUSE_SHAPE_DEFAULT
+        
+        /// Search state
+        @Published var isSearching: Bool = false
+        @Published var searchQuery: String = ""
+        @Published var searchTotal: Int = 0
+        @Published var searchSelected: Int = 0
+        
         /// Scroll indicator view
         private var scrollIndicator: UIView?
         private var scrollIndicatorHideTimer: Timer?
@@ -511,6 +815,11 @@ extension Ghostty {
             let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             addGestureRecognizer(tapGesture)
             
+            // Add two-finger tap to open links (equivalent to Cmd+click on macOS)
+            let twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
+            twoFingerTapGesture.numberOfTouchesRequired = 2
+            addGestureRecognizer(twoFingerTapGesture)
+            
             // Add long press gesture to START text selection
             let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
             longPressGesture.minimumPressDuration = 0.3
@@ -547,6 +856,30 @@ extension Ghostty {
             
             // Setup scroll indicator
             setupScrollIndicator()
+            
+            // Set initial color scheme based on current trait collection
+            updateColorScheme()
+        }
+        
+        // MARK: - Dark Mode Support
+        
+        /// Update Ghostty color scheme based on iOS appearance
+        private func updateColorScheme() {
+            guard let surface = surface else { return }
+            let scheme: ghostty_color_scheme_e = traitCollection.userInterfaceStyle == .dark
+                ? GHOSTTY_COLOR_SCHEME_DARK
+                : GHOSTTY_COLOR_SCHEME_LIGHT
+            ghostty_surface_set_color_scheme(surface, scheme)
+            logger.info("🎨 Color scheme set to: \(traitCollection.userInterfaceStyle == .dark ? "dark" : "light")")
+        }
+        
+        /// Called when iOS appearance changes (dark/light mode)
+        override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+            super.traitCollectionDidChange(previousTraitCollection)
+            
+            if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
+                updateColorScheme()
+            }
         }
         
         // MARK: - Scroll Indicator
@@ -609,8 +942,27 @@ extension Ghostty {
         // MARK: - UIPointerInteractionDelegate
         
         func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion) -> UIPointerStyle? {
-            // Use the default text cursor for terminal
-            return UIPointerStyle(shape: .verticalBeam(length: 20))
+            // Map Ghostty mouse shape to iOS pointer style
+            switch currentMouseShape {
+            case GHOSTTY_MOUSE_SHAPE_TEXT, GHOSTTY_MOUSE_SHAPE_VERTICAL_TEXT:
+                return UIPointerStyle(shape: .verticalBeam(length: 20))
+            case GHOSTTY_MOUSE_SHAPE_POINTER:
+                // Link cursor - use default pointer which shows hand on hover
+                return UIPointerStyle(effect: .automatic(UITargetedPreview(view: self)))
+            case GHOSTTY_MOUSE_SHAPE_CROSSHAIR:
+                return UIPointerStyle(shape: .verticalBeam(length: 20)) // iOS doesn't have crosshair
+            case GHOSTTY_MOUSE_SHAPE_GRAB, GHOSTTY_MOUSE_SHAPE_GRABBING:
+                return UIPointerStyle(effect: .automatic(UITargetedPreview(view: self)))
+            case GHOSTTY_MOUSE_SHAPE_NOT_ALLOWED, GHOSTTY_MOUSE_SHAPE_NO_DROP:
+                return UIPointerStyle(effect: .automatic(UITargetedPreview(view: self)))
+            case GHOSTTY_MOUSE_SHAPE_E_RESIZE, GHOSTTY_MOUSE_SHAPE_W_RESIZE, GHOSTTY_MOUSE_SHAPE_EW_RESIZE:
+                return UIPointerStyle(shape: .horizontalBeam(length: 20))
+            case GHOSTTY_MOUSE_SHAPE_N_RESIZE, GHOSTTY_MOUSE_SHAPE_S_RESIZE, GHOSTTY_MOUSE_SHAPE_NS_RESIZE:
+                return UIPointerStyle(shape: .verticalBeam(length: 20))
+            default:
+                // Default to text cursor for terminal
+                return UIPointerStyle(shape: .verticalBeam(length: 20))
+            }
         }
         
         // MARK: - Mouse Hover for Position Tracking
@@ -771,6 +1123,40 @@ extension Ghostty {
             NSLog("👆 Terminal tapped, becoming first responder")
             stopScrollMomentum()
             becomeFirstResponder()
+            
+            // If Ctrl toggle is active, this tap should open a link
+            if ctrlToggleActive, let surface = surface {
+                let point = gesture.location(in: self)
+                let scale = contentScaleFactor
+                
+                NSLog("👆 Ctrl+tap at \(point) - attempting to open link")
+                
+                // Send mouse position and click with Ctrl modifier
+                ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_CTRL)
+                _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_CTRL)
+                _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_CTRL)
+                
+                // Reset Ctrl toggle
+                ctrlToggleActive = false
+            }
+        }
+        
+        /// Handle two-finger tap to open links (equivalent to Cmd+click on macOS)
+        @objc private func handleTwoFingerTap(_ gesture: UITapGestureRecognizer) {
+            guard let surface = surface else { return }
+            
+            // Get the midpoint of the two touches
+            let point = gesture.location(in: self)
+            let scale = contentScaleFactor
+            
+            NSLog("👆👆 Two-finger tap at \(point) - attempting to open link")
+            
+            // Send mouse position
+            ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_CTRL)
+            
+            // Send click with Ctrl modifier to trigger link opening
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_CTRL)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_CTRL)
         }
         
         // MARK: - UIGestureRecognizerDelegate
@@ -1387,6 +1773,69 @@ extension Ghostty {
             if focused {
                 focusInstant = ContinuousClock.now
             }
+        }
+        
+        // MARK: - First Responder
+        
+        override func becomeFirstResponder() -> Bool {
+            let result = super.becomeFirstResponder()
+            if result {
+                focusDidChange(true)
+            }
+            return result
+        }
+        
+        override func resignFirstResponder() -> Bool {
+            let result = super.resignFirstResponder()
+            if result {
+                focusDidChange(false)
+            }
+            return result
+        }
+        
+        // MARK: - Visibility/Occlusion
+        
+        /// Set surface visibility for performance optimization
+        func setVisible(_ visible: Bool) {
+            guard let surface = surface else { return }
+            ghostty_surface_set_occlusion(surface, !visible)
+        }
+        
+        // MARK: - Search
+        
+        /// Start a search in the terminal
+        func startSearch(_ query: String = "") {
+            guard let surface = surface else { return }
+            let action = query.isEmpty ? "start_search" : "search:\(query)"
+            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+        }
+        
+        /// Update the search query
+        func updateSearch(_ query: String) {
+            guard let surface = surface else { return }
+            let action = "search:\(query)"
+            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+        }
+        
+        /// Navigate to next search result
+        func searchNext() {
+            guard let surface = surface else { return }
+            let action = "search_next"
+            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+        }
+        
+        /// Navigate to previous search result
+        func searchPrevious() {
+            guard let surface = surface else { return }
+            let action = "search_previous"
+            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+        }
+        
+        /// End the current search
+        func endSearch() {
+            guard let surface = surface else { return }
+            let action = "end_search"
+            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
         }
         
         /// Notify size change

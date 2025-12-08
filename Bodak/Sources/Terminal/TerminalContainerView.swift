@@ -28,6 +28,10 @@ struct TerminalContainerView: View {
     @State private var isSelectingText: Bool = false
     @State private var showSettings: Bool = false
     
+    // Link preview state
+    @State private var hoverUrl: String? = nil
+    @State private var hoverUrlCancellable: AnyCancellable? = nil
+    
     // Constants for auto-hide behavior
     private let edgeTapThreshold: CGFloat = 60 // Pixels from edge to reveal chrome
     
@@ -131,6 +135,35 @@ struct TerminalContainerView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
+                
+                // Link preview tooltip (shows URL when hovering over a link)
+                if let url = hoverUrl {
+                    VStack {
+                        Spacer()
+                        
+                        HStack(spacing: 6) {
+                            Image(systemName: "link")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.blue)
+                            
+                            Text(url)
+                                .font(.system(size: 13, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.black.opacity(0.85))
+                                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                        )
+                        .padding(.bottom, showChrome ? 80 + max(geometry.safeAreaInsets.bottom, keyboardHeight) : 20)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .animation(.easeInOut(duration: 0.15), value: hoverUrl)
+                }
             }
             .animation(.easeInOut(duration: 0.3), value: showChrome)
         }
@@ -149,9 +182,17 @@ struct TerminalContainerView: View {
         .onAppear {
             setupConnection()
             startAutoHideTimer()
+            
+            // Subscribe to hoverUrl changes from surface view
+            // We need a small delay since surfaceView is created in BodakTerminalView's makeUIView
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                subscribeToHoverUrl()
+            }
         }
         .onDisappear {
             hideTimer?.invalidate()
+            hoverUrlCancellable?.cancel()
+            hoverUrlCancellable = nil
             terminalViewModel.disconnect()
             terminalViewModel.surfaceView = nil
         }
@@ -213,6 +254,27 @@ struct TerminalContainerView: View {
                 hideChrome()
             }
         }
+    }
+    
+    // MARK: - Link Preview
+    
+    private func subscribeToHoverUrl() {
+        guard let surfaceView = terminalViewModel.surfaceView else {
+            // Retry after a short delay if surface view isn't ready yet
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                subscribeToHoverUrl()
+            }
+            return
+        }
+        
+        // Subscribe to hoverUrl changes
+        hoverUrlCancellable = surfaceView.$hoverUrl
+            .receive(on: DispatchQueue.main)
+            .sink { [self] url in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    self.hoverUrl = url
+                }
+            }
     }
     
     // MARK: - Connection
