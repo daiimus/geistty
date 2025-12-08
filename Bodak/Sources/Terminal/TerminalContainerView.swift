@@ -122,7 +122,7 @@ struct TerminalContainerView: View {
                         .padding(.bottom, 12)
                         .background(
                             LinearGradient(
-                                colors: [Color.black.opacity(0.8), Color.black.opacity(0)],
+                                colors: [ThemeManager.shared.selectedTheme.background.opacity(0.95), ThemeManager.shared.selectedTheme.background.opacity(0)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -131,24 +131,6 @@ struct TerminalContainerView: View {
                     }
                     
                     Spacer()
-                }
-                
-                // Bottom chrome (toolbar)
-                VStack {
-                    Spacer()
-                    
-                    if showChrome {
-                        TerminalToolbar(viewModel: terminalViewModel)
-                            .padding(.bottom, max(geometry.safeAreaInsets.bottom, keyboardHeight))
-                            .background(
-                                LinearGradient(
-                                    colors: [Color.black.opacity(0), Color.black.opacity(0.8)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
                 }
                 
                 // Link preview tooltip (shows URL when hovering over a link)
