@@ -684,6 +684,17 @@ extension Ghostty {
         @Published var searchTotal: Int = 0
         @Published var searchSelected: Int = 0
         
+        /// Current font size (starts at config default)
+        @Published var currentFontSize: Float = 14.0
+        
+        /// Font size constraints
+        static let minFontSize: Float = 6.0
+        static let maxFontSize: Float = 72.0
+        static let defaultFontSize: Float = 14.0
+        
+        /// Pinch gesture state
+        private var pinchStartFontSize: Float = 14.0
+        
         /// Scroll indicator view
         private var scrollIndicator: UIView?
         private var scrollIndicatorHideTimer: Timer?
@@ -815,10 +826,29 @@ extension Ghostty {
             let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             addGestureRecognizer(tapGesture)
             
+            // Add double-tap for word selection
+            let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTapGesture.numberOfTapsRequired = 2
+            addGestureRecognizer(doubleTapGesture)
+            tapGesture.require(toFail: doubleTapGesture)
+            
+            // Add triple-tap for line selection
+            let tripleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTripleTap(_:)))
+            tripleTapGesture.numberOfTapsRequired = 3
+            addGestureRecognizer(tripleTapGesture)
+            doubleTapGesture.require(toFail: tripleTapGesture)
+            
             // Add two-finger tap to open links (equivalent to Cmd+click on macOS)
             let twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
             twoFingerTapGesture.numberOfTouchesRequired = 2
             addGestureRecognizer(twoFingerTapGesture)
+            
+            // Add two-finger double-tap to reset font size
+            let twoFingerDoubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerDoubleTap(_:)))
+            twoFingerDoubleTapGesture.numberOfTouchesRequired = 2
+            twoFingerDoubleTapGesture.numberOfTapsRequired = 2
+            addGestureRecognizer(twoFingerDoubleTapGesture)
+            twoFingerTapGesture.require(toFail: twoFingerDoubleTapGesture)
             
             // Add long press gesture to START text selection
             let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
@@ -853,6 +883,10 @@ extension Ghostty {
             // Add hover gesture for mouse movement tracking
             let hoverGesture = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
             addGestureRecognizer(hoverGesture)
+            
+            // Add pinch gesture for font size zoom
+            let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            addGestureRecognizer(pinchGesture)
             
             // Setup scroll indicator
             setupScrollIndicator()
@@ -1159,6 +1193,62 @@ extension Ghostty {
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_CTRL)
         }
         
+        /// Handle double-tap for word selection
+        @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let surface = surface else { return }
+            
+            let point = gesture.location(in: self)
+            let scale = contentScaleFactor
+            
+            NSLog("👆👆 Double-tap at \(point) - selecting word")
+            
+            // Position the mouse
+            ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+            
+            // Double-click to select word
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            
+            // Provide haptic feedback
+            let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+            feedbackGenerator.impactOccurred()
+        }
+        
+        /// Handle triple-tap for line selection
+        @objc private func handleTripleTap(_ gesture: UITapGestureRecognizer) {
+            guard let surface = surface else { return }
+            
+            let point = gesture.location(in: self)
+            let scale = contentScaleFactor
+            
+            NSLog("👆👆👆 Triple-tap at \(point) - selecting line")
+            
+            // Position the mouse
+            ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+            
+            // Triple-click to select line
+            for _ in 0..<3 {
+                _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+                _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            }
+            
+            // Provide haptic feedback
+            let feedbackGenerator = UIImpactFeedbackGenerator(style: .medium)
+            feedbackGenerator.impactOccurred()
+        }
+        
+        /// Handle two-finger double-tap to reset font size
+        @objc private func handleTwoFingerDoubleTap(_ gesture: UITapGestureRecognizer) {
+            NSLog("👆👆 Two-finger double-tap - resetting font size")
+            resetFontSize()
+            
+            // Provide haptic feedback
+            let feedbackGenerator = UINotificationFeedbackGenerator()
+            feedbackGenerator.notificationOccurred(.success)
+        }
+        
         // MARK: - UIGestureRecognizerDelegate
         
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -1310,6 +1400,10 @@ extension Ghostty {
         /// Set Ctrl toggle state (from toolbar button)
         func setCtrlToggle(_ active: Bool) {
             ctrlToggleActive = active
+            
+            // Haptic feedback when Ctrl toggle changes
+            let feedbackGenerator = UIImpactFeedbackGenerator(style: active ? .medium : .light)
+            feedbackGenerator.impactOccurred()
         }
         
         /// Handle hardware keyboard key presses and mouse button events
@@ -1838,6 +1932,67 @@ extension Ghostty {
             ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
         }
         
+        // MARK: - Font Size / Zoom
+        
+        /// Increase font size by delta points
+        func increaseFontSize(_ delta: Float = 1.0) {
+            guard let surface = surface else { return }
+            let action = "increase_font_size:\(delta)"
+            if ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                currentFontSize = min(currentFontSize + delta, Self.maxFontSize)
+                logger.info("🔍 Font size increased to \(currentFontSize)")
+            }
+        }
+        
+        /// Decrease font size by delta points
+        func decreaseFontSize(_ delta: Float = 1.0) {
+            guard let surface = surface else { return }
+            let action = "decrease_font_size:\(delta)"
+            if ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                currentFontSize = max(currentFontSize - delta, Self.minFontSize)
+                logger.info("🔍 Font size decreased to \(currentFontSize)")
+            }
+        }
+        
+        /// Reset font size to default
+        func resetFontSize() {
+            guard let surface = surface else { return }
+            let action = "reset_font_size"
+            if ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                currentFontSize = Self.defaultFontSize
+                logger.info("🔍 Font size reset to \(currentFontSize)")
+            }
+        }
+        
+        /// Handle pinch gesture for zooming font size
+        @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                pinchStartFontSize = currentFontSize
+                
+            case .changed:
+                let newSize = pinchStartFontSize * Float(gesture.scale)
+                let clampedSize = max(Self.minFontSize, min(Self.maxFontSize, newSize))
+                let delta = clampedSize - currentFontSize
+                
+                if abs(delta) >= 0.5 {
+                    if delta > 0 {
+                        increaseFontSize(abs(delta))
+                    } else {
+                        decreaseFontSize(abs(delta))
+                    }
+                }
+                
+            case .ended, .cancelled:
+                // Provide haptic feedback at end of gesture
+                let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+                feedbackGenerator.impactOccurred()
+                
+            default:
+                break
+            }
+        }
+
         /// Notify size change
         func sizeDidChange(_ size: CGSize) {
             guard let surface = surface else {
