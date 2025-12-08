@@ -56,18 +56,21 @@ struct SettingsView: View {
     var onIncreaseFontSize: () -> Void
     var onDecreaseFontSize: () -> Void
     var onResetFontSize: () -> Void
+    var onFontFamilyChanged: () -> Void
     
     // Default initializer for preview
     init(
         currentFontSize: Int = 14,
         onIncreaseFontSize: @escaping () -> Void = {},
         onDecreaseFontSize: @escaping () -> Void = {},
-        onResetFontSize: @escaping () -> Void = {}
+        onResetFontSize: @escaping () -> Void = {},
+        onFontFamilyChanged: @escaping () -> Void = {}
     ) {
         self.currentFontSize = currentFontSize
         self.onIncreaseFontSize = onIncreaseFontSize
         self.onDecreaseFontSize = onDecreaseFontSize
         self.onResetFontSize = onResetFontSize
+        self.onFontFamilyChanged = onFontFamilyChanged
     }
     
     var body: some View {
@@ -106,7 +109,10 @@ struct SettingsView: View {
                 // Font Family
                 Section {
                     NavigationLink {
-                        FontPickerView(selectedFont: $settings.fontFamily)
+                        FontPickerView(
+                            selectedFont: $settings.fontFamily,
+                            onFontChanged: onFontFamilyChanged
+                        )
                     } label: {
                         HStack {
                             Text("Font Family")
@@ -116,7 +122,7 @@ struct SettingsView: View {
                         }
                     }
                 } footer: {
-                    Text("Font changes will apply to new terminal sessions.")
+                    Text("Font changes apply immediately to the current terminal.")
                 }
                 
                 // Font Size - Live control!
@@ -232,13 +238,26 @@ struct ThemePickerView: View {
 
 struct FontPickerView: View {
     @Binding var selectedFont: String
+    var onFontChanged: () -> Void
     @Environment(\.dismiss) private var dismiss
+    
+    init(selectedFont: Binding<String>, onFontChanged: @escaping () -> Void = {}) {
+        self._selectedFont = selectedFont
+        self.onFontChanged = onFontChanged
+    }
     
     var body: some View {
         List {
             ForEach(AppSettings.fontFamilies, id: \.self) { font in
                 Button {
+                    let changed = selectedFont != font
                     selectedFont = font
+                    if changed {
+                        // Small delay to let the setting save
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            onFontChanged()
+                        }
+                    }
                     dismiss()
                 } label: {
                     HStack {

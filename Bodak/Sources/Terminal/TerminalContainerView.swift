@@ -231,7 +231,8 @@ struct TerminalContainerView: View {
                 currentFontSize: Int(terminalViewModel.currentFontSize),
                 onIncreaseFontSize: { terminalViewModel.increaseFontSize() },
                 onDecreaseFontSize: { terminalViewModel.decreaseFontSize() },
-                onResetFontSize: { terminalViewModel.resetFontSize() }
+                onResetFontSize: { terminalViewModel.resetFontSize() },
+                onFontFamilyChanged: { terminalViewModel.updateConfig() }
             )
         }
     }
@@ -513,6 +514,11 @@ class TerminalViewModel: ObservableObject {
         if let surface = surfaceView {
             currentFontSize = surface.currentFontSize
         }
+    }
+    
+    /// Update terminal configuration (e.g., after font family change)
+    func updateConfig() {
+        surfaceView?.updateConfig()
     }
     
     /// Clear the terminal screen (Ctrl+L)
