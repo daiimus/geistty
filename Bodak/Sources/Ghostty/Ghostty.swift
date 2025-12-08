@@ -917,45 +917,60 @@ extension Ghostty {
         
         /// Required: Insert text from keyboard (software keyboard)
         func insertText(_ text: String) {
-            NSLog("⌨️ insertText: '\(text.debugDescription)' ctrlToggle=\(ctrlToggleActive)")
-            guard let surface = surface else {
-                NSLog("⌨️ insertText: surface is nil")
-                return
-            }
-            
-            // Check if Ctrl toggle is active
+            // Check if Ctrl toggle is active (from on-screen button)
             if ctrlToggleActive {
-                ctrlToggleActive = false  // Reset after use
-                
-                // Convert to control character if single character
+                ctrlToggleActive = false
                 if text.count == 1, let scalar = text.unicodeScalars.first {
-                    let ctrlChar = controlCharacter(for: scalar, mods: GHOSTTY_MODS_CTRL)
-                    if !ctrlChar.isEmpty {
-                        NSLog("⌨️ Sending Ctrl character: \\x\(String(format: "%02X", ctrlChar.utf8.first ?? 0))")
-                        ctrlChar.withCString { ptr in
-                            ghostty_surface_text(surface, ptr, UInt(ctrlChar.utf8.count))
-                        }
+                    let bytes = applyControlToCharacter(scalar)
+                    if !bytes.isEmpty {
+                        sendBytes(bytes)
                         return
                     }
                 }
             }
             
-            // Send text to Ghostty which will trigger the write callback
-            text.withCString { ptr in
-                let len = text.utf8.count
-                ghostty_surface_text(surface, ptr, UInt(len))
+            // Send text directly to SSH
+            if let data = text.data(using: .utf8) {
+                onWrite?(data)
             }
         }
         
         /// Required: Handle backspace/delete
         func deleteBackward() {
-            NSLog("⌨️ deleteBackward")
-            guard let surface = surface else { return }
+            sendBytes([0x7f])  // DEL character
+        }
+        
+        // MARK: - Byte sending helpers
+        
+        /// Send raw bytes directly to SSH (bypasses terminal emulator)
+        private func sendBytes(_ bytes: [UInt8]) {
+            guard !bytes.isEmpty else { return }
+            let data = Data(bytes)
+            onWrite?(data)
+        }
+        
+        /// Convert character to control sequence (Ctrl+A = 0x01, etc.)
+        private func applyControlToCharacter(_ scalar: UnicodeScalar) -> [UInt8] {
+            let value = scalar.value
             
-            // Send backspace character (ASCII 127 or 0x08)
-            let backspace = "\u{7f}"  // DEL character (more common for terminals)
-            backspace.withCString { ptr in
-                ghostty_surface_text(surface, ptr, 1)
+            // Ctrl+A through Ctrl+Z -> 0x01-0x1A
+            if value >= 0x61 && value <= 0x7A {  // a-z
+                return [UInt8(value - 0x60)]
+            }
+            if value >= 0x41 && value <= 0x5A {  // A-Z
+                return [UInt8(value - 0x40)]
+            }
+            
+            // Special control characters
+            switch scalar {
+            case "[":  return [0x1B]  // ESC
+            case "\\":  return [0x1C]  // FS
+            case "]":  return [0x1D]  // GS
+            case "^":  return [0x1E]  // RS
+            case "_":  return [0x1F]  // US
+            case "@":  return [0x00]  // NUL
+            case " ":  return [0x00]  // Ctrl+Space = NUL
+            default:   return []
             }
         }
         
@@ -1007,6 +1022,16 @@ extension Ghostty {
             }
             
             self.surface = surface
+            
+            // Set background color to match theme to prevent flash during screen transitions
+            // This is the fallback color when the IOSurface has transparent pixels momentarily
+            let themeBg = ThemeManager.shared.selectedTheme.background
+            self.backgroundColor = UIColor(themeBg)
+            
+            // Mark view and layer as opaque to prevent blending artifacts (gray flash)
+            self.isOpaque = true
+            self.layer.isOpaque = true
+            
             print("[Bodak] 🏗️ Sublayers after ghostty_surface_new: \(layer.sublayers?.count ?? 0)")
             layer.sublayers?.forEach { sublayer in
                 print("[Bodak] 🏗️   Sublayer: \(type(of: sublayer)), frame: \(sublayer.frame)")
@@ -1565,6 +1590,10 @@ extension Ghostty {
         
         /// Override canPerformAction to enable copy
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+            // Prevent system "cut" action from intercepting Ctrl+X
+            if action == #selector(UIResponderStandardEditActions.cut(_:)) {
+                return false
+            }
             if action == #selector(UIResponderStandardEditActions.copy(_:)) {
                 guard let surface = surface else { return false }
                 return ghostty_surface_has_selection(surface)
@@ -1620,330 +1649,90 @@ extension Ghostty {
             feedbackGenerator.impactOccurred()
         }
         
-        /// Handle hardware keyboard key presses and mouse button events
+        /// Handle hardware keyboard key presses (Magic Keyboard, etc.)
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            var handled = false
-            
             for press in presses {
-                // Handle mouse button presses (Mac Catalyst only)
-                #if targetEnvironment(macCatalyst)
-                if let surface = surface {
-                    switch press.type {
-                    case .primaryButton:  // Left click
-                        NSLog("🖱️ Primary button pressed")
-                        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
-                        handled = true
-                        continue
-                        
-                    case .secondaryButton:  // Right click
-                        NSLog("🖱️ Secondary button pressed")
-                        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, GHOSTTY_MODS_NONE)
-                        handled = true
-                        continue
-                        
-                    default:
-                        break
+                guard let key = press.key else { continue }
+                
+                // Check for Ctrl modifier
+                let hasCtrl = key.modifierFlags.contains(.control) || ctrlToggleActive
+                if ctrlToggleActive { ctrlToggleActive = false }
+                
+                // Handle Ctrl+key combinations
+                if hasCtrl {
+                    if let scalar = key.charactersIgnoringModifiers.unicodeScalars.first {
+                        let bytes = applyControlToCharacter(scalar)
+                        if !bytes.isEmpty {
+                            sendBytes(bytes)
+                            return
+                        }
                     }
                 }
-                #endif
                 
-                // Handle keyboard key presses
-                if let key = press.key {
-                    NSLog("⌨️ pressesBegan: keyCode=\\(key.keyCode.rawValue) chars='\\(key.characters)'")
-                    
-                    // Get modifiers from the press event
-                    var mods = ghosttyMods(from: key.modifierFlags)
-                    
-                    // Add Ctrl if toggle is active (for toolbar Ctrl button)
-                    if ctrlToggleActive {
-                        mods = ghostty_input_mods_e(rawValue: mods.rawValue | GHOSTTY_MODS_CTRL.rawValue)
-                        // Reset toggle after use
-                        ctrlToggleActive = false
+                // Handle special keys
+                switch key.keyCode {
+                case .keyboardEscape:
+                    sendBytes([0x1B])
+                    return
+                case .keyboardTab:
+                    sendBytes([0x09])
+                    return
+                case .keyboardDeleteOrBackspace:
+                    sendBytes([0x7F])
+                    return
+                case .keyboardReturnOrEnter:
+                    sendBytes([0x0D])
+                    return
+                case .keyboardUpArrow:
+                    sendBytes([0x1B, 0x5B, 0x41])  // ESC [ A
+                    return
+                case .keyboardDownArrow:
+                    sendBytes([0x1B, 0x5B, 0x42])  // ESC [ B
+                    return
+                case .keyboardRightArrow:
+                    sendBytes([0x1B, 0x5B, 0x43])  // ESC [ C
+                    return
+                case .keyboardLeftArrow:
+                    sendBytes([0x1B, 0x5B, 0x44])  // ESC [ D
+                    return
+                case .keyboardHome:
+                    sendBytes([0x1B, 0x5B, 0x48])  // ESC [ H
+                    return
+                case .keyboardEnd:
+                    sendBytes([0x1B, 0x5B, 0x46])  // ESC [ F
+                    return
+                case .keyboardPageUp:
+                    sendBytes([0x1B, 0x5B, 0x35, 0x7E])  // ESC [ 5 ~
+                    return
+                case .keyboardPageDown:
+                    sendBytes([0x1B, 0x5B, 0x36, 0x7E])  // ESC [ 6 ~
+                    return
+                case .keyboardDeleteForward:
+                    sendBytes([0x1B, 0x5B, 0x33, 0x7E])  // ESC [ 3 ~
+                    return
+                default:
+                    break
+                }
+                
+                // Regular character input
+                let chars = key.characters
+                if !chars.isEmpty {
+                    if let data = chars.data(using: .utf8) {
+                        onWrite?(data)
                     }
-                    
-                    // Handle the key through Ghostty or as escape sequence
-                    if sendHardwareKey(key, action: GHOSTTY_ACTION_PRESS, mods: mods) {
-                        handled = true
-                    }
+                    return
                 }
             }
             
-            if !handled {
-                super.pressesBegan(presses, with: event)
-            }
+            super.pressesBegan(presses, with: event)
         }
         
         override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            // Handle mouse button releases (Mac Catalyst only)
-            for press in presses {
-                #if targetEnvironment(macCatalyst)
-                if let surface = surface {
-                    switch press.type {
-                    case .primaryButton:
-                        NSLog("🖱️ Primary button released")
-                        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
-                        continue
-                        
-                    case .secondaryButton:
-                        NSLog("🖱️ Secondary button released")
-                        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, GHOSTTY_MODS_NONE)
-                        continue
-                        
-                    default:
-                        break
-                    }
-                }
-                #endif
-                
-                // Handle keyboard key releases
-                if let key = press.key {
-                    let mods = ghosttyMods(from: key.modifierFlags)
-                    _ = sendHardwareKey(key, action: GHOSTTY_ACTION_RELEASE, mods: mods)
-                }
-            }
             super.pressesEnded(presses, with: event)
         }
         
         override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            // Treat cancelled as released
-            pressesEnded(presses, with: event)
-        }
-        
-        /// Convert UIKeyModifierFlags to Ghostty modifier flags
-        private func ghosttyMods(from flags: UIKeyModifierFlags) -> ghostty_input_mods_e {
-            var mods: UInt32 = 0
-            
-            if flags.contains(.shift) {
-                mods |= GHOSTTY_MODS_SHIFT.rawValue
-            }
-            if flags.contains(.control) {
-                mods |= GHOSTTY_MODS_CTRL.rawValue
-            }
-            if flags.contains(.alternate) {  // Option/Alt
-                mods |= GHOSTTY_MODS_ALT.rawValue
-            }
-            if flags.contains(.command) {
-                mods |= GHOSTTY_MODS_SUPER.rawValue
-            }
-            if flags.contains(.alphaShift) {  // Caps Lock
-                mods |= GHOSTTY_MODS_CAPS.rawValue
-            }
-            
-            return ghostty_input_mods_e(rawValue: mods)
-        }
-        
-        /// Send a hardware key event to Ghostty
-        private func sendHardwareKey(_ key: UIKey, action: ghostty_input_action_e, mods: ghostty_input_mods_e) -> Bool {
-            guard let surface = surface else { return false }
-            
-            // For Ctrl+key combinations on press, send control character directly
-            // This ensures apps like tmux, vim, blightmud receive proper control sequences
-            if action == GHOSTTY_ACTION_PRESS,
-               mods.rawValue & GHOSTTY_MODS_CTRL.rawValue != 0 {
-                let charsIgnoring = key.charactersIgnoringModifiers
-                if let char = charsIgnoring.unicodeScalars.first {
-                    let ctrlChar = controlCharacter(for: char, mods: mods)
-                    if !ctrlChar.isEmpty {
-                        NSLog("⌨️ HW Ctrl+\(charsIgnoring) -> \\x\(String(format: "%02X", ctrlChar.utf8.first ?? 0))")
-                        ctrlChar.withCString { ptr in
-                            ghostty_surface_text(surface, ptr, UInt(ctrlChar.utf8.count))
-                        }
-                        return true
-                    }
-                }
-            }
-            
-            // Map UIKey to macOS-style keycode for Ghostty
-            guard let keycode = uikeyToKeycode(key) else {
-                // If no keycode mapping, try sending as text (for regular characters)
-                let chars = key.characters
-                if action == GHOSTTY_ACTION_PRESS, !chars.isEmpty {
-                    // Apply Ctrl modifier if needed
-                    if mods.rawValue & GHOSTTY_MODS_CTRL.rawValue != 0,
-                       chars.count == 1,
-                       let char = chars.unicodeScalars.first {
-                        // Convert to control character
-                        let ctrlChar = controlCharacter(for: char, mods: mods)
-                        if !ctrlChar.isEmpty {
-                            NSLog("⌨️ Sending Ctrl character: \\x\(String(format: "%02X", ctrlChar.utf8.first ?? 0))")
-                            ctrlChar.withCString { ptr in
-                                ghostty_surface_text(surface, ptr, UInt(ctrlChar.utf8.count))
-                            }
-                            return true
-                        }
-                    }
-                    
-                    // Regular text input
-                    chars.withCString { ptr in
-                        ghostty_surface_text(surface, ptr, UInt(chars.utf8.count))
-                    }
-                    return true
-                }
-                return false
-            }
-            
-            // Create key event for Ghostty
-            var keyEvent = ghostty_input_key_s()
-            keyEvent.action = action
-            keyEvent.keycode = keycode
-            keyEvent.mods = mods
-            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-            keyEvent.composing = false
-            
-            // Set unshifted codepoint if available
-            let charsIgnoring = key.charactersIgnoringModifiers
-            if let scalar = charsIgnoring.unicodeScalars.first {
-                keyEvent.unshifted_codepoint = scalar.value
-            }
-            
-            // For press events with text, include the text
-            let chars = key.characters
-            if action == GHOSTTY_ACTION_PRESS, !chars.isEmpty {
-                return chars.withCString { ptr in
-                    keyEvent.text = ptr
-                    return ghostty_surface_key(surface, keyEvent)
-                }
-            } else {
-                keyEvent.text = nil
-                return ghostty_surface_key(surface, keyEvent)
-            }
-        }
-        
-        /// Generate control character for Ctrl+key combinations
-        private func controlCharacter(for scalar: UnicodeScalar, mods: ghostty_input_mods_e) -> String {
-            let value = scalar.value
-            
-            // Ctrl+A through Ctrl+Z → 0x01-0x1A
-            if value >= UInt32(Character("a").asciiValue!), value <= UInt32(Character("z").asciiValue!) {
-                let ctrlValue = value - UInt32(Character("a").asciiValue!) + 1
-                return String(UnicodeScalar(ctrlValue)!)
-            }
-            if value >= UInt32(Character("A").asciiValue!), value <= UInt32(Character("Z").asciiValue!) {
-                let ctrlValue = value - UInt32(Character("A").asciiValue!) + 1
-                return String(UnicodeScalar(ctrlValue)!)
-            }
-            
-            // Special cases
-            switch scalar {
-            case "[", "{":  // Ctrl+[ = ESC
-                return "\u{1B}"
-            case "]", "}":  // Ctrl+]
-                return "\u{1D}"
-            case "\\":      // Ctrl+\ 
-                return "\u{1C}"
-            case "^", "6":  // Ctrl+^
-                return "\u{1E}"
-            case "_", "-":  // Ctrl+_
-                return "\u{1F}"
-            case "@", "`", "2":  // Ctrl+@ = NUL
-                return "\u{00}"
-            default:
-                return ""
-            }
-        }
-        
-        /// Map UIKey keyCode to macOS-style keycode for Ghostty
-        /// These keycodes match the macOS virtual key codes that Ghostty expects
-        private func uikeyToKeycode(_ key: UIKey) -> UInt32? {
-            // UIKeyboardHIDUsage values - map to macOS virtual keycodes
-            switch key.keyCode {
-            // Letters (macOS keycodes for QWERTY layout)
-            case .keyboardA: return 0x00
-            case .keyboardB: return 0x0B
-            case .keyboardC: return 0x08
-            case .keyboardD: return 0x02
-            case .keyboardE: return 0x0E
-            case .keyboardF: return 0x03
-            case .keyboardG: return 0x05
-            case .keyboardH: return 0x04
-            case .keyboardI: return 0x22
-            case .keyboardJ: return 0x26
-            case .keyboardK: return 0x28
-            case .keyboardL: return 0x25
-            case .keyboardM: return 0x2E
-            case .keyboardN: return 0x2D
-            case .keyboardO: return 0x1F
-            case .keyboardP: return 0x23
-            case .keyboardQ: return 0x0C
-            case .keyboardR: return 0x0F
-            case .keyboardS: return 0x01
-            case .keyboardT: return 0x11
-            case .keyboardU: return 0x20
-            case .keyboardV: return 0x09
-            case .keyboardW: return 0x0D
-            case .keyboardX: return 0x07
-            case .keyboardY: return 0x10
-            case .keyboardZ: return 0x06
-            
-            // Numbers (top row)
-            case .keyboard1: return 0x12
-            case .keyboard2: return 0x13
-            case .keyboard3: return 0x14
-            case .keyboard4: return 0x15
-            case .keyboard5: return 0x17
-            case .keyboard6: return 0x16
-            case .keyboard7: return 0x1A
-            case .keyboard8: return 0x1C
-            case .keyboard9: return 0x19
-            case .keyboard0: return 0x1D
-            
-            // Special keys
-            case .keyboardReturnOrEnter: return 0x24
-            case .keyboardEscape: return 0x35
-            case .keyboardDeleteOrBackspace: return 0x33
-            case .keyboardTab: return 0x30
-            case .keyboardSpacebar: return 0x31
-            case .keyboardHyphen: return 0x1B  // -
-            case .keyboardEqualSign: return 0x18  // =
-            case .keyboardOpenBracket: return 0x21  // [
-            case .keyboardCloseBracket: return 0x1E  // ]
-            case .keyboardBackslash: return 0x2A  // \
-            case .keyboardSemicolon: return 0x29  // ;
-            case .keyboardQuote: return 0x27  // '
-            case .keyboardGraveAccentAndTilde: return 0x32  // `
-            case .keyboardComma: return 0x2B  // ,
-            case .keyboardPeriod: return 0x2F  // .
-            case .keyboardSlash: return 0x2C  // /
-            
-            // Arrow keys
-            case .keyboardUpArrow: return 0x7E
-            case .keyboardDownArrow: return 0x7D
-            case .keyboardLeftArrow: return 0x7B
-            case .keyboardRightArrow: return 0x7C
-            
-            // Function keys
-            case .keyboardF1: return 0x7A
-            case .keyboardF2: return 0x78
-            case .keyboardF3: return 0x63
-            case .keyboardF4: return 0x76
-            case .keyboardF5: return 0x60
-            case .keyboardF6: return 0x61
-            case .keyboardF7: return 0x62
-            case .keyboardF8: return 0x64
-            case .keyboardF9: return 0x65
-            case .keyboardF10: return 0x6D
-            case .keyboardF11: return 0x67
-            case .keyboardF12: return 0x6F
-            
-            // Navigation keys
-            case .keyboardHome: return 0x73
-            case .keyboardEnd: return 0x77
-            case .keyboardPageUp: return 0x74
-            case .keyboardPageDown: return 0x79
-            case .keyboardDeleteForward: return 0x75
-            case .keyboardInsert: return 0x72
-            
-            // Modifiers (we handle these but return nil to not send them as key events)
-            case .keyboardLeftShift, .keyboardRightShift: return nil
-            case .keyboardLeftControl, .keyboardRightControl: return nil
-            case .keyboardLeftAlt, .keyboardRightAlt: return nil
-            case .keyboardLeftGUI, .keyboardRightGUI: return nil  // Command
-            case .keyboardCapsLock: return nil
-            
-            default:
-                NSLog("⌨️ Unknown keyCode: \(key.keyCode.rawValue)")
-                return nil
-            }
+            super.pressesCancelled(presses, with: event)
         }
         
         /// C callback for external backend write operations
