@@ -251,12 +251,13 @@ struct FontPickerView: View {
             ForEach(AppSettings.fontFamilies, id: \.self) { font in
                 Button {
                     let changed = selectedFont != font
-                    selectedFont = font
                     if changed {
-                        // Small delay to let the setting save
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            onFontChanged()
-                        }
+                        // Update the selection first
+                        selectedFont = font
+                        // Force sync to UserDefaults
+                        UserDefaults.standard.synchronize()
+                        // Call the callback immediately (before dismiss)
+                        onFontChanged()
                     }
                     dismiss()
                 } label: {
