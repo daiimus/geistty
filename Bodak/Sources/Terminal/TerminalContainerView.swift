@@ -227,7 +227,12 @@ struct TerminalContainerView: View {
             terminalViewModel.clearScreen()
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
+            SettingsView(
+                currentFontSize: Int(terminalViewModel.currentFontSize),
+                onIncreaseFontSize: { terminalViewModel.increaseFontSize() },
+                onDecreaseFontSize: { terminalViewModel.decreaseFontSize() },
+                onResetFontSize: { terminalViewModel.resetFontSize() }
+            )
         }
     }
     
@@ -319,9 +324,20 @@ class TerminalViewModel: ObservableObject {
     @Published var disconnectedByRemote: Bool = false
     @Published var disconnectError: String? = nil
     @Published var isSelectingText: Bool = false
+    @Published var currentFontSize: Float = 14.0
     
     /// Reference to the Ghostty surface view
-    weak var surfaceView: Ghostty.SurfaceView?
+    weak var surfaceView: Ghostty.SurfaceView? {
+        didSet {
+            // Sync font size when surfaceView is set
+            if let surface = surfaceView {
+                currentFontSize = surface.currentFontSize
+            }
+        }
+    }
+    
+    /// Cancellable for font size observation
+    private var fontSizeCancellable: AnyCancellable?
     
     /// The SSH session
     private var sshSession: SSHSession?
@@ -467,16 +483,25 @@ class TerminalViewModel: ObservableObject {
     /// Increase terminal font size
     func increaseFontSize() {
         surfaceView?.increaseFontSize()
+        if let surface = surfaceView {
+            currentFontSize = surface.currentFontSize
+        }
     }
     
     /// Decrease terminal font size
     func decreaseFontSize() {
         surfaceView?.decreaseFontSize()
+        if let surface = surfaceView {
+            currentFontSize = surface.currentFontSize
+        }
     }
     
     /// Reset terminal font size to default
     func resetFontSize() {
         surfaceView?.resetFontSize()
+        if let surface = surfaceView {
+            currentFontSize = surface.currentFontSize
+        }
     }
     
     /// Clear the terminal screen (Ctrl+L)
