@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000001 /* BodakApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001; };
-		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002; };
-		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003; };
-		A1000004 /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004; };
-		A1000005 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005; };
-		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006; };
-		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007; };
+		A1000001 /* BodakApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* BodakApp.swift */; };
+		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
+		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
+		A1000004 /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* SSHSession.swift */; };
+		A1000005 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* SSHConnection.swift */; };
+		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
+		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* DepartureMono-Regular.otf */; };
 		A1000009 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000001 /* CSSH */; };
 		A1000010 /* Ghostty.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* Ghostty.swift */; };
 		A1000011 /* GhosttyTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* GhosttyTerminalView.swift */; };
@@ -91,22 +91,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		A5000012 /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-				A5000013 /* Fonts */,
-			);
-			path = Resources;
-			sourceTree = "<group>";
-		};
-		A5000013 /* Fonts */ = {
-			isa = PBXGroup;
-			children = (
-				A2000007 /* DepartureMono-Regular.otf */,
-			);
-			path = Fonts;
-			sourceTree = "<group>";
-		};
 		A5000002 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
@@ -119,25 +103,6 @@
 				A5000011 /* SFTP */,
 			);
 			path = Sources;
-			sourceTree = "<group>";
-		};
-		A5000011 /* SFTP */ = {
-			isa = PBXGroup;
-			children = (
-				A2000040 /* SFTPClient.swift */,
-				A2000041 /* SFTPBrowserView.swift */,
-			);
-			path = SFTP;
-			sourceTree = "<group>";
-		};
-		A5000009 /* UI */ = {
-			isa = PBXGroup;
-			children = (
-				A2000030 /* ConnectionListView.swift */,
-				A2000031 /* ConnectionEditorView.swift */,
-				A2000050 /* SettingsView.swift */,
-			);
-			path = UI;
 			sourceTree = "<group>";
 		};
 		A5000003 /* App */ = {
@@ -194,6 +159,16 @@
 			path = Auth;
 			sourceTree = "<group>";
 		};
+		A5000009 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				A2000030 /* ConnectionListView.swift */,
+				A2000031 /* ConnectionEditorView.swift */,
+				A2000050 /* SettingsView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
 		A5000010 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -202,12 +177,37 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		A5000011 /* SFTP */ = {
+			isa = PBXGroup;
+			children = (
+				A2000040 /* SFTPClient.swift */,
+				A2000041 /* SFTPBrowserView.swift */,
+			);
+			path = SFTP;
+			sourceTree = "<group>";
+		};
+		A5000012 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A5000013 /* Fonts */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A5000013 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				A2000007 /* DepartureMono-Regular.otf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
 		A6000001 /* Bodak */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A7000001;
+			buildConfigurationList = A7000001 /* Build configuration list for PBXNativeTarget "Bodak" */;
 			buildPhases = (
 				A8000001 /* Sources */,
 				A4000001 /* Frameworks */,
@@ -241,7 +241,7 @@
 					};
 				};
 			};
-			buildConfigurationList = AB000001;
+			buildConfigurationList = AB000001 /* Build configuration list for PBXProject "Bodak" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -427,7 +427,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = DPF76SZNJB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -465,7 +465,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = DPF76SZNJB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -537,7 +537,6 @@
 			productName = CSSH;
 		};
 /* End XCSwiftPackageProductDependency section */
-
 	};
 	rootObject = AA000001 /* Project object */;
 }
