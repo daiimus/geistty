@@ -677,7 +677,7 @@ struct TerminalToolbar: View {
             .padding(.horizontal, 8)
         }
         .padding(.vertical, 4)
-        .background(Color(UIColor.systemGray6))
+        .background(Color.black.opacity(0.7))
     }
 }
 
