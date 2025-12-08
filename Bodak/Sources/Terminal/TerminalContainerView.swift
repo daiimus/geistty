@@ -39,9 +39,11 @@ struct TerminalContainerView: View {
         GeometryReader { geometry in
             ZStack {
                 // Main terminal surface (full screen)
+                // NOTE: Don't dynamically change ignoresSafeArea - it causes flashing
+                // Instead, use a fixed safe area and adjust content within it
                 BodakTerminalView(viewModel: terminalViewModel)
                     .environmentObject(ghosttyApp)
-                    .ignoresSafeArea(.all, edges: showChrome ? [] : [.top, .bottom])
+                    .ignoresSafeArea(.all)
                 
                 // Overlay for detecting taps on edges to reveal chrome
                 VStack {
@@ -76,9 +78,19 @@ struct TerminalContainerView: View {
                             
                             Spacer()
                             
-                            Text(terminalTitle)
-                                .font(.headline)
-                                .lineLimit(1)
+                            // Title and duration
+                            VStack(spacing: 2) {
+                                Text(terminalTitle)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                
+                                // Connection duration badge
+                                if terminalViewModel.connectionDuration > 0 {
+                                    Text(terminalViewModel.formattedDuration)
+                                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             
                             Spacer()
                             
@@ -168,7 +180,9 @@ struct TerminalContainerView: View {
             .animation(.easeInOut(duration: 0.3), value: showChrome)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .statusBarHidden(!showChrome)
+        // NOTE: Don't hide status bar dynamically - it causes screen flash on iPadOS
+        // Instead keep it always visible (it auto-hides in fullscreen anyway)
+        .persistentSystemOverlays(.hidden) // Hides home indicator, less intrusive than statusBarHidden
         .navigationBarHidden(true)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
@@ -178,6 +192,25 @@ struct TerminalContainerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardHeight = 0
+        }
+        // Keyboard shortcut handlers
+        .onReceive(NotificationCenter.default.publisher(for: .terminalClearScreen)) { _ in
+            terminalViewModel.clearScreen()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalReset)) { _ in
+            terminalViewModel.resetTerminal()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalIncreaseFontSize)) { _ in
+            terminalViewModel.increaseFontSize()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalDecreaseFontSize)) { _ in
+            terminalViewModel.decreaseFontSize()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalResetFontSize)) { _ in
+            terminalViewModel.resetFontSize()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalDisconnect)) { _ in
+            disconnect()
         }
         .onAppear {
             setupConnection()
@@ -326,6 +359,11 @@ class TerminalViewModel: ObservableObject {
     @Published var disconnectError: String? = nil
     @Published var isSelectingText: Bool = false
     @Published var currentFontSize: Float = 14.0
+    @Published var connectionDuration: TimeInterval = 0
+    
+    /// Connection start time for duration tracking
+    private var connectionStartTime: Date?
+    private var durationTimer: Timer?
     
     /// Reference to the Ghostty surface view
     weak var surfaceView: Ghostty.SurfaceView? {
@@ -358,6 +396,40 @@ class TerminalViewModel: ObservableObject {
     private var cols: Int = 80
     private var rows: Int = 24
     
+    /// Start tracking connection duration
+    func startDurationTimer() {
+        connectionStartTime = Date()
+        connectionDuration = 0
+        
+        // Update duration every second
+        durationTimer?.invalidate()
+        durationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, let startTime = self.connectionStartTime else { return }
+                self.connectionDuration = Date().timeIntervalSince(startTime)
+            }
+        }
+    }
+    
+    /// Stop duration timer
+    func stopDurationTimer() {
+        durationTimer?.invalidate()
+        durationTimer = nil
+    }
+    
+    /// Formatted connection duration string
+    var formattedDuration: String {
+        let hours = Int(connectionDuration) / 3600
+        let minutes = (Int(connectionDuration) % 3600) / 60
+        let seconds = Int(connectionDuration) % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+    
     func connect(host: String, port: Int, username: String, password: String?) {
         logger.info("📡 TerminalViewModel.connect called - \(host):\(port) user=\(username)")
         Task {
@@ -377,6 +449,7 @@ class TerminalViewModel: ObservableObject {
                 
                 logger.info("📡 SSH connected successfully!")
                 isConnected = true
+                startDurationTimer()
                 
                 // Send initial terminal size
                 logger.info("📡 Setting terminal size: \(cols)x\(rows)")
@@ -395,6 +468,7 @@ class TerminalViewModel: ObservableObject {
         sshSession = session
         sshSession?.delegate = self
         isConnected = true
+        startDurationTimer()
         
         // Send initial terminal size
         logger.info("📡 Setting terminal size: \(cols)x\(rows)")
@@ -402,6 +476,7 @@ class TerminalViewModel: ObservableObject {
     }
     
     func disconnect() {
+        stopDurationTimer()
         sshSession?.disconnect()
         sshSession = nil
         isConnected = false
@@ -547,6 +622,12 @@ class TerminalViewModel: ObservableObject {
         send(text: "\u{0c}")
     }
     
+    /// Reset the terminal (ESC c - full reset)
+    func resetTerminal() {
+        // Send ESC c (RIS - Reset to Initial State)
+        send(text: "\u{1b}c")
+    }
+    
     enum SpecialKey {
         case escape, tab, up, down, left, right, enter, backspace
     }
@@ -669,6 +750,7 @@ struct BodakTerminalView: UIViewRepresentable {
 struct TerminalToolbar: View {
     @ObservedObject var viewModel: TerminalViewModel
     @State private var ctrlPressed = false
+    @State private var ctrlPulsePhase = false
     
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -682,12 +764,9 @@ struct TerminalToolbar: View {
                     viewModel.sendSpecialKey(.tab)
                 }
                 
-                ToolbarButton(
-                    symbol: ctrlPressed ? "control.fill" : "control",
-                    label: "Ctrl"
-                ) {
+                // Ctrl toggle with visual indicator when active
+                CtrlToggleButton(isActive: $ctrlPressed, pulsePhase: $ctrlPulsePhase) {
                     ctrlPressed.toggle()
-                    // Notify the surface view about Ctrl toggle state
                     viewModel.setCtrlToggle(ctrlPressed)
                 }
                 
@@ -731,14 +810,60 @@ struct TerminalToolbar: View {
                 
                 Spacer()
                 
-                ToolbarButton(symbol: "keyboard", label: "KB") {
-                    // Toggle keyboard visibility
+                ToolbarButton(symbol: "keyboard.chevron.compact.down", label: "Hide") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             }
             .padding(.horizontal, 8)
         }
         .padding(.vertical, 4)
         .background(Color.black.opacity(0.7))
+        // Start/stop pulsing animation when Ctrl is toggled
+        .onChange(of: ctrlPressed) { _, isActive in
+            if isActive {
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    ctrlPulsePhase = true
+                }
+            } else {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    ctrlPulsePhase = false
+                }
+            }
+        }
+    }
+}
+
+/// Ctrl toggle button with visual pulsing indicator when active
+struct CtrlToggleButton: View {
+    @Binding var isActive: Bool
+    @Binding var pulsePhase: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: isActive ? "control.fill" : "control")
+                    .font(.system(size: 16))
+                Text("Ctrl")
+                    .font(.system(size: 10))
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .foregroundStyle(isActive ? .white : .primary)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? Color.orange : Color.clear)
+                    .opacity(isActive ? (pulsePhase ? 1.0 : 0.6) : 0)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isActive ? Color.orange : Color.clear, lineWidth: 2)
+                    .opacity(isActive ? (pulsePhase ? 0.3 : 1.0) : 0)
+            )
+        }
+        .accessibilityLabel("Control key modifier")
+        .accessibilityValue(isActive ? "Active" : "Inactive")
+        .accessibilityHint("Double tap to toggle. When active, the next key press will include Control.")
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 
@@ -755,6 +880,8 @@ struct CharacterButton: View {
                 .frame(minWidth: 36, minHeight: 44)
         }
         .foregroundStyle(.primary)
+        .accessibilityLabel(label)
+        .accessibilityHint("Inserts \(char) character")
     }
 }
 
@@ -774,6 +901,7 @@ struct ToolbarButton: View {
             .frame(minWidth: 44, minHeight: 44)
         }
         .foregroundStyle(.primary)
+        .accessibilityLabel(label)
     }
 }
 

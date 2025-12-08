@@ -97,7 +97,16 @@ _ghostty_surface_key      # Send key events
 _ghostty_surface_set_size # Resize terminal
 ```
 
-### 2. Ghostty.swift - Swift Wrapper
+### 2. Ghostty Swift Wrappers
+
+The Ghostty C API is wrapped in two Swift files for full API parity:
+
+- **`Ghostty.swift`** - Main implementation (Config, App, SurfaceView classes)
+- **`GhosttyAPI.swift`** - Extended API wrappers for complete parity
+
+See [GHOSTTY_API.md](Bodak/GHOSTTY_API.md) for detailed API coverage.
+
+### 3. Ghostty.swift - Core Implementation
 
 #### Ghostty.Config
 ```swift

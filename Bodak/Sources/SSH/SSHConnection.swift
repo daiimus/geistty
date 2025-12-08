@@ -197,13 +197,15 @@ public class SSHConnection: ObservableObject {
         
         let user = username
         
+        // Capture sess as nonisolated(unsafe) to avoid Sendable warning
+        nonisolated(unsafe) let unsafeSess = sess
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sshQueue.async {
                 logger.info("🔐 Calling libssh2_userauth_password_ex...")
                 let rc = user.withCString { userPtr in
                     password.withCString { passPtr in
                         libssh2_userauth_password_ex(
-                            sess,
+                            unsafeSess,
                             userPtr,
                             UInt32(user.utf8.count),
                             passPtr,
@@ -236,6 +238,8 @@ public class SSHConnection: ObservableObject {
         
         let user = username
         
+        // Capture sess as nonisolated(unsafe) to avoid Sendable warning
+        nonisolated(unsafe) let unsafeSess = sess
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sshQueue.async {
                 let rc = user.withCString { userPtr in
@@ -243,7 +247,7 @@ public class SSHConnection: ObservableObject {
                         if let pass = passphrase {
                             return pass.withCString { passPtr in
                                 libssh2_userauth_publickey_fromfile_ex(
-                                    sess,
+                                    unsafeSess,
                                     userPtr,
                                     UInt32(user.utf8.count),
                                     nil,
@@ -253,7 +257,7 @@ public class SSHConnection: ObservableObject {
                             }
                         } else {
                             return libssh2_userauth_publickey_fromfile_ex(
-                                sess,
+                                unsafeSess,
                                 userPtr,
                                 UInt32(user.utf8.count),
                                 nil,
@@ -288,13 +292,15 @@ public class SSHConnection: ObservableObject {
         self.cols = cols
         self.rows = rows
         
+        // Capture sess as nonisolated(unsafe) to avoid Sendable warning
+        nonisolated(unsafe) let unsafeSess = sess
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sshQueue.async { [self] in
                 // Open channel
                 logger.info("🖥️ Opening channel...")
                 guard let chan = "session".withCString({ typePtr in
                     libssh2_channel_open_ex(
-                        sess,
+                        unsafeSess,
                         typePtr,
                         7,  // strlen("session")
                         UInt32(2 * 1024 * 1024),  // LIBSSH2_CHANNEL_WINDOW_DEFAULT
@@ -332,9 +338,9 @@ public class SSHConnection: ObservableObject {
                 // Set environment variables for better terminal support
                 // Note: Many SSH servers disable AcceptEnv by default, so these may not work
                 // But we try anyway for servers that do allow them
-                self.setEnv(chan, name: "COLORTERM", value: "truecolor")
-                self.setEnv(chan, name: "TERM_PROGRAM", value: "ghostty")
-                self.setEnv(chan, name: "TERM_PROGRAM_VERSION", value: "1.0.0")
+                Self.setEnv(chan, name: "COLORTERM", value: "truecolor")
+                Self.setEnv(chan, name: "TERM_PROGRAM", value: "ghostty")
+                Self.setEnv(chan, name: "TERM_PROGRAM_VERSION", value: "1.0.0")
                 
                 // Start shell
                 logger.info("🖥️ Starting shell...")
@@ -375,14 +381,17 @@ public class SSHConnection: ObservableObject {
         self.cols = cols
         self.rows = rows
         
+        // Capture chan as nonisolated(unsafe) to avoid Sendable warning
+        // This is safe because we only use it for libssh2 calls on sshQueue
+        nonisolated(unsafe) let unsafeChan = chan
         sshQueue.async {
-            _ = libssh2_channel_request_pty_size_ex(chan, Int32(cols), Int32(rows), 0, 0)
+            _ = libssh2_channel_request_pty_size_ex(unsafeChan, Int32(cols), Int32(rows), 0, 0)
         }
     }
     
     /// Set an environment variable on the channel
     /// Note: This requires AcceptEnv to be configured on the SSH server
-    private func setEnv(_ channel: OpaquePointer, name: String, value: String) {
+    nonisolated private static func setEnv(_ channel: OpaquePointer, name: String, value: String) {
         let rc = name.withCString { namePtr in
             value.withCString { valuePtr in
                 libssh2_channel_setenv_ex(
@@ -404,6 +413,9 @@ public class SSHConnection: ObservableObject {
     public func write(_ data: Data) {
         guard state == .channelOpen, let chan = channel else { return }
         
+        // Capture chan as nonisolated(unsafe) to avoid Sendable warning
+        // This is safe because we only use it for libssh2 calls on sshQueue
+        nonisolated(unsafe) let unsafeChan = chan
         sshQueue.async {
             data.withUnsafeBytes { buffer in
                 guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
@@ -411,7 +423,7 @@ public class SSHConnection: ObservableObject {
                 let total = buffer.count
                 
                 while written < total {
-                    let rc = libssh2_channel_write_ex(chan, 0, ptr.advanced(by: written), total - written)
+                    let rc = libssh2_channel_write_ex(unsafeChan, 0, ptr.advanced(by: written), total - written)
                     
                     if rc < 0 {
                         // LIBSSH2_ERROR_EAGAIN = -37

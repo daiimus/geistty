@@ -24,8 +24,8 @@
 		A1000075 /* Hack-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000075 /* Hack-Bold.ttf */; };
 		A1000076 /* SourceCodePro-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000076 /* SourceCodePro-Regular.otf */; };
 		A1000077 /* SourceCodePro-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000077 /* SourceCodePro-Bold.otf */; };
-		A1000078 /* IBMPlexMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000078 /* IBMPlexMono-Regular.otf */; };
-		A1000079 /* IBMPlexMono-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000079 /* IBMPlexMono-Bold.otf */; };
+		A1000078 /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000078 /* IBMPlexMono-Regular.ttf */; };
+		A1000079 /* IBMPlexMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000079 /* IBMPlexMono-Bold.ttf */; };
 		A100007A /* Inconsolata-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007A /* Inconsolata-Regular.ttf */; };
 		A100007B /* Inconsolata-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007B /* Inconsolata-Bold.ttf */; };
 		A1000009 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000001 /* CSSH */; };
@@ -72,8 +72,8 @@
 		A2000075 /* Hack-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Hack-Bold.ttf"; sourceTree = "<group>"; };
 		A2000076 /* SourceCodePro-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SourceCodePro-Regular.otf"; sourceTree = "<group>"; };
 		A2000077 /* SourceCodePro-Bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SourceCodePro-Bold.otf"; sourceTree = "<group>"; };
-		A2000078 /* IBMPlexMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.otf"; sourceTree = "<group>"; };
-		A2000079 /* IBMPlexMono-Bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Bold.otf"; sourceTree = "<group>"; };
+		A2000078 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
+		A2000079 /* IBMPlexMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Bold.ttf"; sourceTree = "<group>"; };
 		A200007A /* Inconsolata-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Regular.ttf"; sourceTree = "<group>"; };
 		A200007B /* Inconsolata-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Bold.ttf"; sourceTree = "<group>"; };
 		A2000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -236,8 +236,8 @@
 				A2000075 /* Hack-Bold.ttf */,
 				A2000076 /* SourceCodePro-Regular.otf */,
 				A2000077 /* SourceCodePro-Bold.otf */,
-				A2000078 /* IBMPlexMono-Regular.otf */,
-				A2000079 /* IBMPlexMono-Bold.otf */,
+				A2000078 /* IBMPlexMono-Regular.ttf */,
+				A2000079 /* IBMPlexMono-Bold.ttf */,
 				A200007A /* Inconsolata-Regular.ttf */,
 				A200007B /* Inconsolata-Bold.ttf */,
 			);
@@ -319,8 +319,8 @@
 				A1000075 /* Hack-Bold.ttf in Resources */,
 				A1000076 /* SourceCodePro-Regular.otf in Resources */,
 				A1000077 /* SourceCodePro-Bold.otf in Resources */,
-				A1000078 /* IBMPlexMono-Regular.otf in Resources */,
-				A1000079 /* IBMPlexMono-Bold.otf in Resources */,
+				A1000078 /* IBMPlexMono-Regular.ttf in Resources */,
+				A1000079 /* IBMPlexMono-Bold.ttf in Resources */,
 				A100007A /* Inconsolata-Regular.ttf in Resources */,
 				A100007B /* Inconsolata-Bold.ttf in Resources */,
 				A1000061 /* Themes in Resources */,

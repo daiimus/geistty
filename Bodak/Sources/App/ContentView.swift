@@ -129,6 +129,7 @@ struct ConnectingView: View {
 struct ErrorView: View {
     let message: String
     @Binding var showConnectionSheet: Bool
+    @EnvironmentObject var appState: AppState
     
     var body: some View {
         VStack(spacing: 20) {
@@ -144,10 +145,27 @@ struct ErrorView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             
-            Button("Try Again") {
-                showConnectionSheet = true
+            VStack(spacing: 12) {
+                // Reconnect button (uses last connection if available)
+                if appState.currentHost != nil {
+                    Button {
+                        appState.connectionStatus = .connected
+                    } label: {
+                        Label("Reconnect", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: 200)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                
+                Button {
+                    appState.clearConnectionParams()
+                    appState.connectionStatus = .disconnected
+                } label: {
+                    Label("Back to Connections", systemImage: "list.bullet")
+                        .frame(maxWidth: 200)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding()
     }
