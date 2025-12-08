@@ -229,10 +229,10 @@ struct TerminalContainerView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(
                 currentFontSize: Int(terminalViewModel.currentFontSize),
-                onIncreaseFontSize: { terminalViewModel.increaseFontSize() },
-                onDecreaseFontSize: { terminalViewModel.decreaseFontSize() },
+                onFontSizeChanged: { newSize in terminalViewModel.setFontSize(newSize) },
                 onResetFontSize: { terminalViewModel.resetFontSize() },
-                onFontFamilyChanged: { terminalViewModel.updateConfig() }
+                onFontFamilyChanged: { terminalViewModel.updateConfig() },
+                onThemeChanged: { terminalViewModel.updateConfig() }
             )
         }
     }
@@ -464,27 +464,39 @@ class TerminalViewModel: ObservableObject {
     }
     
     func sendSpecialKey(_ key: SpecialKey) {
-        // Map special keys to escape sequences
-        let sequence: String
-        switch key {
-        case .escape:
-            sequence = "\u{1b}"
-        case .tab:
-            sequence = "\t"
-        case .up:
-            sequence = "\u{1b}[A"
-        case .down:
-            sequence = "\u{1b}[B"
-        case .left:
-            sequence = "\u{1b}[D"
-        case .right:
-            sequence = "\u{1b}[C"
-        case .enter:
-            sequence = "\r"
-        case .backspace:
-            sequence = "\u{7f}"
+        // Use Ghostty's key encoding for proper application cursor mode support
+        // This ensures tmux, vim, etc. receive the correct escape sequences
+        guard let surfaceView = surfaceView else {
+            // Fallback to raw escape sequences if no surface
+            let sequence: String
+            switch key {
+            case .escape: sequence = "\u{1b}"
+            case .tab: sequence = "\t"
+            case .up: sequence = "\u{1b}[A"
+            case .down: sequence = "\u{1b}[B"
+            case .left: sequence = "\u{1b}[D"
+            case .right: sequence = "\u{1b}[C"
+            case .enter: sequence = "\r"
+            case .backspace: sequence = "\u{7f}"
+            }
+            send(text: sequence)
+            return
         }
-        send(text: sequence)
+        
+        // Send through Ghostty's key encoding
+        let virtualKey: Ghostty.SurfaceView.VirtualKey
+        switch key {
+        case .escape: virtualKey = .escape
+        case .tab: virtualKey = .tab
+        case .up: virtualKey = .upArrow
+        case .down: virtualKey = .downArrow
+        case .left: virtualKey = .leftArrow
+        case .right: virtualKey = .rightArrow
+        case .enter: virtualKey = .enter
+        case .backspace: virtualKey = .delete
+        }
+        
+        surfaceView.sendVirtualKey(virtualKey)
     }
     
     /// Set Ctrl toggle state for next keypress (from toolbar button)
@@ -503,6 +515,14 @@ class TerminalViewModel: ObservableObject {
     /// Decrease terminal font size
     func decreaseFontSize() {
         surfaceView?.decreaseFontSize()
+        if let surface = surfaceView {
+            currentFontSize = surface.currentFontSize
+        }
+    }
+    
+    /// Set terminal font size to a specific value
+    func setFontSize(_ size: Int) {
+        surfaceView?.setFontSize(Float(size))
         if let surface = surfaceView {
             currentFontSize = surface.currentFontSize
         }
@@ -610,6 +630,14 @@ struct BodakTerminalView: UIViewRepresentable {
             }
         }
         
+        // Wire up the resize callback - when terminal grid size changes, resize SSH PTY
+        surfaceView.onResize = { [weak viewModel] cols, rows in
+            Task { @MainActor in
+                logger.info("📐 Terminal grid resized to \(cols)x\(rows)")
+                viewModel?.resize(cols: cols, rows: rows)
+            }
+        }
+        
         // Store reference in view model IMMEDIATELY (not async)
         // This is crucial - we need surfaceView to be available before SSH data arrives
         viewModel.surfaceView = surfaceView
@@ -702,15 +730,6 @@ struct TerminalToolbar: View {
                 }
                 
                 Spacer()
-                
-                // Font size controls
-                ToolbarButton(symbol: "minus.magnifyingglass", label: "A-") {
-                    viewModel.decreaseFontSize()
-                }
-                
-                ToolbarButton(symbol: "plus.magnifyingglass", label: "A+") {
-                    viewModel.increaseFontSize()
-                }
                 
                 ToolbarButton(symbol: "keyboard", label: "KB") {
                     // Toggle keyboard visibility

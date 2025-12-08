@@ -30,6 +30,10 @@ class SSHSession: ObservableObject, Identifiable {
     private(set) var port: Int = 22
     private(set) var username: String = ""
     
+    // tmux options
+    private var useTmux: Bool = false
+    private var tmuxSessionName: String?
+    
     // State
     @Published var state: SSHState = .disconnected
     @Published var lastError: Error?
@@ -40,39 +44,43 @@ class SSHSession: ObservableObject, Identifiable {
     
     init() {}
     
-    /// The preferred TERM type - try ghostty first for best experience
-    private static let preferredTerm = "xterm-ghostty"
-    private static let fallbackTerm = "xterm-256color"
+    /// The TERM type to use - xterm-256color is universally supported
+    /// Note: xterm-ghostty would be ideal but most servers don't have the terminfo
+    private static let termType = "xterm-256color"
     
     /// Connect to the SSH server with password authentication
-    func connect(host: String, port: Int, username: String, password: String) async throws {
+    func connect(host: String, port: Int, username: String, password: String, useTmux: Bool = false, tmuxSessionName: String? = nil) async throws {
         self.host = host
         self.port = port
         self.username = username
+        self.useTmux = useTmux
+        self.tmuxSessionName = tmuxSessionName
         
         connection = SSHConnection(host: host, port: port, username: username)
         connection?.delegate = self
         
         try await connection?.connect()
         try await connection?.authenticatePassword(password)
-        try await connection?.openShell(term: Self.preferredTerm, cols: terminalCols, rows: terminalRows)
+        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
         
         // Inject shell initialization for best terminal experience
         injectTerminalSetup()
     }
     
     /// Connect to the SSH server with key-based authentication
-    func connectWithKey(host: String, port: Int, username: String, privateKeyPath: String, passphrase: String? = nil) async throws {
+    func connectWithKey(host: String, port: Int, username: String, privateKeyPath: String, passphrase: String? = nil, useTmux: Bool = false, tmuxSessionName: String? = nil) async throws {
         self.host = host
         self.port = port
         self.username = username
+        self.useTmux = useTmux
+        self.tmuxSessionName = tmuxSessionName
         
         connection = SSHConnection(host: host, port: port, username: username)
         connection?.delegate = self
         
         try await connection?.connect()
         try await connection?.authenticateKey(privateKeyPath: privateKeyPath, passphrase: passphrase)
-        try await connection?.openShell(term: Self.preferredTerm, cols: terminalCols, rows: terminalRows)
+        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
         
         // Inject shell initialization for best terminal experience
         injectTerminalSetup()
@@ -83,6 +91,8 @@ class SSHSession: ObservableObject, Identifiable {
         self.host = profile.host
         self.port = profile.port
         self.username = profile.username
+        self.useTmux = profile.useTmux
+        self.tmuxSessionName = profile.tmuxSessionName
         
         connection = SSHConnection(host: profile.host, port: profile.port, username: profile.username)
         connection?.delegate = self
@@ -108,7 +118,7 @@ class SSHSession: ObservableObject, Identifiable {
             try await connection?.authenticateKey(privateKeyPath: tempPath.path, passphrase: passphrase)
         }
         
-        try await connection?.openShell(term: Self.preferredTerm, cols: terminalCols, rows: terminalRows)
+        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
         
         // Mark profile as recently connected
         ConnectionProfileManager.shared.markConnected(profile)
@@ -122,18 +132,27 @@ class SSHSession: ObservableObject, Identifiable {
     /// Note: Some restricted shells (like test servers) don't support these commands,
     /// so we make this optional and non-disruptive
     private func injectTerminalSetup() {
-        // Disable auto-setup for now - it causes issues on restricted shells
-        // Users can manually configure their shell profile if needed
-        // 
-        // TODO: Detect shell type first, or make this a per-connection setting
-        // 
-        // The ideal setup would be:
-        // - Check if we're in a real shell (bash/zsh/fish)
-        // - Only then inject environment setup
-        // - Consider using SSH channel env requests as primary method
+        // Auto-attach to tmux if enabled
+        if useTmux {
+            attachToTmux()
+        }
+    }
+    
+    /// Auto-attach to or create a tmux session
+    /// Uses "tmux new-session -A -s <name>" which:
+    /// - Attaches to session if it exists
+    /// - Creates a new session if it doesn't
+    private func attachToTmux() {
+        let sessionName = tmuxSessionName ?? "main"
         
-        // For now, we rely on the TERM set during PTY request
-        // which is xterm-ghostty or xterm-256color
+        // Small delay to let the shell initialize
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            // Use exec to replace the shell with tmux (cleaner)
+            // clear && exec prevents the command from being visible in history
+            // The space prefix also helps avoid history on some shells
+            let command = " exec tmux new-session -A -s \(sessionName)\n"
+            self?.write(command)
+        }
     }
     
     /// Resize the PTY

@@ -116,8 +116,11 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 - [x] **tmux support**
   - [x] Ctrl+B prefix key handling
   - [x] Control character sequences working
-  - [ ] Verify all escape sequences work correctly
-  - [ ] Window/pane navigation testing
+  - [x] Bracketed paste mode (paste_from_clipboard binding action)
+  - [x] All escape sequences verified working
+  - [x] Window/pane navigation tested
+  - [x] Auto-attach to tmux session on connect (per-connection setting)
+  - [x] Custom tmux session name support
 
 ### Connection Management
 - [x] **Saved connections**
@@ -126,7 +129,7 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Connection list UI with add/edit/delete
   - [x] Quick Connect flow
   - [x] Favorites and recents tracking
-  - [ ] iCloud sync for connection profiles
+  - [x] iCloud sync for connection profiles (code ready, needs paid developer account for entitlement)
 - [x] **SSH Key Authentication**
   - [x] Generate Ed25519 keys in-app (SSHKeyManager)
   - [x] Generate RSA keys (2048/4096 bit options)
@@ -148,9 +151,10 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Auto-navigate back to connection screen
 
 ### iPad-Specific
-- [ ] Split View support
-- [ ] Stage Manager support
-- [ ] External display mirroring
+- [x] Split View support (works out of box with SwiftUI)
+- [x] Stage Manager support (works out of box with SwiftUI)
+- [x] External display mirroring (automatic via WindowGroup)
+- [x] UISupportsMultipleScenes enabled
 
 ### Settings
 - [x] **Font family selection**
@@ -158,8 +162,19 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Live font updates (ghostty_surface_update_config)
   - [x] ghostty_config_load_string API for config loading
   - [x] Font preference persistence (UserDefaults)
-- [ ] Font size adjustment
-- [ ] Theme/color scheme selection
+- [x] **Font size adjustment**
+  - [x] Slider control in Settings (8-32pt range)
+  - [x] Live font size updates
+  - [x] Reset to default button
+- [x] **Theme/color scheme selection**
+  - [x] 18 bundled Ghostty themes (light & dark)
+  - [x] Theme picker with color palette preview
+  - [x] Live theme updates
+  - [x] Theme persistence (UserDefaults)
+- [x] **Text rendering quality**
+  - [x] Font thickening toggle for Retina displays
+  - [x] Freetype hinting (light) for optimal clarity
+  - [x] Proper DPI/contentScaleFactor handling throughout
 - [ ] Terminal type (xterm-256color, etc.)
 
 ---
