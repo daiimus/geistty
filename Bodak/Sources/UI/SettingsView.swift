@@ -407,10 +407,13 @@ struct FontPickerView: View {
                     if changed {
                         // Update the selection first
                         selectedFont = font
-                        // Force sync to UserDefaults
-                        UserDefaults.standard.synchronize()
-                        // Call the callback immediately (before dismiss)
-                        onFontChanged()
+                        // Write directly to UserDefaults to ensure it's persisted
+                        // before the config update reads it
+                        UserDefaults.standard.set(font, forKey: "terminal.fontFamily")
+                        // Call the callback on next run loop to ensure UserDefaults is synced
+                        DispatchQueue.main.async {
+                            onFontChanged()
+                        }
                     }
                     dismiss()
                 } label: {

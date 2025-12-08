@@ -132,27 +132,44 @@ class SSHSession: ObservableObject, Identifiable {
     /// Note: Some restricted shells (like test servers) don't support these commands,
     /// so we make this optional and non-disruptive
     private func injectTerminalSetup() {
-        // Auto-attach to tmux if enabled
+        // Small delay to let the shell initialize before injecting env vars
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.injectEnvironmentVariables()
+        }
+        
+        // Auto-attach to tmux if enabled (with longer delay to let env vars set first)
         if useTmux {
-            attachToTmux()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.attachToTmuxNow()
+            }
         }
     }
     
-    /// Auto-attach to or create a tmux session
+    /// Inject environment variables for optimal TUI app experience
+    /// These help apps like Yazi, kew, aichat, browsh detect terminal capabilities
+    /// Uses a single-line command that suppresses output and avoids shell history
+    private func injectEnvironmentVariables() {
+        // Truly silent injection:
+        // - Space prefix: avoids bash/zsh history (HISTCONTROL=ignorespace)
+        // - eval "...": single command execution
+        // - All on one line with semicolons
+        // - No newline echo, just set vars and redraw prompt
+        // - 2>/dev/null suppresses any errors
+        // - Uses POSIX-compatible syntax for maximum shell compatibility
+        let envSetup = " eval 'export COLORTERM=truecolor TERM_PROGRAM=ghostty TERM_PROGRAM_VERSION=1.0.0; [ -z \"$LANG\" ] && export LANG=en_US.UTF-8' 2>/dev/null; clear\n"
+        write(envSetup)
+    }
+    
+    /// Auto-attach to or create a tmux session (called after delay)
     /// Uses "tmux new-session -A -s <name>" which:
     /// - Attaches to session if it exists
     /// - Creates a new session if it doesn't
-    private func attachToTmux() {
+    private func attachToTmuxNow() {
         let sessionName = tmuxSessionName ?? "main"
-        
-        // Small delay to let the shell initialize
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            // Use exec to replace the shell with tmux (cleaner)
-            // clear && exec prevents the command from being visible in history
-            // The space prefix also helps avoid history on some shells
-            let command = " exec tmux new-session -A -s \(sessionName)\n"
-            self?.write(command)
-        }
+        // Use exec to replace the shell with tmux (cleaner)
+        // The space prefix avoids history on many shells
+        let command = " exec tmux new-session -A -s \(sessionName)\n"
+        write(command)
     }
     
     /// Resize the PTY

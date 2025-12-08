@@ -12,7 +12,75 @@ struct BodakApp: App {
                 .environmentObject(appState)
                 .environmentObject(ghosttyApp)
         }
+        .commands {
+            // Terminal commands (Cmd+C/V work automatically via system)
+            CommandGroup(replacing: .textEditing) {
+                // Keep standard edit commands
+            }
+            
+            // Custom terminal commands shown in Cmd-hold menu on iPad
+            CommandMenu("Terminal") {
+                Button("Clear Screen") {
+                    NotificationCenter.default.post(name: .terminalClearScreen, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                
+                Button("Reset Terminal") {
+                    NotificationCenter.default.post(name: .terminalReset, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                
+                Divider()
+                
+                Button("Increase Font Size") {
+                    NotificationCenter.default.post(name: .terminalIncreaseFontSize, object: nil)
+                }
+                .keyboardShortcut("+", modifiers: .command)
+                
+                Button("Decrease Font Size") {
+                    NotificationCenter.default.post(name: .terminalDecreaseFontSize, object: nil)
+                }
+                .keyboardShortcut("-", modifiers: .command)
+                
+                Button("Reset Font Size") {
+                    NotificationCenter.default.post(name: .terminalResetFontSize, object: nil)
+                }
+                .keyboardShortcut("0", modifiers: .command)
+                
+                Divider()
+                
+                Button("Disconnect") {
+                    NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
+                }
+                .keyboardShortcut("w", modifiers: .command)
+            }
+            
+            CommandMenu("Connection") {
+                Button("New Connection") {
+                    NotificationCenter.default.post(name: .showNewConnection, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                
+                Button("Quick Connect") {
+                    NotificationCenter.default.post(name: .showQuickConnect, object: nil)
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
+        }
     }
+}
+
+// MARK: - Notification Names for Keyboard Shortcuts
+
+extension Notification.Name {
+    static let terminalClearScreen = Notification.Name("terminalClearScreen")
+    static let terminalReset = Notification.Name("terminalReset")
+    static let terminalIncreaseFontSize = Notification.Name("terminalIncreaseFontSize")
+    static let terminalDecreaseFontSize = Notification.Name("terminalDecreaseFontSize")
+    static let terminalResetFontSize = Notification.Name("terminalResetFontSize")
+    static let terminalDisconnect = Notification.Name("terminalDisconnect")
+    static let showNewConnection = Notification.Name("showNewConnection")
+    static let showQuickConnect = Notification.Name("showQuickConnect")
 }
 
 /// Global application state

@@ -160,27 +160,45 @@ extension Ghostty {
             # URL detection and hyperlinks
             link-url = true
             
+            # === TUI App Optimizations ===
+            # For apps like Yazi, kew, aichat, browsh, mpv
+            
+            # Kitty graphics protocol - enables image previews in Yazi, ranger, etc.
+            # 500MB limit for image-heavy workflows (default is 320MB)
+            image-storage-limit = 500000000
+            
+            # OSC 52 clipboard - allows remote apps to copy to local clipboard
+            clipboard-read = allow
+            clipboard-write = allow
+            
+            # Mouse reporting - essential for TUI navigation
+            # (enabled by default, but explicit for clarity)
+            
+            # Scrollback for reviewing output
+            scrollback-limit = 10000
+            
             \(themeConfig)
             """
         }
         
         /// Map user-friendly font names to Ghostty-compatible names
+        /// Ghostty uses CoreText font family names (not PostScript names)
         static func mapFontFamily(_ fontFamily: String) -> String {
             switch fontFamily {
             case "Departure Mono":
-                return "DepartureMono-Regular"
+                return "Departure Mono"
             case "JetBrains Mono":
-                return "JetBrainsMono-Regular"
+                return "JetBrains Mono"
             case "Fira Code":
-                return "FiraCode-Regular"
+                return "Fira Code"
             case "Hack":
-                return "Hack-Regular"
+                return "Hack"
             case "Source Code Pro":
-                return "SourceCodePro-Regular"
+                return "Source Code Pro"
             case "IBM Plex Mono":
-                return "IBMPlexMono-Regular"
+                return "IBM Plex Mono"
             case "Inconsolata":
-                return "Inconsolata-Regular"
+                return "Inconsolata"
             case "SF Mono":
                 return "SF Mono"
             case "Menlo":
@@ -868,6 +886,32 @@ extension Ghostty {
         /// Required: Can this view become first responder?
         override var canBecomeFirstResponder: Bool { true }
         
+        // MARK: - UITextInputTraits (stored properties for keyboard configuration)
+        
+        /// Disable autocorrection for terminal input
+        private var _autocorrectionType: UITextAutocorrectionType = .no
+        
+        /// Disable autocapitalization for terminal input
+        private var _autocapitalizationType: UITextAutocapitalizationType = .none
+        
+        /// Disable spell checking for terminal input
+        private var _spellCheckingType: UITextSpellCheckingType = .no
+        
+        /// Use ASCII keyboard as default
+        private var _keyboardType: UIKeyboardType = .asciiCapable
+        
+        /// Standard return key
+        private var _returnKeyType: UIReturnKeyType = .default
+        
+        /// Disable smart quotes for terminal
+        private var _smartQuotesType: UITextSmartQuotesType = .no
+        
+        /// Disable smart dashes for terminal
+        private var _smartDashesType: UITextSmartDashesType = .no
+        
+        /// Disable smart insert/delete for terminal
+        private var _smartInsertDeleteType: UITextSmartInsertDeleteType = .no
+        
         /// Required: Does the view have text? (Always yes for terminal)
         var hasText: Bool { true }
         
@@ -1001,17 +1045,18 @@ extension Ghostty {
             // Add long press gesture to START text selection
             let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
             longPressGesture.minimumPressDuration = 0.3
-            longPressGesture.delegate = self
+            // NOTE: Removed delegate to avoid gesture conflicts
             addGestureRecognizer(longPressGesture)
             
-            // Add single-finger pan gesture for scrolling (primary touch scroll)
-            let singleFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleSingleFingerScroll(_:)))
-            singleFingerScrollGesture.minimumNumberOfTouches = 1
-            singleFingerScrollGesture.maximumNumberOfTouches = 1
-            singleFingerScrollGesture.delegate = self
-            addGestureRecognizer(singleFingerScrollGesture)
+            // TEMPORARILY DISABLED: Single-finger scroll was conflicting with other gestures
+            // TODO: Re-enable once we figure out the scroll issue
+            // let singleFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleSingleFingerScroll(_:)))
+            // singleFingerScrollGesture.minimumNumberOfTouches = 1
+            // singleFingerScrollGesture.maximumNumberOfTouches = 1
+            // singleFingerScrollGesture.delegate = self
+            // addGestureRecognizer(singleFingerScrollGesture)
             
-            // Add two-finger pan gesture for scrolling (alternative)
+            // Add two-finger pan gesture for scrolling (original working gesture)
             let twoFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
             twoFingerScrollGesture.minimumNumberOfTouches = 2
             twoFingerScrollGesture.maximumNumberOfTouches = 2
@@ -1039,8 +1084,43 @@ extension Ghostty {
             // Setup scroll indicator
             setupScrollIndicator()
             
+            // Register for trait changes (dark/light mode)
+            registerForTraitChanges()
+            
             // Set initial color scheme based on current trait collection
             updateColorScheme()
+            
+            // Configure accessibility
+            setupAccessibility()
+        }
+        
+        // MARK: - Accessibility
+        
+        /// Configure accessibility for VoiceOver and other assistive technologies
+        private func setupAccessibility() {
+            isAccessibilityElement = true
+            accessibilityTraits = [.allowsDirectInteraction, .keyboardKey]
+            accessibilityLabel = "Terminal"
+            accessibilityHint = "SSH terminal connection. Double tap to focus and show keyboard."
+            
+            // Enable VoiceOver to read terminal output
+            accessibilityViewIsModal = true
+        }
+        
+        /// Update accessibility value with current terminal state
+        func updateAccessibilityValue() {
+            var value = ""
+            if let currentPwd = pwd {
+                value += "Current directory: \(currentPwd). "
+            }
+            if !title.isEmpty && title != "Terminal" {
+                value += "Title: \(title). "
+            }
+            if let scrollState = scrollbar, scrollState.total > scrollState.len {
+                let scrollPercent = Int(Double(scrollState.offset) / Double(scrollState.total - scrollState.len) * 100)
+                value += "Scrolled \(scrollPercent) percent. "
+            }
+            accessibilityValue = value.isEmpty ? nil : value
         }
         
         // MARK: - Dark Mode Support
@@ -1055,12 +1135,10 @@ extension Ghostty {
             logger.info("🎨 Color scheme set to: \(traitCollection.userInterfaceStyle == .dark ? "dark" : "light")")
         }
         
-        /// Called when iOS appearance changes (dark/light mode)
-        override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-            super.traitCollectionDidChange(previousTraitCollection)
-            
-            if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
-                updateColorScheme()
+        /// Register for trait changes using modern API (iOS 17+)
+        private func registerForTraitChanges() {
+            registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+                self.updateColorScheme()
             }
         }
         
@@ -1181,35 +1259,17 @@ extension Ghostty {
         /// Track accumulated scroll for gesture
         private var accumulatedScrollY: CGFloat = 0
         
-        /// Adaptive scroll settings
-        /// Base sensitivity for slow/precise scrolling
-        private let baseScrollSensitivity: CGFloat = 0.8
-        /// How much velocity amplifies scrolling (higher = faster scrolls go further)  
-        private let velocityAmplification: CGFloat = 0.002
-        /// Maximum multiplier to prevent runaway scrolling
-        private let maxScrollMultiplier: CGFloat = 4.0
-        /// Trackpad sensitivity (usually doesn't need velocity scaling)
-        private let trackpadScrollSensitivity: CGFloat = 1.0
-        
-        /// Calculate adaptive scroll amount based on gesture velocity
-        /// Slow movements = precise (1:1), fast movements = amplified
-        private func adaptiveScrollAmount(delta: CGFloat, velocity: CGFloat) -> CGFloat {
-            let absVelocity = abs(velocity)
-            // Scale from 1.0 (slow) up to maxScrollMultiplier (fast)
-            let velocityMultiplier = min(maxScrollMultiplier, 1.0 + absVelocity * velocityAmplification)
-            return delta * baseScrollSensitivity * velocityMultiplier
-        }
+        /// Simple scroll sensitivity (original value that worked)
+        private let scrollSensitivity: CGFloat = 0.5
         
         /// Handle two-finger touch scrolling
         @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
             guard let surface = surface else { return }
             
             let translation = gesture.translation(in: self)
-            let velocity = gesture.velocity(in: self)
             
             switch gesture.state {
             case .began:
-                stopScrollMomentum()
                 accumulatedScrollY = 0
                 
             case .changed:
@@ -1217,19 +1277,12 @@ extension Ghostty {
                 let deltaY = translation.y - accumulatedScrollY
                 accumulatedScrollY = translation.y
                 
-                // Adaptive: slow swipes are precise, fast swipes cover more ground
-                let scrollAmount = adaptiveScrollAmount(delta: deltaY, velocity: velocity.y)
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollAmount), 0)
+                // Send scroll to Ghostty (negative because pan down = scroll up in content)
+                let scrollY = -deltaY * scrollSensitivity
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
                 
-            case .ended:
+            case .ended, .cancelled:
                 accumulatedScrollY = 0
-                // Momentum based on release velocity - faster flick = more momentum
-                let momentumVelocity = velocity.y * baseScrollSensitivity * 0.15
-                startScrollMomentum(velocity: momentumVelocity)
-                
-            case .cancelled:
-                accumulatedScrollY = 0
-                stopScrollMomentum()
                 
             default:
                 break
@@ -1254,9 +1307,10 @@ extension Ghostty {
                 let deltaY = translation.y - accumulatedTrackpadScrollY
                 accumulatedTrackpadScrollY = translation.y
                 
-                // Trackpad uses natural scrolling (same direction as touch)
-                let scrollAmount = deltaY * trackpadScrollSensitivity
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollAmount), 0)
+                // Trackpad scrolling - natural scrolling direction
+                // (pan down = content moves down = scroll down in terminal)
+                let scrollY = deltaY * scrollSensitivity
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
                 
             case .ended, .cancelled:
                 accumulatedTrackpadScrollY = 0
@@ -1299,14 +1353,14 @@ extension Ghostty {
                 return
             }
             
-            // Apply scroll
+            // Apply scroll momentum
             ghostty_surface_mouse_scroll(surface, 0, Double(scrollVelocity), 0)
         }
         
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             NSLog("👆 Terminal tapped, becoming first responder")
             stopScrollMomentum()
-            becomeFirstResponder()
+            _ = becomeFirstResponder()
             
             // If Ctrl toggle is active, this tap should open a link
             if ctrlToggleActive, let surface = surface {
@@ -1431,7 +1485,6 @@ extension Ghostty {
             guard let surface = surface else { return }
             
             let translation = gesture.translation(in: self)
-            let velocity = gesture.velocity(in: self)
             
             switch gesture.state {
             case .began:
@@ -1443,17 +1496,11 @@ extension Ghostty {
                 let deltaY = translation.y - accumulatedSingleFingerScrollY
                 accumulatedSingleFingerScrollY = translation.y
                 
-                // Adaptive: slow = precise review, fast = rapid search
-                let scrollAmount = adaptiveScrollAmount(delta: deltaY, velocity: velocity.y)
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollAmount), 0)
+                // Send scroll to Ghostty (negative because pan down = scroll up in content)
+                let scrollY = -deltaY * scrollSensitivity
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
                 
-            case .ended:
-                accumulatedSingleFingerScrollY = 0
-                // Momentum based on release velocity
-                let momentumVelocity = velocity.y * baseScrollSensitivity * 0.15
-                startScrollMomentum(velocity: momentumVelocity)
-                
-            case .cancelled:
+            case .ended, .cancelled:
                 accumulatedSingleFingerScrollY = 0
                 stopScrollMomentum()
                 
@@ -1501,11 +1548,19 @@ extension Ghostty {
             }
         }
         
-        /// Show a copy menu at the given point
+        /// Edit menu interaction for copy/paste (iOS 16+)
+        private var editMenuInteraction: UIEditMenuInteraction?
+        
+        /// Show a copy menu at the given point using modern UIEditMenuInteraction
         private func showCopyMenu(at point: CGPoint) {
-            let menuController = UIMenuController.shared
-            let rect = CGRect(origin: point, size: CGSize(width: 1, height: 1))
-            menuController.showMenu(from: self, rect: rect)
+            // Create edit menu interaction if needed
+            if editMenuInteraction == nil {
+                editMenuInteraction = UIEditMenuInteraction(delegate: nil)
+                addInteraction(editMenuInteraction!)
+            }
+            
+            let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+            editMenuInteraction?.presentEditMenu(with: config)
         }
         
         /// Override canPerformAction to enable copy
@@ -1594,7 +1649,7 @@ extension Ghostty {
                 
                 // Handle keyboard key presses
                 if let key = press.key {
-                    NSLog("⌨️ pressesBegan: keyCode=\(key.keyCode.rawValue) chars='\(key.characters ?? "")'")
+                    NSLog("⌨️ pressesBegan: keyCode=\\(key.keyCode.rawValue) chars='\\(key.characters)'")
                     
                     // Get modifiers from the press event
                     var mods = ghosttyMods(from: key.modifierFlags)
@@ -1951,19 +2006,12 @@ extension Ghostty {
         /// This uses ghostty_surface_write_output which feeds data directly to the
         /// terminal emulator as if it came from a subprocess/PTY output.
         func feedData(_ data: Data) {
-            guard let surface = surface else {
-                NSLog("⚠️ feedData called but surface is nil!")
-                return
-            }
+            guard let surface = surface else { return }
             
-            NSLog("🖥️ feedData: sending %d bytes to ghostty_surface_write_output", data.count)
             data.withUnsafeBytes { buffer in
                 guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
-                // Use write_output to feed terminal output data (SSH -> terminal display)
-                // This is different from ghostty_surface_text which sends INPUT to subprocess
                 ghostty_surface_write_output(surface, ptr, UInt(data.count))
             }
-            NSLog("🖥️ feedData: ghostty_surface_write_output returned")
         }
         
         /// Feed a string to the terminal for display
@@ -2029,7 +2077,7 @@ extension Ghostty {
         func sendKey(_ key: ghostty_input_key_e, action: ghostty_input_action_e, mods: ghostty_input_mods_e) {
             guard let surface = surface else { return }
             
-            var keyEvent = ghostty_input_key_s(
+            let keyEvent = ghostty_input_key_s(
                 action: action,
                 mods: mods,
                 consumed_mods: GHOSTTY_MODS_NONE,
@@ -2413,11 +2461,21 @@ extension Ghostty {
             print("[Bodak] 📐 didMoveToWindow: window=\(window != nil ? "present" : "nil"), frame=\(frame)")
             sizeDidChange(frame.size)
             
-            // Automatically become first responder when added to a window
+            // Focus management: request keyboard focus when added to window
+            // Use RunLoop to ensure view is fully laid out first
             if window != nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                    NSLog("⌨️ Auto-focusing terminal")
-                    self?.becomeFirstResponder()
+                RunLoop.main.perform { [weak self] in
+                    guard let self = self, self.window != nil else { return }
+                    // Only become first responder if we're visible and in the window
+                    if !self.isFirstResponder {
+                        NSLog("⌨️ Requesting keyboard focus")
+                        _ = self.becomeFirstResponder()
+                    }
+                }
+            } else {
+                // Resign when removed from window to clean up keyboard
+                if self.isFirstResponder {
+                    _ = self.resignFirstResponder()
                 }
             }
         }
@@ -2435,6 +2493,53 @@ extension Ghostty {
                 CATransaction.commit()
             }
         }
+    }
+}
+
+// MARK: - UITextInputTraits Conformance
+
+extension Ghostty.SurfaceView: UITextInputTraits {
+    // These properties are required to be settable by the protocol
+    // but we use backing stored properties with computed accessors
+    
+    var autocorrectionType: UITextAutocorrectionType {
+        get { _autocorrectionType }
+        set { _autocorrectionType = newValue }
+    }
+    
+    var autocapitalizationType: UITextAutocapitalizationType {
+        get { _autocapitalizationType }
+        set { _autocapitalizationType = newValue }
+    }
+    
+    var spellCheckingType: UITextSpellCheckingType {
+        get { _spellCheckingType }
+        set { _spellCheckingType = newValue }
+    }
+    
+    var keyboardType: UIKeyboardType {
+        get { _keyboardType }
+        set { _keyboardType = newValue }
+    }
+    
+    var returnKeyType: UIReturnKeyType {
+        get { _returnKeyType }
+        set { _returnKeyType = newValue }
+    }
+    
+    var smartQuotesType: UITextSmartQuotesType {
+        get { _smartQuotesType }
+        set { _smartQuotesType = newValue }
+    }
+    
+    var smartDashesType: UITextSmartDashesType {
+        get { _smartDashesType }
+        set { _smartDashesType = newValue }
+    }
+    
+    var smartInsertDeleteType: UITextSmartInsertDeleteType {
+        get { _smartInsertDeleteType }
+        set { _smartInsertDeleteType = newValue }
     }
 }
 

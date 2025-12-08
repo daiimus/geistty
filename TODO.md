@@ -238,7 +238,7 @@ These are small improvements that would have big impact:
 - [x] Add Tab key to accessory bar (very common in terminal)
 - [x] Add pipe `|` and tilde `~` buttons (hard to type on iOS keyboard)
 - [x] Haptic feedback on Ctrl toggle activation
-- [ ] Visual indicator when Ctrl is active (pulsing or colored border)
+- [x] Visual indicator when Ctrl is active (pulsing orange border)
 
 ### Terminal UX
 - [x] Double-tap to select word
@@ -250,15 +250,18 @@ These are small improvements that would have big impact:
 
 ### Connection UX
 - [ ] Connection timeout setting
-- [ ] Retry connection button on disconnect
+- [x] Retry connection button on disconnect
 - [ ] "Keep alive" ping option
-- [ ] Show connection duration in header
+- [x] Show connection duration in header
 
 ### Polish
 - [ ] App icon (currently default)
 - [ ] Launch screen
 - [ ] Onboarding flow for first connection
-- [ ] Keyboard shortcut discoverability (Cmd+K menu on iPad)
+- [x] Keyboard shortcut discoverability (Cmd+hold menu on iPad)
+- [x] Keyboard shortcuts (Cmd+K clear, Cmd+N new, Cmd+O quick connect, Cmd++/- zoom)
+- [x] Dismiss keyboard button in toolbar
+- [x] Context menu: duplicate connection, copy host/connection string
 
 ---
 
