@@ -80,6 +80,7 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 - [x] **Hardware keyboard support**
   - [x] Arrow keys (up/down/left/right)
   - [x] Modifier keys (Ctrl+C, Ctrl+D, etc.)
+  - [x] Control character handling for external apps (tmux, vim, blightmud)
   - [x] Function keys (F1-F12)
   - [x] Home/End/PageUp/PageDown
   - [x] UIKey → macOS keycode mapping
@@ -87,6 +88,12 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Esc button
   - [x] Ctrl toggle button (sticky modifier)
   - [x] Arrow key buttons
+- [ ] **Additional keyboard improvements**
+  - [ ] Alt/Option modifier support (for vim, emacs)
+  - [ ] Tab key button in accessory bar
+  - [ ] Common symbols bar (~, |, `, etc.)
+  - [ ] Cmd+C/V for copy/paste (intercept and handle)
+  - [ ] Keyboard shortcuts help overlay
 
 ### Terminal Features
 - [x] **Copy/paste support**
@@ -100,9 +107,15 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 - [x] **Terminal environment auto-setup**
   - [x] xterm-ghostty preferred (falls back to xterm-256color)
   - [x] COLORTERM=truecolor injection for server compatibility
-- [ ] **Scrollback support** (if not already working)
-- [ ] **tmux support**
-  - [x] Ctrl+B prefix key handling (via Ctrl toggle)
+- [x] **Scrollback support**
+  - [x] Touch scrolling with adaptive velocity
+  - [x] Trackpad/mouse wheel support
+  - [x] Momentum scrolling
+  - [x] Scroll position indicator
+  - [ ] Fine-tune scroll sensitivity settings
+- [x] **tmux support**
+  - [x] Ctrl+B prefix key handling
+  - [x] Control character sequences working
   - [ ] Verify all escape sequences work correctly
   - [ ] Window/pane navigation testing
 
@@ -114,22 +127,20 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Quick Connect flow
   - [x] Favorites and recents tracking
   - [ ] iCloud sync for connection profiles
-- [x] **SSH Key Authentication (Infrastructure)**
+- [x] **SSH Key Authentication**
   - [x] Generate Ed25519 keys in-app (SSHKeyManager)
   - [x] Generate RSA keys (2048/4096 bit options)
   - [x] Keychain storage for keys
   - [x] Key management UI (SSHKeyListView)
   - [x] View/copy public key
-  - [ ] Import keys from Files app
+  - [x] Import keys from Files app (.pem, .key files)
   - [ ] Secure Enclave storage (planned, needs additional work)
-- [x] **Credential Provider System (Infrastructure)**
+- [x] **Credential Provider System**
   - [x] KeychainCredentialProvider (saved passwords)
   - [x] SSHKeyCredentialProvider (key-based auth)
   - [x] Unified CredentialManager for multiple sources
-  - [ ] 1Password integration (protocol ready, needs SDK)
-  - [ ] iCloud Keychain (protocol ready, needs ASAuthorizationController)
-  - [ ] LastPass (protocol ready, needs SDK)
-  - [ ] AutoFill support for password fields
+  - [x] Password entry at connection time (saved to Keychain)
+  - ~~1Password/LastPass integration~~ (Not possible on iOS - their SSH integration uses desktop SSH Agent, not available via iOS APIs. Export keys from password manager and import into Bodak via Files app)
 - [ ] **Connection status indicators**
 - [x] **Handle remote disconnect**
   - [x] Detect SSH channel EOF/close
@@ -194,7 +205,87 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 2. **Scale factor** - May need adjustment for Retina displays
 3. **Keyboard dismiss** - No explicit way to dismiss keyboard currently
 4. **Simulator performance** - Rendering may be slower on iOS Simulator vs real device (Metal emulation overhead). Test on physical device for accurate performance assessment.
-5. **Disconnect not detected** - When the remote host closes the SSH connection, the app doesn't detect it and navigate back. Need to handle EOF/channel close in the read loop.
+5. ~~**Disconnect not detected**~~ - Fixed: Now handles EOF/channel close and navigates back
+6. **Scroll sensitivity** - Touch scrolling may need per-user tuning (currently adaptive velocity)
+
+---
+
+## 🎯 Low-Hanging Fruit (Quick Wins)
+
+These are small improvements that would have big impact:
+
+### Input/Keyboard
+- [ ] Add Tab key to accessory bar (very common in terminal)
+- [ ] Add pipe `|` and tilde `~` buttons (hard to type on iOS keyboard)
+- [ ] Haptic feedback on Ctrl toggle activation
+- [ ] Visual indicator when Ctrl is active (pulsing or colored border)
+
+### Terminal UX
+- [ ] Double-tap to select word
+- [ ] Triple-tap to select line
+- [ ] Pinch to zoom (font size)
+- [ ] Shake to clear screen (send Ctrl+L)
+
+### Connection UX
+- [ ] Connection timeout setting
+- [ ] Retry connection button on disconnect
+- [ ] "Keep alive" ping option
+- [ ] Show connection duration in header
+
+### Polish
+- [ ] App icon (currently default)
+- [ ] Launch screen
+- [ ] Onboarding flow for first connection
+- [ ] Keyboard shortcut discoverability (Cmd+K menu on iPad)
+
+---
+
+## 🚀 AI Coding Tools Support (Cursor/Claude Code/Aider)
+
+Features that would make Bodak essential for developers using AI terminals:
+
+### Large Text Handling
+- [ ] **Paste large code blocks** - Handle multi-KB pastes without lag/truncation
+- [ ] **Bracketed paste mode** - Proper escape sequences for pasting into vim/editors
+- [ ] **Streaming output optimization** - Handle rapid AI output without flicker
+
+### Selection & Copying
+- [ ] **Select visible output** - Quick select last command output
+- [ ] **Select by regex/pattern** - Find and select code blocks
+- [ ] **Copy without line numbers** - Strip prompt prefixes when copying
+- [ ] **Copy as markdown** - Preserve code block formatting
+
+### Multi-Line Input
+- [ ] **Multi-line paste handling** - Don't execute each line separately
+- [ ] **Here-doc support** - Paste multi-line strings properly
+- [ ] **Input history** - Browse previous long commands
+
+### URL & Path Handling
+- [ ] **Clickable URLs** - Open links in browser
+- [ ] **Clickable file paths** - Quick actions (copy, open in Files)
+- [ ] **Error line detection** - Jump to file:line from stack traces
+
+### Session Management
+- [ ] **Session persistence** - Reconnect to tmux/screen automatically
+- [ ] **Multiple panes** - Split view for parallel AI sessions
+- [ ] **Session recording** - Save terminal session to file
+- [ ] **Quick switch** - Fast switching between multiple SSH connections
+
+### Search & Navigation
+- [ ] **Search in scrollback** - Find text in terminal history (Cmd+F)
+- [ ] **Jump to prompt** - Quick navigation between command prompts
+- [ ] **Semantic search** - Find by description ("that curl command")
+
+### Developer Quality of Life
+- [ ] **Syntax highlighting in output** - Detect and highlight code blocks
+- [ ] **JSON/YAML pretty print** - Auto-format structured output
+- [ ] **Diff highlighting** - Color git diffs properly
+- [ ] **Command palette** - Quick actions via Cmd+Shift+P
+
+### Clipboard Integration
+- [ ] **Clipboard history** - Access recent copies
+- [ ] **Smart paste** - Detect and handle different content types
+- [ ] **Share sheet** - Share terminal output via iOS share
 
 ---
 

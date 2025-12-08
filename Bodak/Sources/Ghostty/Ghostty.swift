@@ -203,6 +203,30 @@ extension Ghostty {
                 generator.notificationOccurred(.warning)
                 return true
                 
+            case GHOSTTY_ACTION_SCROLLBAR:
+                // Handle scrollbar update - extract surface from target
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                // Get the scrollbar data
+                let scrollbar = action.action.scrollbar
+                
+                // Find the SurfaceView associated with this surface
+                // The surface userdata points to the SurfaceView
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.updateScrollIndicator(
+                            total: scrollbar.total,
+                            offset: scrollbar.offset,
+                            len: scrollbar.len
+                        )
+                    }
+                }
+                return true
+                
             default:
                 return false
             }
@@ -213,9 +237,20 @@ extension Ghostty {
             location: ghostty_clipboard_e,
             state: UnsafeMutableRawPointer?
         ) {
-            // Read from clipboard and send to Ghostty
+            // Read from system clipboard and send to Ghostty
             guard let userdata = userdata else { return }
-            // TODO: Implement clipboard read
+            let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            guard let surface = surfaceView.surface else { return }
+            
+            // Get clipboard contents
+            let str = UIPasteboard.general.string ?? ""
+            
+            // Complete the clipboard request with the content
+            str.withCString { ptr in
+                ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
+            }
+            
+            logger.debug("📋 Read clipboard: \(str.prefix(50))...")
         }
         
         private static func confirmReadClipboard(
@@ -224,8 +259,26 @@ extension Ghostty {
             state: UnsafeMutableRawPointer?,
             request: ghostty_clipboard_request_e
         ) {
-            // Confirm clipboard read (for security)
-            // TODO: Implement confirmation dialog
+            // For security confirmation before pasting sensitive content
+            // On iOS, we auto-confirm since the system already handles clipboard permissions
+            guard let userdata = userdata else { return }
+            let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            guard let surface = surfaceView.surface else { return }
+            
+            // Get the string being requested
+            let str: String
+            if let cStr = string {
+                str = String(cString: cStr)
+            } else {
+                str = ""
+            }
+            
+            // Auto-confirm on iOS (the system already manages clipboard access)
+            str.withCString { ptr in
+                ghostty_surface_complete_clipboard_request(surface, ptr, state, true)
+            }
+            
+            logger.debug("📋 Confirmed clipboard read")
         }
         
         private static func writeClipboard(
@@ -323,6 +376,13 @@ extension Ghostty {
         
         /// Cell size for the terminal grid
         @Published var cellSize: CGSize = .zero
+        
+        /// Scrollbar state (total rows, offset, visible length)
+        @Published var scrollbar: (total: UInt64, offset: UInt64, len: UInt64)? = nil
+        
+        /// Scroll indicator view
+        private var scrollIndicator: UIView?
+        private var scrollIndicatorHideTimer: Timer?
         
         /// Whether the surface is healthy
         @Published var healthy: Bool = true
@@ -451,16 +511,24 @@ extension Ghostty {
             let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             addGestureRecognizer(tapGesture)
             
-            // Add long press + pan gesture for text selection
+            // Add long press gesture to START text selection
             let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
             longPressGesture.minimumPressDuration = 0.3
+            longPressGesture.delegate = self
             addGestureRecognizer(longPressGesture)
             
-            // Add two-finger pan gesture for touch scrolling
-            let scrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
-            scrollGesture.minimumNumberOfTouches = 2
-            scrollGesture.maximumNumberOfTouches = 2
-            addGestureRecognizer(scrollGesture)
+            // Add single-finger pan gesture for scrolling (primary touch scroll)
+            let singleFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleSingleFingerScroll(_:)))
+            singleFingerScrollGesture.minimumNumberOfTouches = 1
+            singleFingerScrollGesture.maximumNumberOfTouches = 1
+            singleFingerScrollGesture.delegate = self
+            addGestureRecognizer(singleFingerScrollGesture)
+            
+            // Add two-finger pan gesture for scrolling (alternative)
+            let twoFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+            twoFingerScrollGesture.minimumNumberOfTouches = 2
+            twoFingerScrollGesture.maximumNumberOfTouches = 2
+            addGestureRecognizer(twoFingerScrollGesture)
             
             // Add trackpad/mouse scroll gesture (indirect input like Magic Keyboard trackpad)
             let trackpadScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleTrackpadScroll(_:)))
@@ -476,6 +544,66 @@ extension Ghostty {
             // Add hover gesture for mouse movement tracking
             let hoverGesture = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
             addGestureRecognizer(hoverGesture)
+            
+            // Setup scroll indicator
+            setupScrollIndicator()
+        }
+        
+        // MARK: - Scroll Indicator
+        
+        private func setupScrollIndicator() {
+            let indicator = UIView()
+            indicator.backgroundColor = UIColor.white.withAlphaComponent(0.4)
+            indicator.layer.cornerRadius = 2
+            indicator.alpha = 0
+            indicator.frame = CGRect(x: bounds.width - 6, y: 0, width: 4, height: 40)
+            addSubview(indicator)
+            scrollIndicator = indicator
+        }
+        
+        /// Update scroll indicator based on scrollbar state
+        func updateScrollIndicator(total: UInt64, offset: UInt64, len: UInt64) {
+            scrollbar = (total, offset, len)
+            
+            guard let indicator = scrollIndicator else { return }
+            guard total > 0 else {
+                indicator.alpha = 0
+                return
+            }
+            
+            let viewHeight = bounds.height
+            let margin: CGFloat = 4
+            let availableHeight = viewHeight - (margin * 2)
+            
+            // Calculate indicator size and position
+            let indicatorHeight = max(20, availableHeight * CGFloat(len) / CGFloat(total))
+            let indicatorY = margin + (availableHeight - indicatorHeight) * CGFloat(offset) / CGFloat(max(1, total - len))
+            
+            // Position on right edge
+            indicator.frame = CGRect(
+                x: bounds.width - 6,
+                y: indicatorY,
+                width: 4,
+                height: indicatorHeight
+            )
+            
+            // Show indicator
+            showScrollIndicator()
+        }
+        
+        private func showScrollIndicator() {
+            scrollIndicatorHideTimer?.invalidate()
+            
+            UIView.animate(withDuration: 0.15) {
+                self.scrollIndicator?.alpha = 1
+            }
+            
+            // Hide after delay
+            scrollIndicatorHideTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                UIView.animate(withDuration: 0.3) {
+                    self?.scrollIndicator?.alpha = 0
+                }
+            }
         }
         
         // MARK: - UIPointerInteractionDelegate
@@ -511,21 +639,41 @@ extension Ghostty {
         /// Track scroll state for physics-based scrolling
         private var scrollDisplayLink: CADisplayLink?
         private var scrollVelocity: CGFloat = 0
-        private let scrollDeceleration: CGFloat = 0.95
-        private let scrollMinVelocity: CGFloat = 0.1
+        private let scrollDeceleration: CGFloat = 0.95  // Slower deceleration for smoother momentum
+        private let scrollMinVelocity: CGFloat = 0.3
         
         /// Track accumulated scroll for gesture
         private var accumulatedScrollY: CGFloat = 0
-        private let scrollSensitivity: CGFloat = 0.5
+        
+        /// Adaptive scroll settings
+        /// Base sensitivity for slow/precise scrolling
+        private let baseScrollSensitivity: CGFloat = 0.8
+        /// How much velocity amplifies scrolling (higher = faster scrolls go further)  
+        private let velocityAmplification: CGFloat = 0.002
+        /// Maximum multiplier to prevent runaway scrolling
+        private let maxScrollMultiplier: CGFloat = 4.0
+        /// Trackpad sensitivity (usually doesn't need velocity scaling)
+        private let trackpadScrollSensitivity: CGFloat = 1.0
+        
+        /// Calculate adaptive scroll amount based on gesture velocity
+        /// Slow movements = precise (1:1), fast movements = amplified
+        private func adaptiveScrollAmount(delta: CGFloat, velocity: CGFloat) -> CGFloat {
+            let absVelocity = abs(velocity)
+            // Scale from 1.0 (slow) up to maxScrollMultiplier (fast)
+            let velocityMultiplier = min(maxScrollMultiplier, 1.0 + absVelocity * velocityAmplification)
+            return delta * baseScrollSensitivity * velocityMultiplier
+        }
         
         /// Handle two-finger touch scrolling
         @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
             guard let surface = surface else { return }
             
             let translation = gesture.translation(in: self)
+            let velocity = gesture.velocity(in: self)
             
             switch gesture.state {
             case .began:
+                stopScrollMomentum()
                 accumulatedScrollY = 0
                 
             case .changed:
@@ -533,12 +681,19 @@ extension Ghostty {
                 let deltaY = translation.y - accumulatedScrollY
                 accumulatedScrollY = translation.y
                 
-                // Send scroll to Ghostty (negative because pan down = scroll up in content)
-                let scrollY = -deltaY * scrollSensitivity
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
+                // Adaptive: slow swipes are precise, fast swipes cover more ground
+                let scrollAmount = adaptiveScrollAmount(delta: deltaY, velocity: velocity.y)
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollAmount), 0)
                 
-            case .ended, .cancelled:
+            case .ended:
                 accumulatedScrollY = 0
+                // Momentum based on release velocity - faster flick = more momentum
+                let momentumVelocity = velocity.y * baseScrollSensitivity * 0.15
+                startScrollMomentum(velocity: momentumVelocity)
+                
+            case .cancelled:
+                accumulatedScrollY = 0
+                stopScrollMomentum()
                 
             default:
                 break
@@ -556,7 +711,6 @@ extension Ghostty {
             
             switch gesture.state {
             case .began:
-                NSLog("🖲️ Trackpad scroll began")
                 accumulatedTrackpadScrollY = 0
                 
             case .changed:
@@ -564,13 +718,11 @@ extension Ghostty {
                 let deltaY = translation.y - accumulatedTrackpadScrollY
                 accumulatedTrackpadScrollY = translation.y
                 
-                // Trackpad scrolling - natural scrolling direction
-                // (pan down = content moves down = scroll down in terminal)
-                let scrollY = deltaY * scrollSensitivity
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
+                // Trackpad uses natural scrolling (same direction as touch)
+                let scrollAmount = deltaY * trackpadScrollSensitivity
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollAmount), 0)
                 
             case .ended, .cancelled:
-                NSLog("🖲️ Trackpad scroll ended")
                 accumulatedTrackpadScrollY = 0
                 
             default:
@@ -578,8 +730,46 @@ extension Ghostty {
             }
         }
         
+        // MARK: - Momentum Scrolling
+        
+        private func startScrollMomentum(velocity: CGFloat) {
+            guard abs(velocity) > scrollMinVelocity else { return }
+            
+            scrollVelocity = velocity
+            
+            scrollDisplayLink?.invalidate()
+            scrollDisplayLink = CADisplayLink(target: self, selector: #selector(updateScrollMomentum))
+            scrollDisplayLink?.add(to: .main, forMode: .common)
+        }
+        
+        private func stopScrollMomentum() {
+            scrollDisplayLink?.invalidate()
+            scrollDisplayLink = nil
+            scrollVelocity = 0
+        }
+        
+        @objc private func updateScrollMomentum() {
+            guard let surface = surface else {
+                stopScrollMomentum()
+                return
+            }
+            
+            // Apply deceleration
+            scrollVelocity *= scrollDeceleration
+            
+            // Stop if velocity is too low
+            if abs(scrollVelocity) < scrollMinVelocity {
+                stopScrollMomentum()
+                return
+            }
+            
+            // Apply scroll
+            ghostty_surface_mouse_scroll(surface, 0, Double(scrollVelocity), 0)
+        }
+        
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             NSLog("👆 Terminal tapped, becoming first responder")
+            stopScrollMomentum()
             becomeFirstResponder()
         }
         
@@ -592,9 +782,59 @@ extension Ghostty {
             }
             return false
         }
+        
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Single finger pan should wait for long press to fail (so long press can trigger selection)
+            // But use a very short delay
+            if gestureRecognizer is UIPanGestureRecognizer && otherGestureRecognizer is UILongPressGestureRecognizer {
+                return false  // Don't wait - let pan start immediately, long press will cancel it if held
+            }
+            return false
+        }
 
         /// Track if we're in selection mode (from long press)
         private var isSelecting = false
+        
+        /// Track accumulated single-finger scroll
+        private var accumulatedSingleFingerScrollY: CGFloat = 0
+        
+        /// Handle single-finger pan for scrolling
+        @objc private func handleSingleFingerScroll(_ gesture: UIPanGestureRecognizer) {
+            // Don't scroll if we're selecting
+            guard !isSelecting else { return }
+            guard let surface = surface else { return }
+            
+            let translation = gesture.translation(in: self)
+            let velocity = gesture.velocity(in: self)
+            
+            switch gesture.state {
+            case .began:
+                stopScrollMomentum()
+                accumulatedSingleFingerScrollY = 0
+                
+            case .changed:
+                // Convert pan translation to scroll delta
+                let deltaY = translation.y - accumulatedSingleFingerScrollY
+                accumulatedSingleFingerScrollY = translation.y
+                
+                // Adaptive: slow = precise review, fast = rapid search
+                let scrollAmount = adaptiveScrollAmount(delta: deltaY, velocity: velocity.y)
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollAmount), 0)
+                
+            case .ended:
+                accumulatedSingleFingerScrollY = 0
+                // Momentum based on release velocity
+                let momentumVelocity = velocity.y * baseScrollSensitivity * 0.15
+                startScrollMomentum(velocity: momentumVelocity)
+                
+            case .cancelled:
+                accumulatedSingleFingerScrollY = 0
+                stopScrollMomentum()
+                
+            default:
+                break
+            }
+        }
         
         @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
             guard let surface = surface else { return }
@@ -801,6 +1041,23 @@ extension Ghostty {
         /// Send a hardware key event to Ghostty
         private func sendHardwareKey(_ key: UIKey, action: ghostty_input_action_e, mods: ghostty_input_mods_e) -> Bool {
             guard let surface = surface else { return false }
+            
+            // For Ctrl+key combinations on press, send control character directly
+            // This ensures apps like tmux, vim, blightmud receive proper control sequences
+            if action == GHOSTTY_ACTION_PRESS,
+               mods.rawValue & GHOSTTY_MODS_CTRL.rawValue != 0 {
+                let charsIgnoring = key.charactersIgnoringModifiers
+                if let char = charsIgnoring.unicodeScalars.first {
+                    let ctrlChar = controlCharacter(for: char, mods: mods)
+                    if !ctrlChar.isEmpty {
+                        NSLog("⌨️ HW Ctrl+\(charsIgnoring) -> \\x\(String(format: "%02X", ctrlChar.utf8.first ?? 0))")
+                        ctrlChar.withCString { ptr in
+                            ghostty_surface_text(surface, ptr, UInt(ctrlChar.utf8.count))
+                        }
+                        return true
+                    }
+                }
+            }
             
             // Map UIKey to macOS-style keycode for Ghostty
             guard let keycode = uikeyToKeycode(key) else {
@@ -1310,6 +1567,11 @@ extension Ghostty {
             super.layoutSubviews()
             print("[Bodak] 📐 layoutSubviews: bounds=\(bounds)")
             sizeDidChange(bounds.size)
+            
+            // Keep scroll indicator on right edge
+            if let indicator = scrollIndicator {
+                indicator.frame.origin.x = bounds.width - 6
+            }
         }
     }
 }
