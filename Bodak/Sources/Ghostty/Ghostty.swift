@@ -118,6 +118,8 @@ extension Ghostty {
             let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
             let ghosttyFontFamily = mapFontFamily(fontFamily)
             
+            logger.info("📝 Creating config string with font: \(fontFamily) -> \(ghosttyFontFamily)")
+            
             return """
             font-family = "\(ghosttyFontFamily)"
             background-opacity = 1.0
@@ -2069,15 +2071,21 @@ extension Ghostty {
                 return
             }
             
+            // Log current state before update
+            let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
+            logger.info("🔧 updateConfig called - current font preference: \(fontFamily)")
+            
             // Create a new config with current user preferences
             guard let newConfig = Config.createConfigWithCurrentSettings() else {
                 logger.error("Failed to create new config for update")
                 return
             }
             
+            logger.info("🔧 Applying new config to surface...")
+            
             // Apply the new config to the surface
             ghostty_surface_update_config(surface, newConfig)
-            logger.info("✅ Updated surface config")
+            logger.info("✅ Updated surface config with font: \(fontFamily)")
             
             // Free the config after applying (Ghostty makes a copy)
             ghostty_config_free(newConfig)
