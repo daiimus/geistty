@@ -169,6 +169,18 @@ extension Ghostty {
             switch fontFamily {
             case "Departure Mono":
                 return "DepartureMono-Regular"
+            case "JetBrains Mono":
+                return "JetBrainsMono-Regular"
+            case "Fira Code":
+                return "FiraCode-Regular"
+            case "Hack":
+                return "Hack-Regular"
+            case "Source Code Pro":
+                return "SourceCodePro-Regular"
+            case "IBM Plex Mono":
+                return "IBMPlexMono-Regular"
+            case "Inconsolata":
+                return "Inconsolata-Regular"
             case "SF Mono":
                 return "SF Mono"
             case "Menlo":
