@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "Bodak",
+			"path": "."
+		},
+		{
+			"name": "ghostty",
+			"path": "../ghostty"
+		},
+		{
+			"name": "libxev-ios",
+			"path": "../libxev-ios"
+		}
+	],
+	"settings": {}
+}

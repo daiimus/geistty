@@ -1,0 +1,4 @@
+module GhosttyKit {
+    umbrella header "ghostty.h"
+    export *
+}
