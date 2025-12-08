@@ -79,24 +79,12 @@ extension Ghostty {
         
         /// Write a Ghostty config file with the user's preferences
         /// This file will be loaded when we have the updated Ghostty library
-        private static func writeConfigFile() {
+        static func writeConfigFile() {
             // Get font family from user defaults
             let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
             
             // Map font family names to Ghostty-compatible names
-            let ghosttyFontFamily: String
-            switch fontFamily {
-            case "Departure Mono":
-                ghosttyFontFamily = "DepartureMono-Regular"
-            case "SF Mono":
-                ghosttyFontFamily = "SF Mono"
-            case "Menlo":
-                ghosttyFontFamily = "Menlo"
-            case "Courier New":
-                ghosttyFontFamily = "Courier New"
-            default:
-                ghosttyFontFamily = fontFamily
-            }
+            let ghosttyFontFamily = mapFontFamily(fontFamily)
             
             // Build config file content
             var configContent = """
@@ -123,6 +111,57 @@ extension Ghostty {
             } catch {
                 logger.error("Failed to write Ghostty config: \(error)")
             }
+        }
+        
+        /// Map user-friendly font names to Ghostty-compatible names
+        static func mapFontFamily(_ fontFamily: String) -> String {
+            switch fontFamily {
+            case "Departure Mono":
+                return "DepartureMono-Regular"
+            case "SF Mono":
+                return "SF Mono"
+            case "Menlo":
+                return "Menlo"
+            case "Courier New":
+                return "Courier New"
+            default:
+                return fontFamily
+            }
+        }
+        
+        /// Create a new config with the current user preferences
+        /// Returns nil if config creation fails
+        static func createConfigWithCurrentSettings() -> ghostty_config_t? {
+            guard let cfg = ghostty_config_new() else {
+                logger.error("Failed to create new config")
+                return nil
+            }
+            
+            // Write the config file first
+            writeConfigFile()
+            
+            // Try to load the config file using the new API
+            // Note: This will fail silently if the library doesn't have the API yet
+            let path = configFilePath.path
+            path.withCString { cstr in
+                // This will be a linker error if the API isn't available
+                // For now we'll use dlsym to check if it exists
+                if let loadFile = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "ghostty_config_load_file") {
+                    typealias LoadFileFn = @convention(c) (ghostty_config_t, UnsafePointer<CChar>, UInt) -> Bool
+                    let fn = unsafeBitCast(loadFile, to: LoadFileFn.self)
+                    let loaded = fn(cfg, cstr, UInt(path.utf8.count))
+                    if loaded {
+                        logger.info("Loaded config from: \(path)")
+                    } else {
+                        logger.warning("Failed to load config from: \(path)")
+                    }
+                } else {
+                    logger.warning("ghostty_config_load_file not available in library")
+                }
+            }
+            
+            ghostty_config_finalize(cfg)
+            return cfg
         }
         
         deinit {
@@ -2023,6 +2062,28 @@ extension Ghostty {
                 currentFontSize = Self.defaultFontSize
                 logger.info("🔍 Font size reset to \(currentFontSize)")
             }
+        }
+        
+        /// Update the terminal configuration (e.g., font family)
+        /// This creates a new config with current settings and applies it to the surface
+        func updateConfig() {
+            guard let surface = surface else {
+                logger.warning("Cannot update config: surface is nil")
+                return
+            }
+            
+            // Create a new config with current user preferences
+            guard let newConfig = Config.createConfigWithCurrentSettings() else {
+                logger.error("Failed to create new config for update")
+                return
+            }
+            
+            // Apply the new config to the surface
+            ghostty_surface_update_config(surface, newConfig)
+            logger.info("✅ Updated surface config")
+            
+            // Free the config after applying (Ghostty makes a copy)
+            ghostty_config_free(newConfig)
         }
         
         /// Handle pinch gesture for zooming font size
