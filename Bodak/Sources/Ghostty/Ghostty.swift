@@ -51,6 +51,12 @@ extension Ghostty {
     class Config {
         private(set) var config: ghostty_config_t
         
+        /// Path to the Ghostty config file in the app's documents directory
+        static var configFilePath: URL {
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            return documentsPath.appendingPathComponent("ghostty.conf")
+        }
+        
         /// Background color from config (default to dark)
         var backgroundColor: UIColor {
             // TODO: Read from actual config once we parse it
@@ -63,7 +69,60 @@ extension Ghostty {
                 return nil
             }
             config = cfg
+            
+            // Write config file with user preferences
+            // Note: Loading requires rebuilding the Ghostty static library with the new API
+            Self.writeConfigFile()
+            
             ghostty_config_finalize(config)
+        }
+        
+        /// Write a Ghostty config file with the user's preferences
+        /// This file will be loaded when we have the updated Ghostty library
+        private static func writeConfigFile() {
+            // Get font family from user defaults
+            let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
+            
+            // Map font family names to Ghostty-compatible names
+            let ghosttyFontFamily: String
+            switch fontFamily {
+            case "Departure Mono":
+                ghosttyFontFamily = "DepartureMono-Regular"
+            case "SF Mono":
+                ghosttyFontFamily = "SF Mono"
+            case "Menlo":
+                ghosttyFontFamily = "Menlo"
+            case "Courier New":
+                ghosttyFontFamily = "Courier New"
+            default:
+                ghosttyFontFamily = fontFamily
+            }
+            
+            // Build config file content
+            var configContent = """
+            # Bodak Terminal Configuration
+            # This file is auto-generated from app settings
+            
+            font-family = "\(ghosttyFontFamily)"
+            
+            """
+            
+            // Add any other config options here
+            configContent += """
+            # Terminal appearance
+            background-opacity = 1.0
+            window-padding-x = 4
+            window-padding-y = 4
+            
+            """
+            
+            // Write to file
+            do {
+                try configContent.write(to: configFilePath, atomically: true, encoding: .utf8)
+                logger.info("Wrote Ghostty config to: \(configFilePath.path)")
+            } catch {
+                logger.error("Failed to write Ghostty config: \(error)")
+            }
         }
         
         deinit {
