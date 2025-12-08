@@ -17,6 +17,11 @@ class AppSettings: ObservableObject {
     @AppStorage("terminal.cursorStyle") var cursorStyle: String = "block"
     @AppStorage("terminal.fontFamily") var fontFamily: String = "SF Mono"
     
+    // MARK: - Font Rendering Settings
+    
+    @AppStorage("terminal.fontThicken") var fontThicken: Bool = true
+    @AppStorage("terminal.fontThickenStrength") var fontThickenStrength: Int = 255
+    
     // MARK: - UI Settings
     
     @AppStorage("ui.autoHideChrome") var autoHideChrome: Bool = true
@@ -50,27 +55,28 @@ class AppSettings: ObservableObject {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     
     // Font size control - passed from terminal
     var currentFontSize: Int
-    var onIncreaseFontSize: () -> Void
-    var onDecreaseFontSize: () -> Void
+    var onFontSizeChanged: (Int) -> Void
     var onResetFontSize: () -> Void
     var onFontFamilyChanged: () -> Void
+    var onThemeChanged: () -> Void
     
     // Default initializer for preview
     init(
         currentFontSize: Int = 14,
-        onIncreaseFontSize: @escaping () -> Void = {},
-        onDecreaseFontSize: @escaping () -> Void = {},
+        onFontSizeChanged: @escaping (Int) -> Void = { _ in },
         onResetFontSize: @escaping () -> Void = {},
-        onFontFamilyChanged: @escaping () -> Void = {}
+        onFontFamilyChanged: @escaping () -> Void = {},
+        onThemeChanged: @escaping () -> Void = {}
     ) {
         self.currentFontSize = currentFontSize
-        self.onIncreaseFontSize = onIncreaseFontSize
-        self.onDecreaseFontSize = onDecreaseFontSize
+        self.onFontSizeChanged = onFontSizeChanged
         self.onResetFontSize = onResetFontSize
         self.onFontFamilyChanged = onFontFamilyChanged
+        self.onThemeChanged = onThemeChanged
     }
     
     var body: some View {
@@ -79,16 +85,15 @@ struct SettingsView: View {
                 // Color Theme
                 Section {
                     NavigationLink {
-                        ThemePickerView(selectedTheme: $settings.colorTheme)
+                        ThemePickerView(onThemeChanged: onThemeChanged)
                     } label: {
                         HStack {
                             Text("Color Theme")
                             Spacer()
-                            Text(settings.colorTheme)
-                                .foregroundStyle(.secondary)
+                            ThemePreviewStrip(theme: themeManager.selectedTheme)
+                                .frame(width: 80)
                         }
                     }
-                    .disabled(true) // Not yet implemented
                 }
                 
                 // Cursor Style
@@ -125,38 +130,57 @@ struct SettingsView: View {
                     Text("Font changes apply immediately to the current terminal.")
                 }
                 
-                // Font Size - Live control!
+                // Font Size - Live control with slider
                 Section {
-                    HStack {
-                        Text("Font Size: \(currentFontSize)")
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Font Size")
+                            Spacer()
+                            Text("\(currentFontSize) pt")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                         
-                        HStack(spacing: 0) {
-                            Button {
-                                onDecreaseFontSize()
-                            } label: {
-                                Image(systemName: "minus")
-                                    .frame(width: 44, height: 36)
-                            }
-                            .buttonStyle(.bordered)
+                        HStack(spacing: 12) {
+                            Image(systemName: "textformat.size.smaller")
+                                .foregroundStyle(.secondary)
                             
-                            Divider()
-                                .frame(height: 20)
+                            Slider(
+                                value: Binding(
+                                    get: { Double(currentFontSize) },
+                                    set: { newValue in
+                                        let newSize = Int(newValue.rounded())
+                                        if newSize != currentFontSize {
+                                            onFontSizeChanged(newSize)
+                                        }
+                                    }
+                                ),
+                                in: 8...32,
+                                step: 1
+                            )
                             
-                            Button {
-                                onIncreaseFontSize()
-                            } label: {
-                                Image(systemName: "plus")
-                                    .frame(width: 44, height: 36)
-                            }
-                            .buttonStyle(.bordered)
+                            Image(systemName: "textformat.size.larger")
+                                .foregroundStyle(.secondary)
                         }
                     }
+                    .padding(.vertical, 4)
                     
-                    Button("Reset to Default") {
+                    Button("Reset to Default (14 pt)") {
                         onResetFontSize()
                     }
                     .foregroundStyle(.blue)
+                }
+                
+                // Font Rendering - DPI/text quality options
+                Section {
+                    Toggle("Thicken Font Strokes", isOn: $settings.fontThicken)
+                        .onChange(of: settings.fontThicken) { _, _ in
+                            onFontFamilyChanged() // Triggers config reload
+                        }
+                } header: {
+                    Text("Text Rendering")
+                } footer: {
+                    Text("Makes font strokes slightly thicker for improved readability on Retina displays.")
                 }
                 
                 // Interface
@@ -174,12 +198,43 @@ struct SettingsView: View {
                     }
                 }
                 
+                // iCloud Sync
+                Section {
+                    HStack {
+                        Image(systemName: ConnectionProfileManager.shared.iCloudSyncEnabled ? "icloud.fill" : "icloud.slash")
+                            .foregroundStyle(ConnectionProfileManager.shared.iCloudSyncEnabled ? .blue : .secondary)
+                        Text("iCloud Sync")
+                        Spacer()
+                        Text(ConnectionProfileManager.shared.iCloudSyncEnabled ? "Enabled" : "Not Available")
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    if ConnectionProfileManager.shared.iCloudSyncEnabled {
+                        Button {
+                            ConnectionProfileManager.shared.forceiCloudSync()
+                        } label: {
+                            HStack {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text("Sync Now")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Sync")
+                } footer: {
+                    if ConnectionProfileManager.shared.iCloudSyncEnabled {
+                        Text("Connection profiles sync automatically across your devices.")
+                    } else {
+                        Text("Sign in to iCloud in Settings to sync connection profiles across devices.")
+                    }
+                }
+                
                 // About
                 Section("About") {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text("0.2.0")
                             .foregroundStyle(.secondary)
                     }
                     
@@ -207,30 +262,122 @@ struct SettingsView: View {
 // MARK: - Theme Picker
 
 struct ThemePickerView: View {
-    @Binding var selectedTheme: String
+    @ObservedObject private var themeManager = ThemeManager.shared
+    var onThemeChanged: () -> Void
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         List {
-            ForEach(AppSettings.colorThemes, id: \.self) { theme in
-                Button {
-                    selectedTheme = theme
-                    dismiss()
-                } label: {
-                    HStack {
-                        Text(theme)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        if selectedTheme == theme {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
+            // Light themes section
+            Section("Light Themes") {
+                ForEach(themeManager.themes.filter { $0.isLightTheme }) { theme in
+                    ThemeRow(
+                        theme: theme,
+                        isSelected: themeManager.selectedTheme.id == theme.id,
+                        onSelect: {
+                            themeManager.selectTheme(theme)
+                            onThemeChanged()
                         }
-                    }
+                    )
+                }
+            }
+            
+            // Dark themes section
+            Section("Dark Themes") {
+                ForEach(themeManager.themes.filter { !$0.isLightTheme }) { theme in
+                    ThemeRow(
+                        theme: theme,
+                        isSelected: themeManager.selectedTheme.id == theme.id,
+                        onSelect: {
+                            themeManager.selectTheme(theme)
+                            onThemeChanged()
+                        }
+                    )
                 }
             }
         }
         .navigationTitle("Color Theme")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// A single row in the theme picker showing theme name and color preview
+struct ThemeRow: View {
+    let theme: TerminalTheme
+    let isSelected: Bool
+    let onSelect: () -> Void
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 12) {
+                // Theme name
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(theme.name)
+                        .foregroundStyle(.primary)
+                        .font(.body)
+                    
+                    // Background/foreground indicator
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(theme.background)
+                            .frame(width: 12, height: 12)
+                            .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 0.5))
+                        Circle()
+                            .fill(theme.foreground)
+                            .frame(width: 12, height: 12)
+                            .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 0.5))
+                    }
+                }
+                
+                Spacer()
+                
+                // Color palette preview
+                ThemePreviewStrip(theme: theme)
+                    .frame(width: 100)
+                
+                // Selection checkmark
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.blue)
+                        .fontWeight(.semibold)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+}
+
+/// Horizontal strip showing the 16-color palette
+struct ThemePreviewStrip: View {
+    let theme: TerminalTheme
+    
+    var body: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                // Show colors 0-7 (normal) on top row appearance
+                ForEach(0..<8, id: \.self) { index in
+                    Rectangle()
+                        .fill(theme.palette[index])
+                }
+            }
+            .frame(height: geometry.size.height / 2)
+            .overlay(alignment: .bottom) {
+                HStack(spacing: 0) {
+                    // Show colors 8-15 (bright) on bottom row
+                    ForEach(8..<16, id: \.self) { index in
+                        Rectangle()
+                            .fill(theme.palette[index])
+                    }
+                }
+                .frame(height: geometry.size.height / 2)
+            }
+        }
+        .frame(height: 24)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
+        )
     }
 }
 
@@ -280,5 +427,11 @@ struct FontPickerView: View {
 }
 
 #Preview {
-    SettingsView()
+    SettingsView(
+        currentFontSize: 14,
+        onFontSizeChanged: { _ in },
+        onResetFontSize: {},
+        onFontFamilyChanged: {},
+        onThemeChanged: {}
+    )
 }

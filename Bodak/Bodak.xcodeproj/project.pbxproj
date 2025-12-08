@@ -10,6 +10,8 @@
 		A1000001 /* BodakApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* BodakApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
+		A1000060 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* Theme.swift */; };
+		A1000061 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* Themes */; };
 		A1000004 /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* SSHSession.swift */; };
 		A1000005 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* SSHConnection.swift */; };
 		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
@@ -64,6 +66,8 @@
 		A2000040 /* SFTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPClient.swift; sourceTree = "<group>"; };
 		A2000041 /* SFTPBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPBrowserView.swift; sourceTree = "<group>"; };
 		A2000050 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A2000060 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A2000061 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -118,6 +122,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000003 /* TerminalContainerView.swift */,
+				A2000060 /* Theme.swift */,
 			);
 			path = Terminal;
 			sourceTree = "<group>";
@@ -190,6 +195,7 @@
 			isa = PBXGroup;
 			children = (
 				A5000013 /* Fonts */,
+				A2000061 /* Themes */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -269,6 +275,7 @@
 			files = (
 				A1000006 /* Assets.xcassets in Resources */,
 				A1000007 /* DepartureMono-Regular.otf in Resources */,
+				A1000061 /* Themes in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -295,6 +302,7 @@
 				A1000040 /* SFTPClient.swift in Sources */,
 				A1000041 /* SFTPBrowserView.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
+				A1000060 /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -424,7 +432,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Bodak.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = DPF76SZNJB;
@@ -462,7 +471,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Bodak.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = DPF76SZNJB;
