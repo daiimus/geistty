@@ -7,6 +7,7 @@
 
 import Foundation
 import AuthenticationServices
+import UIKit
 import os.log
 
 private let logger = Logger(subsystem: "com.bodak", category: "Credentials")
@@ -77,52 +78,139 @@ class SSHKeyCredentialProvider: CredentialProvider {
     }
 }
 
-// MARK: - iCloud Keychain Provider (via ASAuthorizationController)
+// MARK: - Password AutoFill Provider (1Password, iCloud Keychain, etc.)
 
-/// Provides credentials from iCloud Keychain using system UI
-class iCloudKeychainProvider: CredentialProvider {
+/// Provides credentials via iOS Password AutoFill
+/// This integrates with 1Password, iCloud Keychain, and other password managers
+class PasswordAutoFillProvider: CredentialProvider {
     
     var isAvailable: Bool { true }
-    var displayName: String { "iCloud Keychain" }
+    var displayName: String { "Password Manager" }
+    
+    private var presentingViewController: UIViewController?
+    
+    init(presentingViewController: UIViewController? = nil) {
+        self.presentingViewController = presentingViewController
+    }
     
     func getCredentials(for host: String, username: String) async throws -> SSHCredential {
-        // This uses the system's password autofill
-        // In a real implementation, you'd present ASAuthorizationController
-        
         return try await withCheckedThrowingContinuation { continuation in
-            // TODO: Implement ASAuthorizationController flow
-            // For now, throw an error indicating this needs to be implemented
-            continuation.resume(throwing: CredentialError.notImplemented)
+            DispatchQueue.main.async { [weak self] in
+                self?.requestCredentials(host: host, username: username, continuation: continuation)
+            }
+        }
+    }
+    
+    @MainActor
+    private func requestCredentials(
+        host: String,
+        username: String,
+        continuation: CheckedContinuation<SSHCredential, Error>
+    ) {
+        // Get the presenting view controller
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootVC = window.rootViewController else {
+            continuation.resume(throwing: CredentialError.noPresentingViewController)
+            return
+        }
+        
+        let presenter = presentingViewController ?? rootVC.presentedViewController ?? rootVC
+        
+        // Create the authorization request
+        let passwordProvider = ASAuthorizationPasswordProvider()
+        let request = passwordProvider.createRequest()
+        
+        // Create the controller
+        let controller = ASAuthorizationController(authorizationRequests: [request])
+        
+        // Create delegate to handle result
+        let delegate = PasswordAuthDelegate(host: host, username: username, continuation: continuation)
+        controller.delegate = delegate
+        controller.presentationContextProvider = PasswordPresentationContext(anchor: presenter)
+        
+        // Store delegate to prevent deallocation
+        objc_setAssociatedObject(controller, "delegate", delegate, .OBJC_ASSOCIATION_RETAIN)
+        
+        // Perform the request
+        controller.performRequests()
+    }
+}
+
+// MARK: - ASAuthorizationController Delegate
+
+private class PasswordAuthDelegate: NSObject, ASAuthorizationControllerDelegate {
+    let host: String
+    let username: String
+    var continuation: CheckedContinuation<SSHCredential, Error>?
+    
+    init(host: String, username: String, continuation: CheckedContinuation<SSHCredential, Error>) {
+        self.host = host
+        self.username = username
+        self.continuation = continuation
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let continuation = continuation else { return }
+        self.continuation = nil  // Prevent double-resume
+        
+        if let credential = authorization.credential as? ASPasswordCredential {
+            let password = credential.password
+            let retrievedUsername = credential.user
+            
+            logger.info("✅ Got password from AutoFill for user: \(retrievedUsername)")
+            
+            continuation.resume(returning: SSHCredential(
+                authType: .password(password),
+                source: "Password AutoFill"
+            ))
+        } else {
+            continuation.resume(throwing: CredentialError.unsupportedCredentialType)
+        }
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        guard let continuation = continuation else { return }
+        self.continuation = nil  // Prevent double-resume
+        
+        logger.error("❌ AutoFill error: \(error.localizedDescription)")
+        
+        if let authError = error as? ASAuthorizationError {
+            switch authError.code {
+            case .canceled:
+                continuation.resume(throwing: CredentialError.cancelled)
+            case .failed:
+                continuation.resume(throwing: CredentialError.autoFillFailed(error.localizedDescription))
+            case .notHandled:
+                continuation.resume(throwing: CredentialError.autoFillNotAvailable)
+            case .invalidResponse:
+                continuation.resume(throwing: CredentialError.invalidResponse)
+            case .unknown:
+                continuation.resume(throwing: CredentialError.autoFillFailed(error.localizedDescription))
+            case .notInteractive:
+                continuation.resume(throwing: CredentialError.autoFillFailed("Not interactive"))
+            case .matchedExcludedCredential:
+                continuation.resume(throwing: CredentialError.autoFillFailed("Credential excluded"))
+            @unknown default:
+                continuation.resume(throwing: CredentialError.autoFillFailed(error.localizedDescription))
+            }
+        } else {
+            continuation.resume(throwing: error)
         }
     }
 }
 
-// MARK: - 1Password Provider
+// MARK: - Presentation Context
 
-/// Provides credentials from 1Password
-class OnePasswordProvider: CredentialProvider {
+private class PasswordPresentationContext: NSObject, ASAuthorizationControllerPresentationContextProviding {
+    let anchor: UIViewController
     
-    var isAvailable: Bool {
-        // Check if 1Password is installed
-        // Could also check for 1Password SDK availability
-        return UIApplication.shared.canOpenURL(URL(string: "onepassword://")!)
+    init(anchor: UIViewController) {
+        self.anchor = anchor
     }
     
-    var displayName: String { "1Password" }
-    
-    func getCredentials(for host: String, username: String) async throws -> SSHCredential {
-        // 1Password integration options:
-        // 1. Use 1Password SDK (requires CocoaPods/SPM integration)
-        // 2. Use 1Password URL scheme
-        // 3. Use AutoFill via ASCredentialProviderViewController
-        
-        // For now, we'll use the URL scheme approach
-        guard isAvailable else {
-            throw CredentialError.providerNotAvailable("1Password")
-        }
-        
-        // TODO: Implement 1Password URL scheme or SDK integration
-        throw CredentialError.notImplemented
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        return anchor.view.window!
     }
 }
 
@@ -145,8 +233,7 @@ class CredentialManager: ObservableObject {
         providers = [
             KeychainCredentialProvider(),
             SSHKeyCredentialProvider(),
-            iCloudKeychainProvider(),
-            OnePasswordProvider()
+            PasswordAutoFillProvider()  // Unified provider for 1Password, iCloud Keychain, etc.
         ].filter { $0.isAvailable }
     }
     
@@ -162,8 +249,15 @@ class CredentialManager: ObservableObject {
     func getCredentials(for profile: ConnectionProfile) async throws -> SSHCredential {
         switch profile.authMethod {
         case .password:
-            let provider = KeychainCredentialProvider()
-            return try await provider.getCredentials(for: profile.host, username: profile.username)
+            // Try saved keychain first, fall back to autofill
+            do {
+                let provider = KeychainCredentialProvider()
+                return try await provider.getCredentials(for: profile.host, username: profile.username)
+            } catch {
+                // Password not saved, try autofill
+                let provider = PasswordAutoFillProvider()
+                return try await provider.getCredentials(for: profile.host, username: profile.username)
+            }
             
         case .sshKey:
             guard let keyName = profile.sshKeyName else {
@@ -173,21 +267,18 @@ class CredentialManager: ObservableObject {
             return try await provider.getCredentials(for: profile.host, username: profile.username)
             
         case .passwordManager:
-            guard let pmProvider = profile.passwordManagerProvider else {
-                throw CredentialError.noProviderSelected
-            }
-            
-            switch pmProvider {
-            case .icloudKeychain:
-                let provider = iCloudKeychainProvider()
-                return try await provider.getCredentials(for: profile.host, username: profile.username)
-            case .onePassword:
-                let provider = OnePasswordProvider()
-                return try await provider.getCredentials(for: profile.host, username: profile.username)
-            case .lastPass:
-                throw CredentialError.notImplemented
-            }
+            // Use the unified Password AutoFill provider
+            // This shows the iOS credential picker with 1Password, iCloud Keychain, etc.
+            let provider = PasswordAutoFillProvider()
+            return try await provider.getCredentials(for: profile.host, username: profile.username)
         }
+    }
+    
+    /// Request credentials via AutoFill (shows system credential picker)
+    /// This integrates with 1Password, iCloud Keychain, and other password managers
+    func requestCredentialsViaAutoFill(for host: String, username: String) async throws -> SSHCredential {
+        let provider = PasswordAutoFillProvider()
+        return try await provider.getCredentials(for: host, username: username)
     }
     
     /// Save password to Keychain for a profile
@@ -204,6 +295,11 @@ enum CredentialError: LocalizedError {
     case noKeySelected
     case noProviderSelected
     case cancelled
+    case noPresentingViewController
+    case unsupportedCredentialType
+    case autoFillNotAvailable
+    case autoFillFailed(String)
+    case invalidResponse
     
     var errorDescription: String? {
         switch self {
@@ -217,6 +313,16 @@ enum CredentialError: LocalizedError {
             return "No password manager selected"
         case .cancelled:
             return "Authentication cancelled"
+        case .noPresentingViewController:
+            return "Cannot present credential picker"
+        case .unsupportedCredentialType:
+            return "Unsupported credential type received"
+        case .autoFillNotAvailable:
+            return "Password AutoFill is not available"
+        case .autoFillFailed(let reason):
+            return "Password AutoFill failed: \(reason)"
+        case .invalidResponse:
+            return "Invalid response from credential provider"
         }
     }
 }
