@@ -13,7 +13,6 @@ class AppSettings: ObservableObject {
     
     // MARK: - Terminal Settings
     
-    @AppStorage("terminal.fontSize") var fontSize: Int = 14
     @AppStorage("terminal.colorTheme") var colorTheme: String = "Default"
     @AppStorage("terminal.cursorStyle") var cursorStyle: String = "block"
     @AppStorage("terminal.fontFamily") var fontFamily: String = "SF Mono"
@@ -49,6 +48,25 @@ class AppSettings: ObservableObject {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = AppSettings.shared
+    
+    // Font size control - passed from terminal
+    var currentFontSize: Int
+    var onIncreaseFontSize: () -> Void
+    var onDecreaseFontSize: () -> Void
+    var onResetFontSize: () -> Void
+    
+    // Default initializer for preview
+    init(
+        currentFontSize: Int = 14,
+        onIncreaseFontSize: @escaping () -> Void = {},
+        onDecreaseFontSize: @escaping () -> Void = {},
+        onResetFontSize: @escaping () -> Void = {}
+    ) {
+        self.currentFontSize = currentFontSize
+        self.onIncreaseFontSize = onIncreaseFontSize
+        self.onDecreaseFontSize = onDecreaseFontSize
+        self.onResetFontSize = onResetFontSize
+    }
     
     var body: some View {
         NavigationStack {
@@ -98,18 +116,15 @@ struct SettingsView: View {
                     .disabled(true) // Not yet implemented
                 }
                 
-                // Font Size - THIS ONE WORKS!
+                // Font Size - Live control!
                 Section {
                     HStack {
-                        Text("Font Size: \(settings.fontSize)")
+                        Text("Font Size: \(currentFontSize)")
                         Spacer()
                         
                         HStack(spacing: 0) {
                             Button {
-                                if settings.fontSize > 8 {
-                                    settings.fontSize -= 1
-                                    // Note: Actual font change happens via pinch gesture or toolbar
-                                }
+                                onDecreaseFontSize()
                             } label: {
                                 Image(systemName: "minus")
                                     .frame(width: 44, height: 36)
@@ -120,9 +135,7 @@ struct SettingsView: View {
                                 .frame(height: 20)
                             
                             Button {
-                                if settings.fontSize < 32 {
-                                    settings.fontSize += 1
-                                }
+                                onIncreaseFontSize()
                             } label: {
                                 Image(systemName: "plus")
                                     .frame(width: 44, height: 36)
@@ -130,8 +143,11 @@ struct SettingsView: View {
                             .buttonStyle(.bordered)
                         }
                     }
-                } footer: {
-                    Text("Use pinch gesture in terminal for live preview")
+                    
+                    Button("Reset to Default") {
+                        onResetFontSize()
+                    }
+                    .foregroundStyle(.blue)
                 }
                 
                 // Interface
