@@ -113,6 +113,19 @@ extension Ghostty {
             }
         }
         
+        /// Get the config string for current settings
+        static func getConfigString() -> String {
+            let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
+            let ghosttyFontFamily = mapFontFamily(fontFamily)
+            
+            return """
+            font-family = "\(ghosttyFontFamily)"
+            background-opacity = 1.0
+            window-padding-x = 4
+            window-padding-y = 4
+            """
+        }
+        
         /// Map user-friendly font names to Ghostty-compatible names
         static func mapFontFamily(_ fontFamily: String) -> String {
             switch fontFamily {
@@ -137,27 +150,11 @@ extension Ghostty {
                 return nil
             }
             
-            // Write the config file first
-            writeConfigFile()
-            
-            // Try to load the config file using the new API
-            // Note: This will fail silently if the library doesn't have the API yet
-            let path = configFilePath.path
-            path.withCString { cstr in
-                // This will be a linker error if the API isn't available
-                // For now we'll use dlsym to check if it exists
-                if let loadFile = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "ghostty_config_load_file") {
-                    typealias LoadFileFn = @convention(c) (ghostty_config_t, UnsafePointer<CChar>, UInt) -> Bool
-                    let fn = unsafeBitCast(loadFile, to: LoadFileFn.self)
-                    let loaded = fn(cfg, cstr, UInt(path.utf8.count))
-                    if loaded {
-                        logger.info("Loaded config from: \(path)")
-                    } else {
-                        logger.warning("Failed to load config from: \(path)")
-                    }
-                } else {
-                    logger.warning("ghostty_config_load_file not available in library")
-                }
+            // Get config string and load it directly
+            let configStr = getConfigString()
+            configStr.withCString { cstr in
+                ghostty_config_load_string(cfg, cstr, UInt(configStr.utf8.count))
+                logger.info("Loaded config string with font settings")
             }
             
             ghostty_config_finalize(cfg)
