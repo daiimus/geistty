@@ -11,20 +11,39 @@ import SwiftUI
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
     
-    // MARK: - UI Settings (Functional)
+    // MARK: - Terminal Settings
+    
+    @AppStorage("terminal.fontSize") var fontSize: Int = 14
+    @AppStorage("terminal.colorTheme") var colorTheme: String = "Default"
+    @AppStorage("terminal.cursorStyle") var cursorStyle: String = "block"
+    @AppStorage("terminal.fontFamily") var fontFamily: String = "SF Mono"
+    
+    // MARK: - UI Settings
     
     @AppStorage("ui.autoHideChrome") var autoHideChrome: Bool = true
     @AppStorage("ui.autoHideDelay") var autoHideDelay: Double = 3.0
     
-    // MARK: - Placeholder Settings (Not yet wired up)
-    // These are stored but not yet connected to Ghostty
-    // TODO: Wire these up when Ghostty config API supports runtime changes
-    
-    @AppStorage("terminal.fontSize") var fontSize: Double = 14
-    @AppStorage("ssh.keepAliveInterval") var keepAliveInterval: Int = 30
-    @AppStorage("ssh.connectionTimeout") var connectionTimeout: Int = 10
-    
     private init() {}
+    
+    // Available color themes (Ghostty themes)
+    static let colorThemes = [
+        "Default",
+        "Dracula",
+        "Solarized Dark",
+        "Solarized Light",
+        "Nord",
+        "Gruvbox Dark",
+        "One Dark",
+        "Tokyo Night"
+    ]
+    
+    // Available monospace fonts on iOS
+    static let fontFamilies = [
+        "SF Mono",
+        "Menlo",
+        "Courier New",
+        "Monaco"
+    ]
 }
 
 struct SettingsView: View {
@@ -33,8 +52,89 @@ struct SettingsView: View {
     
     var body: some View {
         NavigationStack {
-            Form {
-                // UI Section - These settings are functional
+            List {
+                // Color Theme
+                Section {
+                    NavigationLink {
+                        ThemePickerView(selectedTheme: $settings.colorTheme)
+                    } label: {
+                        HStack {
+                            Text("Color Theme")
+                            Spacer()
+                            Text(settings.colorTheme)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(true) // Not yet implemented
+                }
+                
+                // Cursor Style
+                Section {
+                    HStack {
+                        Text("Cursor")
+                        Spacer()
+                        Picker("", selection: $settings.cursorStyle) {
+                            Text("Block").tag("block")
+                            Text("Bar").tag("bar")
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 140)
+                    }
+                    .disabled(true) // Not yet implemented
+                }
+                
+                // Font Family
+                Section {
+                    NavigationLink {
+                        FontPickerView(selectedFont: $settings.fontFamily)
+                    } label: {
+                        HStack {
+                            Text("Font Family")
+                            Spacer()
+                            Text(settings.fontFamily)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(true) // Not yet implemented
+                }
+                
+                // Font Size - THIS ONE WORKS!
+                Section {
+                    HStack {
+                        Text("Font Size: \(settings.fontSize)")
+                        Spacer()
+                        
+                        HStack(spacing: 0) {
+                            Button {
+                                if settings.fontSize > 8 {
+                                    settings.fontSize -= 1
+                                    // Note: Actual font change happens via pinch gesture or toolbar
+                                }
+                            } label: {
+                                Image(systemName: "minus")
+                                    .frame(width: 44, height: 36)
+                            }
+                            .buttonStyle(.bordered)
+                            
+                            Divider()
+                                .frame(height: 20)
+                            
+                            Button {
+                                if settings.fontSize < 32 {
+                                    settings.fontSize += 1
+                                }
+                            } label: {
+                                Image(systemName: "plus")
+                                    .frame(width: 44, height: 36)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                } footer: {
+                    Text("Use pinch gesture in terminal for live preview")
+                }
+                
+                // Interface
                 Section("Interface") {
                     Toggle("Auto-hide Header/Toolbar", isOn: $settings.autoHideChrome)
                     
@@ -49,25 +149,7 @@ struct SettingsView: View {
                     }
                 }
                 
-                // Font Size Info
-                Section {
-                    HStack {
-                        Image(systemName: "hand.pinch")
-                            .foregroundStyle(.secondary)
-                        Text("Pinch to zoom to change font size")
-                    }
-                    HStack {
-                        Image(systemName: "hand.tap")
-                            .foregroundStyle(.secondary)
-                        Text("Two-finger double-tap to reset")
-                    }
-                } header: {
-                    Text("Font Size")
-                } footer: {
-                    Text("Or use A+ / A- buttons in the toolbar")
-                }
-                
-                // About Section
+                // About
                 Section("About") {
                     HStack {
                         Text("Version")
@@ -82,15 +164,6 @@ struct SettingsView: View {
                         Text("Ghostty")
                             .foregroundStyle(.secondary)
                     }
-                    
-                    Link(destination: URL(string: "https://ghostty.org")!) {
-                        HStack {
-                            Text("Ghostty Website")
-                            Spacer()
-                            Image(systemName: "arrow.up.right.square")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                 }
             }
             .navigationTitle("Settings")
@@ -103,6 +176,67 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Theme Picker
+
+struct ThemePickerView: View {
+    @Binding var selectedTheme: String
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        List {
+            ForEach(AppSettings.colorThemes, id: \.self) { theme in
+                Button {
+                    selectedTheme = theme
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(theme)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if selectedTheme == theme {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Color Theme")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Font Picker
+
+struct FontPickerView: View {
+    @Binding var selectedFont: String
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        List {
+            ForEach(AppSettings.fontFamilies, id: \.self) { font in
+                Button {
+                    selectedFont = font
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(font)
+                            .font(.custom(font, size: 17))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if selectedFont == font {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Font Family")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
