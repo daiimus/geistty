@@ -26,6 +26,8 @@ class AppSettings: ObservableObject {
     
     @AppStorage("ui.autoHideChrome") var autoHideChrome: Bool = true
     @AppStorage("ui.autoHideDelay") var autoHideDelay: Double = 3.0
+    @AppStorage("ui.showConnectionInfo") var showConnectionInfo: Bool = false
+    @AppStorage("ui.showStatusBar") var showStatusBar: Bool = false
     
     private init() {}
     
@@ -202,6 +204,16 @@ struct SettingsView: View {
                         }
                         Slider(value: $settings.autoHideDelay, in: 1...10, step: 0.5)
                     }
+                    
+                    Toggle("Show Connection Info", isOn: $settings.showConnectionInfo)
+                    Text("Display hostname and connection duration in header")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    Toggle("Show Status Bar", isOn: $settings.showStatusBar)
+                    Text("Display iOS time, battery, and network indicators")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 
                 // iCloud Sync
