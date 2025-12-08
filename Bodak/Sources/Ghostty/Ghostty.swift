@@ -118,13 +118,49 @@ extension Ghostty {
             let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
             let ghosttyFontFamily = mapFontFamily(fontFamily)
             
+            // Get font rendering settings (default to true if not set)
+            let defaults = UserDefaults.standard
+            let fontThicken: Bool
+            if defaults.object(forKey: "terminal.fontThicken") != nil {
+                fontThicken = defaults.bool(forKey: "terminal.fontThicken")
+            } else {
+                fontThicken = true  // Default to on for crisp text
+            }
+            
+            // Get theme config from ThemeManager
+            let themeConfig = ThemeManager.shared.getThemeConfigString()
+            
             logger.info("📝 Creating config string with font: \(fontFamily) -> \(ghosttyFontFamily)")
+            logger.info("📝 Font thicken: \(fontThicken)")
+            logger.info("📝 Theme: \(ThemeManager.shared.selectedTheme.name)")
             
             return """
             font-family = "\(ghosttyFontFamily)"
             background-opacity = 1.0
             window-padding-x = 4
             window-padding-y = 4
+            
+            # Font rendering for crisp text on Retina displays
+            font-thicken = \(fontThicken)
+            
+            # Freetype hinting options for optimal clarity
+            # light hinting preserves glyph shapes while improving alignment
+            freetype-load-flags = hinting, autohint, light
+            
+            # Fancy text rendering features
+            # Use Unicode standard for proper emoji and non-English character widths
+            grapheme-width-method = unicode
+            
+            # Bold text uses bright colors (classic terminal look)
+            bold-color = bright
+            
+            # Blinking cursor for visibility
+            cursor-style-blink = true
+            
+            # URL detection and hyperlinks
+            link-url = true
+            
+            \(themeConfig)
             """
         }
         
@@ -808,6 +844,9 @@ extension Ghostty {
         /// Callback for when the surface wants to write data (user input)
         var onWrite: ((Data) -> Void)?
         
+        /// Callback for when the terminal grid size changes (cols, rows)
+        var onResize: ((Int, Int) -> Void)?
+        
         /// Focus state tracking
         private var hasFocusState: Bool = false
         private var focusInstant: ContinuousClock.Instant? = nil
@@ -1484,10 +1523,19 @@ extension Ghostty {
             }
         }
         
-        /// Handle paste action
+        /// Handle paste action using Ghostty's paste_from_clipboard action
+        /// This properly handles bracketed paste mode for tmux/vim
         @objc override func paste(_ sender: Any?) {
-            if let text = UIPasteboard.general.string {
-                insertText(text)
+            guard let surface = surface else { return }
+            let action = "paste_from_clipboard"
+            if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                // Fallback to direct insertion if action fails
+                if let text = UIPasteboard.general.string {
+                    insertText(text)
+                }
+                logger.warning("paste_from_clipboard action failed, falling back to direct insert")
+            } else {
+                logger.debug("📋 Paste via Ghostty (bracketed paste mode aware)")
             }
         }
         
@@ -1927,7 +1975,45 @@ extension Ghostty {
             }
         }
         
-        /// Send a key event to the terminal
+        /// Virtual key codes for toolbar buttons (macOS-style keycodes)
+        enum VirtualKey: UInt32 {
+            case escape = 0x35
+            case tab = 0x30
+            case enter = 0x24
+            case delete = 0x33  // Backspace
+            case upArrow = 0x7E
+            case downArrow = 0x7D
+            case leftArrow = 0x7B
+            case rightArrow = 0x7C
+            case home = 0x73
+            case end = 0x77
+            case pageUp = 0x74
+            case pageDown = 0x79
+        }
+        
+        /// Send a virtual key through Ghostty's key encoding
+        /// This ensures proper handling of application cursor mode for tmux, etc.
+        func sendVirtualKey(_ key: VirtualKey, mods: ghostty_input_mods_e = GHOSTTY_MODS_NONE) {
+            guard let surface = surface else { return }
+            
+            // Send press event
+            var keyEvent = ghostty_input_key_s()
+            keyEvent.action = GHOSTTY_ACTION_PRESS
+            keyEvent.keycode = key.rawValue
+            keyEvent.mods = mods
+            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+            keyEvent.composing = false
+            keyEvent.text = nil
+            keyEvent.unshifted_codepoint = 0
+            
+            _ = ghostty_surface_key(surface, keyEvent)
+            
+            // Send release event
+            keyEvent.action = GHOSTTY_ACTION_RELEASE
+            _ = ghostty_surface_key(surface, keyEvent)
+        }
+        
+        /// Send a key event to the terminal (deprecated - use sendVirtualKey instead)
         func sendKey(_ key: ghostty_input_key_e, action: ghostty_input_action_e, mods: ghostty_input_mods_e) {
             guard let surface = surface else { return }
             
@@ -2063,6 +2149,27 @@ extension Ghostty {
             }
         }
         
+        /// Set font size to a specific value
+        func setFontSize(_ newSize: Float) {
+            guard let surface = surface else { return }
+            let clampedSize = min(max(newSize, Self.minFontSize), Self.maxFontSize)
+            let delta = clampedSize - currentFontSize
+            
+            if delta > 0 {
+                let action = "increase_font_size:\(delta)"
+                if ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                    currentFontSize = clampedSize
+                    logger.info("🔍 Font size set to \(currentFontSize)")
+                }
+            } else if delta < 0 {
+                let action = "decrease_font_size:\(abs(delta))"
+                if ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                    currentFontSize = clampedSize
+                    logger.info("🔍 Font size set to \(currentFontSize)")
+                }
+            }
+        }
+        
         /// Update the terminal configuration (e.g., font family)
         /// This creates a new config with current settings and applies it to the surface
         func updateConfig() {
@@ -2150,6 +2257,15 @@ extension Ghostty {
                     CATransaction.commit()
                     print("[Bodak] 📐   Sublayer \(type(of: sublayer)) new frame: \(sublayer.frame)")
                 }
+            }
+            
+            // Get the updated grid size and notify the resize callback
+            // This is crucial for SSH PTY sizing
+            if let gridSize = surfaceSize {
+                let cols = Int(gridSize.columns)
+                let rows = Int(gridSize.rows)
+                print("[Bodak] 📐 Grid size: \(cols)x\(rows)")
+                onResize?(cols, rows)
             }
         }
         

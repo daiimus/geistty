@@ -2,11 +2,12 @@
 //  ConnectionProfile.swift
 //  Bodak
 //
-//  Model for saved SSH connection profiles
+//  Model for saved SSH connection profiles with iCloud sync
 //
 
 import Foundation
 import SwiftUI
+import Combine
 
 /// Authentication method for SSH connections
 ///
@@ -57,6 +58,10 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
     // For SSH key auth
     var sshKeyName: String?
     
+    // Session options
+    var useTmux: Bool  // Auto-attach to or create tmux session
+    var tmuxSessionName: String?  // Custom tmux session name (nil = default "main")
+    
     // Metadata
     var createdAt: Date
     var lastConnectedAt: Date?
@@ -70,7 +75,9 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
         port: Int = 22,
         username: String,
         authMethod: AuthMethod = .sshKey,
-        sshKeyName: String? = nil
+        sshKeyName: String? = nil,
+        useTmux: Bool = false,
+        tmuxSessionName: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -79,10 +86,37 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
         self.username = username
         self.authMethod = authMethod
         self.sshKeyName = sshKeyName
+        self.useTmux = useTmux
+        self.tmuxSessionName = tmuxSessionName
         self.createdAt = Date()
         self.lastConnectedAt = nil
         self.isFavorite = false
         self.colorTag = nil
+    }
+    
+    // Custom coding keys to handle migration from old profiles without tmux fields
+    enum CodingKeys: String, CodingKey {
+        case id, name, host, port, username, authMethod, sshKeyName
+        case useTmux, tmuxSessionName
+        case createdAt, lastConnectedAt, isFavorite, colorTag
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        host = try container.decode(String.self, forKey: .host)
+        port = try container.decode(Int.self, forKey: .port)
+        username = try container.decode(String.self, forKey: .username)
+        authMethod = try container.decode(AuthMethod.self, forKey: .authMethod)
+        sshKeyName = try container.decodeIfPresent(String.self, forKey: .sshKeyName)
+        // Handle migration: default to false if not present
+        useTmux = try container.decodeIfPresent(Bool.self, forKey: .useTmux) ?? false
+        tmuxSessionName = try container.decodeIfPresent(String.self, forKey: .tmuxSessionName)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        lastConnectedAt = try container.decodeIfPresent(Date.self, forKey: .lastConnectedAt)
+        isFavorite = try container.decode(Bool.self, forKey: .isFavorite)
+        colorTag = try container.decodeIfPresent(String.self, forKey: .colorTag)
     }
     
     /// Display string for the connection
@@ -100,7 +134,7 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
     }
 }
 
-/// Manages saved connection profiles
+/// Manages saved connection profiles with iCloud sync
 class ConnectionProfileManager: ObservableObject {
     
     /// Shared instance
@@ -109,11 +143,77 @@ class ConnectionProfileManager: ObservableObject {
     /// Published list of profiles
     @Published var profiles: [ConnectionProfile] = []
     
-    /// Storage key
-    private let storageKey = "connection_profiles"
+    /// iCloud sync enabled status
+    @Published var iCloudSyncEnabled: Bool = false
+    
+    /// Storage keys
+    private let localStorageKey = "connection_profiles"
+    private let iCloudStorageKey = "connection_profiles"
+    
+    /// iCloud key-value store
+    private let iCloudStore = NSUbiquitousKeyValueStore.default
+    
+    /// Cancellables for Combine
+    private var cancellables = Set<AnyCancellable>()
     
     private init() {
+        // Check if iCloud is available
+        checkiCloudAvailability()
+        
+        // Load profiles
         loadProfiles()
+        
+        // Set up iCloud change notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(iCloudStoreDidChange),
+            name: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: iCloudStore
+        )
+        
+        // Synchronize iCloud store
+        iCloudStore.synchronize()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    // MARK: - iCloud Availability
+    
+    private func checkiCloudAvailability() {
+        // Check if iCloud is available by trying to access the store
+        // The store is always available but syncing only works with iCloud signed in
+        iCloudSyncEnabled = FileManager.default.ubiquityIdentityToken != nil
+    }
+    
+    // MARK: - iCloud Change Notification
+    
+    @objc private func iCloudStoreDidChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let changeReason = userInfo[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int else {
+            return
+        }
+        
+        // Handle different change reasons
+        switch changeReason {
+        case NSUbiquitousKeyValueStoreServerChange,
+             NSUbiquitousKeyValueStoreInitialSyncChange:
+            // External change - merge with local
+            DispatchQueue.main.async {
+                self.mergeFromiCloud()
+            }
+        case NSUbiquitousKeyValueStoreQuotaViolationChange:
+            print("iCloud storage quota exceeded")
+        case NSUbiquitousKeyValueStoreAccountChange:
+            // Account changed - reload
+            DispatchQueue.main.async {
+                self.checkiCloudAvailability()
+                self.loadProfiles()
+            }
+        default:
+            break
+        }
     }
     
     // MARK: - CRUD Operations
@@ -188,24 +288,92 @@ class ConnectionProfileManager: ObservableObject {
     // MARK: - Persistence
     
     private func loadProfiles() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        // Try loading from iCloud first if available
+        if iCloudSyncEnabled, let data = iCloudStore.data(forKey: iCloudStorageKey),
+           let decoded = try? JSONDecoder().decode([ConnectionProfile].self, from: data) {
+            profiles = decoded
+            // Also save to local as backup
+            saveToLocal(decoded)
+            return
+        }
+        
+        // Fall back to local storage
+        guard let data = UserDefaults.standard.data(forKey: localStorageKey),
               let decoded = try? JSONDecoder().decode([ConnectionProfile].self, from: data) else {
             profiles = []
             return
         }
         profiles = decoded
-    }
-    
-    private func saveProfiles() {
-        if let data = try? JSONEncoder().encode(profiles) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+        
+        // If we loaded from local and iCloud is available, push to iCloud
+        if iCloudSyncEnabled {
+            saveToiCloud(profiles)
         }
     }
     
-    // MARK: - iCloud Sync (placeholder for future implementation)
+    private func saveProfiles() {
+        guard let data = try? JSONEncoder().encode(profiles) else { return }
+        
+        // Always save locally
+        UserDefaults.standard.set(data, forKey: localStorageKey)
+        
+        // Save to iCloud if available
+        if iCloudSyncEnabled {
+            iCloudStore.set(data, forKey: iCloudStorageKey)
+            iCloudStore.synchronize()
+        }
+    }
     
-    /// Enable iCloud sync for profiles
-    func enableiCloudSync() {
-        // TODO: Implement using NSUbiquitousKeyValueStore or CloudKit
+    private func saveToLocal(_ profiles: [ConnectionProfile]) {
+        if let data = try? JSONEncoder().encode(profiles) {
+            UserDefaults.standard.set(data, forKey: localStorageKey)
+        }
+    }
+    
+    private func saveToiCloud(_ profiles: [ConnectionProfile]) {
+        if let data = try? JSONEncoder().encode(profiles) {
+            iCloudStore.set(data, forKey: iCloudStorageKey)
+            iCloudStore.synchronize()
+        }
+    }
+    
+    // MARK: - iCloud Merge
+    
+    /// Merge profiles from iCloud with local profiles
+    /// Uses "last modified wins" strategy based on lastConnectedAt and createdAt
+    private func mergeFromiCloud() {
+        guard let data = iCloudStore.data(forKey: iCloudStorageKey),
+              let iCloudProfiles = try? JSONDecoder().decode([ConnectionProfile].self, from: data) else {
+            return
+        }
+        
+        var mergedProfiles = profiles
+        
+        for iCloudProfile in iCloudProfiles {
+            if let localIndex = mergedProfiles.firstIndex(where: { $0.id == iCloudProfile.id }) {
+                // Profile exists locally - use the one with more recent activity
+                let localProfile = mergedProfiles[localIndex]
+                let localDate = localProfile.lastConnectedAt ?? localProfile.createdAt
+                let iCloudDate = iCloudProfile.lastConnectedAt ?? iCloudProfile.createdAt
+                
+                if iCloudDate > localDate {
+                    mergedProfiles[localIndex] = iCloudProfile
+                }
+            } else {
+                // New profile from iCloud
+                mergedProfiles.append(iCloudProfile)
+            }
+        }
+        
+        profiles = mergedProfiles
+        saveProfiles()
+    }
+    
+    /// Force sync with iCloud (pull then push)
+    func forceiCloudSync() {
+        guard iCloudSyncEnabled else { return }
+        
+        iCloudStore.synchronize()
+        mergeFromiCloud()
     }
 }

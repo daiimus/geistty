@@ -22,6 +22,8 @@ struct ConnectionEditorView: View {
     @State private var authMethod: AuthMethod = .sshKey
     @State private var selectedKeyName: String?
     @State private var isFavorite = false
+    @State private var useTmux = false
+    @State private var tmuxSessionName = ""
     
     // Key import
     @State private var showingKeyImport = false
@@ -140,6 +142,25 @@ struct ConnectionEditorView: View {
             Section {
                 Toggle("Add to Favorites", isOn: $isFavorite)
             }
+            
+            // tmux Integration
+            Section {
+                Toggle("Auto-attach to tmux", isOn: $useTmux)
+                
+                if useTmux {
+                    TextField("Session Name", text: $tmuxSessionName)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                }
+            } header: {
+                Text("tmux")
+            } footer: {
+                if useTmux {
+                    Text("Automatically attach to or create a tmux session on connect. Leave session name empty to use \"main\".")
+                } else {
+                    Text("Enable to automatically start or attach to a tmux session.")
+                }
+            }
         }
         .navigationTitle(profile == nil ? "New Connection" : "Edit Connection")
         .navigationBarTitleDisplayMode(.inline)
@@ -217,6 +238,8 @@ struct ConnectionEditorView: View {
         authMethod = profile.authMethod
         selectedKeyName = profile.sshKeyName
         isFavorite = profile.isFavorite
+        useTmux = profile.useTmux
+        tmuxSessionName = profile.tmuxSessionName ?? ""
     }
     
     private func save() {
@@ -227,7 +250,9 @@ struct ConnectionEditorView: View {
             port: Int(port) ?? 22,
             username: username,
             authMethod: authMethod,
-            sshKeyName: authMethod == .sshKey ? selectedKeyName : nil
+            sshKeyName: authMethod == .sshKey ? selectedKeyName : nil,
+            useTmux: useTmux,
+            tmuxSessionName: tmuxSessionName.isEmpty ? nil : tmuxSessionName
         )
         
         newProfile.isFavorite = isFavorite
