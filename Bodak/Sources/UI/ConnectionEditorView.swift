@@ -19,10 +19,14 @@ struct ConnectionEditorView: View {
     @State private var host = ""
     @State private var port = "22"
     @State private var username = ""
-    @State private var authMethod: AuthMethod = .password
+    @State private var authMethod: AuthMethod = .sshKey
     @State private var selectedKeyName: String?
-    @State private var passwordManager: PasswordManagerProvider = .icloudKeychain
     @State private var isFavorite = false
+    
+    // Key import
+    @State private var showingKeyImport = false
+    @State private var importError: String?
+    @State private var showingImportError = false
     
     // SSH Key manager
     @StateObject private var keyManager = SSHKeyManager.shared
@@ -48,7 +52,7 @@ struct ConnectionEditorView: View {
             }
             
             // Authentication
-            Section("Authentication") {
+            Section {
                 Picker("Method", selection: $authMethod) {
                     ForEach(AuthMethod.allCases) { method in
                         Label(method.displayName, systemImage: method.icon)
@@ -56,36 +60,77 @@ struct ConnectionEditorView: View {
                     }
                 }
                 
-                switch authMethod {
-                case .password:
-                    Text("Password will be requested at connection time or retrieved from saved passwords")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                case .sshKey:
+                Text(authMethod.description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } header: {
+                Text("Authentication")
+            } footer: {
+                if authMethod == .sshKey {
+                    Text("SSH keys are more secure than passwords. Import a .pem file from 1Password or Files, or generate a new key.")
+                }
+            }
+            
+            // SSH Key selection (only shown for sshKey auth)
+            if authMethod == .sshKey {
+                Section("SSH Key") {
                     if keyManager.keys.isEmpty {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundColor(.orange)
-                            Text("No SSH keys found")
-                        }
-                        NavigationLink("Generate SSH Key") {
-                            SSHKeyGeneratorView()
-                        }
-                    } else {
-                        Picker("SSH Key", selection: $selectedKeyName) {
-                            Text("Select a key").tag(nil as String?)
-                            ForEach(keyManager.keys, id: \.name) { key in
-                                Text(key.name).tag(key.name as String?)
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundColor(.orange)
+                                Text("No SSH keys yet")
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Button {
+                                showingKeyImport = true
+                            } label: {
+                                Label("Import Key from Files", systemImage: "square.and.arrow.down")
+                            }
+                            
+                            NavigationLink {
+                                SSHKeyGeneratorView()
+                            } label: {
+                                Label("Generate New Key", systemImage: "plus.circle")
                             }
                         }
-                    }
-                    
-                case .passwordManager:
-                    Picker("Provider", selection: $passwordManager) {
-                        ForEach(PasswordManagerProvider.allCases) { provider in
-                            Label(provider.displayName, systemImage: provider.icon)
-                                .tag(provider)
+                    } else {
+                        Picker("Select Key", selection: $selectedKeyName) {
+                            Text("Choose a key...").tag(nil as String?)
+                            ForEach(keyManager.keys, id: \.name) { key in
+                                HStack {
+                                    Image(systemName: "key.horizontal")
+                                    Text(key.name)
+                                }
+                                .tag(key.name as String?)
+                            }
+                        }
+                        
+                        HStack {
+                            Button {
+                                showingKeyImport = true
+                            } label: {
+                                Label("Import", systemImage: "square.and.arrow.down")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            
+                            NavigationLink {
+                                SSHKeyGeneratorView()
+                            } label: {
+                                Label("Generate", systemImage: "plus.circle")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            
+                            NavigationLink {
+                                SSHKeyListView()
+                            } label: {
+                                Label("Manage", systemImage: "list.bullet")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
                 }
@@ -112,6 +157,16 @@ struct ConnectionEditorView: View {
                 .disabled(!isValid)
             }
         }
+        .sheet(isPresented: $showingKeyImport) {
+            SSHKeyImportPicker { url in
+                importKey(from: url)
+            }
+        }
+        .alert("Import Error", isPresented: $showingImportError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importError ?? "Unknown error")
+        }
         .onAppear {
             loadProfile()
         }
@@ -122,9 +177,36 @@ struct ConnectionEditorView: View {
         (authMethod != .sshKey || selectedKeyName != nil)
     }
     
+    private func importKey(from url: URL) {
+        do {
+            // Start accessing the security-scoped resource
+            guard url.startAccessingSecurityScopedResource() else {
+                throw SSHKeyError.invalidKeyFormat
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+            
+            // Read the key data
+            let keyData = try Data(contentsOf: url)
+            let keyName = url.deletingPathExtension().lastPathComponent
+            
+            // Import the key (name first, then data as pemData)
+            let _ = try keyManager.importKey(name: keyName, pemData: keyData)
+            
+            // Auto-select the imported key
+            selectedKeyName = keyName
+        } catch {
+            importError = error.localizedDescription
+            showingImportError = true
+        }
+    }
+    
     private func loadProfile() {
         guard let profile = profile else {
-            // Generate default name based on host/username
+            // For new profiles, default to sshKey if keys exist
+            if !keyManager.keys.isEmpty {
+                authMethod = .sshKey
+                selectedKeyName = keyManager.keys.first?.name
+            }
             return
         }
         
@@ -134,7 +216,6 @@ struct ConnectionEditorView: View {
         username = profile.username
         authMethod = profile.authMethod
         selectedKeyName = profile.sshKeyName
-        passwordManager = profile.passwordManagerProvider ?? .icloudKeychain
         isFavorite = profile.isFavorite
     }
     
@@ -146,8 +227,7 @@ struct ConnectionEditorView: View {
             port: Int(port) ?? 22,
             username: username,
             authMethod: authMethod,
-            sshKeyName: authMethod == .sshKey ? selectedKeyName : nil,
-            passwordManagerProvider: authMethod == .passwordManager ? passwordManager : nil
+            sshKeyName: authMethod == .sshKey ? selectedKeyName : nil
         )
         
         newProfile.isFavorite = isFavorite

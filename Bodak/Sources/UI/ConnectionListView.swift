@@ -294,7 +294,6 @@ struct QuickConnectView: View {
     @State private var saveConnection = true
     @State private var isConnecting = false
     @State private var errorMessage: String?
-    @State private var showingPasswordManager = false
     
     var onConnect: (SSHSession) -> Void
     
@@ -310,20 +309,18 @@ struct QuickConnectView: View {
                     .keyboardType(.numberPad)
             }
             
-            Section("Authentication") {
+            Section {
                 TextField("Username", text: $username)
                     .textContentType(.username)
                     .autocapitalization(.none)
                 
                 SecureField("Password", text: $password)
                     .textContentType(.password)
-                
-                Button {
-                    requestPasswordFromManager()
-                } label: {
-                    Label("Use Password Manager", systemImage: "key.viewfinder")
-                }
-                .foregroundColor(.accentColor)
+            } header: {
+                Text("Authentication")
+            } footer: {
+                Text("For SSH key authentication, create a saved connection instead.")
+                    .font(.caption)
             }
             
             Section {
@@ -363,29 +360,6 @@ struct QuickConnectView: View {
     
     private var isValid: Bool {
         !host.isEmpty && !username.isEmpty && (Int(port) ?? 0) > 0
-    }
-    
-    private func requestPasswordFromManager() {
-        Task {
-            do {
-                let credential = try await CredentialManager.shared.requestCredentialsViaAutoFill(
-                    for: host.isEmpty ? "ssh" : host,
-                    username: username
-                )
-                
-                await MainActor.run {
-                    if case .password(let pw) = credential.authType {
-                        password = pw
-                    }
-                }
-            } catch CredentialError.cancelled {
-                // User cancelled, do nothing
-            } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
     }
     
     private func connect() {

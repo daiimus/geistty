@@ -9,51 +9,38 @@ import Foundation
 import SwiftUI
 
 /// Authentication method for SSH connections
+///
+/// Best practices for SSH authentication:
+/// - **SSH Key** (preferred): More secure, no password to remember. Import .pem files from
+///   Files app or generate keys directly in Bodak.
+/// - **Password**: Enter manually at connection time. Optionally save in Keychain.
+///
+/// Note: 1Password/LastPass SSH key integration requires their desktop SSH Agent,
+/// which is not available on iOS. Store SSH keys in Bodak directly.
 enum AuthMethod: String, Codable, CaseIterable, Identifiable {
-    case password = "password"
     case sshKey = "ssh_key"
-    case passwordManager = "password_manager"
+    case password = "password"
     
     var id: String { rawValue }
     
     var displayName: String {
         switch self {
-        case .password: return "Password"
         case .sshKey: return "SSH Key"
-        case .passwordManager: return "Password Manager"
+        case .password: return "Password"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .sshKey: return "Import or generate an SSH key (recommended)"
+        case .password: return "Enter password at connection time"
         }
     }
     
     var icon: String {
         switch self {
-        case .password: return "key.fill"
-        case .sshKey: return "lock.shield.fill"
-        case .passwordManager: return "lock.rectangle.stack.fill"
-        }
-    }
-}
-
-/// Password manager provider
-enum PasswordManagerProvider: String, Codable, CaseIterable, Identifiable {
-    case icloudKeychain = "icloud_keychain"
-    case onePassword = "1password"
-    case lastPass = "lastpass"
-    
-    var id: String { rawValue }
-    
-    var displayName: String {
-        switch self {
-        case .icloudKeychain: return "iCloud Keychain"
-        case .onePassword: return "1Password"
-        case .lastPass: return "LastPass"
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .icloudKeychain: return "icloud.fill"
-        case .onePassword: return "1.circle.fill"
-        case .lastPass: return "l.circle.fill"
+        case .sshKey: return "key.horizontal.fill"
+        case .password: return "textformat.abc"
         }
     }
 }
@@ -70,9 +57,6 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
     // For SSH key auth
     var sshKeyName: String?
     
-    // For password manager
-    var passwordManagerProvider: PasswordManagerProvider?
-    
     // Metadata
     var createdAt: Date
     var lastConnectedAt: Date?
@@ -85,9 +69,8 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
         host: String,
         port: Int = 22,
         username: String,
-        authMethod: AuthMethod = .password,
-        sshKeyName: String? = nil,
-        passwordManagerProvider: PasswordManagerProvider? = nil
+        authMethod: AuthMethod = .sshKey,
+        sshKeyName: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -96,7 +79,6 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
         self.username = username
         self.authMethod = authMethod
         self.sshKeyName = sshKeyName
-        self.passwordManagerProvider = passwordManagerProvider
         self.createdAt = Date()
         self.lastConnectedAt = nil
         self.isFavorite = false
