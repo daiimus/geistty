@@ -42,13 +42,19 @@ class AppSettings: ObservableObject {
     ]
     
     // Available monospace fonts on iOS
-    // Note: "Departure Mono" is bundled with the app
-    // System fonts: SF Mono, Menlo, Courier New, Monaco
+    // Note: Custom fonts are bundled with the app
+    // All fonts below are terminal-focused monospace fonts
     static let fontFamilies = [
-        "Departure Mono",  // Bundled custom font
-        "SF Mono",
-        "Menlo",
-        "Courier New"
+        "Departure Mono",    // Bundled - retro pixel style
+        "JetBrains Mono",    // Bundled - great ligatures, designed for code
+        "Fira Code",         // Bundled - popular with ligatures
+        "Hack",              // Bundled - designed for source code
+        "Source Code Pro",   // Bundled - Adobe's coding font
+        "IBM Plex Mono",     // Bundled - IBM's modern monospace
+        "Inconsolata",       // Bundled - humanist monospace
+        "SF Mono",           // System - Apple's coding font
+        "Menlo",             // System - macOS classic
+        "Courier New"        // System - traditional
     ]
 }
 

@@ -16,6 +16,18 @@
 		A1000005 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* SSHConnection.swift */; };
 		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
 		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* DepartureMono-Regular.otf */; };
+		A1000070 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000070 /* JetBrainsMono-Regular.ttf */; };
+		A1000071 /* JetBrainsMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000071 /* JetBrainsMono-Bold.ttf */; };
+		A1000072 /* FiraCode-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000072 /* FiraCode-Regular.ttf */; };
+		A1000073 /* FiraCode-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000073 /* FiraCode-Bold.ttf */; };
+		A1000074 /* Hack-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000074 /* Hack-Regular.ttf */; };
+		A1000075 /* Hack-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000075 /* Hack-Bold.ttf */; };
+		A1000076 /* SourceCodePro-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000076 /* SourceCodePro-Regular.otf */; };
+		A1000077 /* SourceCodePro-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000077 /* SourceCodePro-Bold.otf */; };
+		A1000078 /* IBMPlexMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000078 /* IBMPlexMono-Regular.otf */; };
+		A1000079 /* IBMPlexMono-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000079 /* IBMPlexMono-Bold.otf */; };
+		A100007A /* Inconsolata-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007A /* Inconsolata-Regular.ttf */; };
+		A100007B /* Inconsolata-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007B /* Inconsolata-Bold.ttf */; };
 		A1000009 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000001 /* CSSH */; };
 		A1000010 /* Ghostty.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* Ghostty.swift */; };
 		A1000011 /* GhosttyTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* GhosttyTerminalView.swift */; };
@@ -52,6 +64,18 @@
 		A2000005 /* SSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnection.swift; sourceTree = "<group>"; };
 		A2000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000007 /* DepartureMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DepartureMono-Regular.otf"; sourceTree = "<group>"; };
+		A2000070 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
+		A2000071 /* JetBrainsMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Bold.ttf"; sourceTree = "<group>"; };
+		A2000072 /* FiraCode-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "FiraCode-Regular.ttf"; sourceTree = "<group>"; };
+		A2000073 /* FiraCode-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "FiraCode-Bold.ttf"; sourceTree = "<group>"; };
+		A2000074 /* Hack-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Hack-Regular.ttf"; sourceTree = "<group>"; };
+		A2000075 /* Hack-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Hack-Bold.ttf"; sourceTree = "<group>"; };
+		A2000076 /* SourceCodePro-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SourceCodePro-Regular.otf"; sourceTree = "<group>"; };
+		A2000077 /* SourceCodePro-Bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SourceCodePro-Bold.otf"; sourceTree = "<group>"; };
+		A2000078 /* IBMPlexMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.otf"; sourceTree = "<group>"; };
+		A2000079 /* IBMPlexMono-Bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Bold.otf"; sourceTree = "<group>"; };
+		A200007A /* Inconsolata-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Regular.ttf"; sourceTree = "<group>"; };
+		A200007B /* Inconsolata-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Bold.ttf"; sourceTree = "<group>"; };
 		A2000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000010 /* Bodak.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Bodak.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000011 /* Ghostty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.swift; sourceTree = "<group>"; };
@@ -204,6 +228,18 @@
 			isa = PBXGroup;
 			children = (
 				A2000007 /* DepartureMono-Regular.otf */,
+				A2000070 /* JetBrainsMono-Regular.ttf */,
+				A2000071 /* JetBrainsMono-Bold.ttf */,
+				A2000072 /* FiraCode-Regular.ttf */,
+				A2000073 /* FiraCode-Bold.ttf */,
+				A2000074 /* Hack-Regular.ttf */,
+				A2000075 /* Hack-Bold.ttf */,
+				A2000076 /* SourceCodePro-Regular.otf */,
+				A2000077 /* SourceCodePro-Bold.otf */,
+				A2000078 /* IBMPlexMono-Regular.otf */,
+				A2000079 /* IBMPlexMono-Bold.otf */,
+				A200007A /* Inconsolata-Regular.ttf */,
+				A200007B /* Inconsolata-Bold.ttf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -275,6 +311,18 @@
 			files = (
 				A1000006 /* Assets.xcassets in Resources */,
 				A1000007 /* DepartureMono-Regular.otf in Resources */,
+				A1000070 /* JetBrainsMono-Regular.ttf in Resources */,
+				A1000071 /* JetBrainsMono-Bold.ttf in Resources */,
+				A1000072 /* FiraCode-Regular.ttf in Resources */,
+				A1000073 /* FiraCode-Bold.ttf in Resources */,
+				A1000074 /* Hack-Regular.ttf in Resources */,
+				A1000075 /* Hack-Bold.ttf in Resources */,
+				A1000076 /* SourceCodePro-Regular.otf in Resources */,
+				A1000077 /* SourceCodePro-Bold.otf in Resources */,
+				A1000078 /* IBMPlexMono-Regular.otf in Resources */,
+				A1000079 /* IBMPlexMono-Bold.otf in Resources */,
+				A100007A /* Inconsolata-Regular.ttf in Resources */,
+				A100007B /* Inconsolata-Bold.ttf in Resources */,
 				A1000061 /* Themes in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

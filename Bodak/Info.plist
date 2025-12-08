@@ -5,6 +5,18 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>DepartureMono-Regular.otf</string>
+		<string>JetBrainsMono-Regular.ttf</string>
+		<string>JetBrainsMono-Bold.ttf</string>
+		<string>FiraCode-Regular.ttf</string>
+		<string>FiraCode-Bold.ttf</string>
+		<string>Hack-Regular.ttf</string>
+		<string>Hack-Bold.ttf</string>
+		<string>SourceCodePro-Regular.otf</string>
+		<string>SourceCodePro-Bold.otf</string>
+		<string>IBMPlexMono-Regular.otf</string>
+		<string>IBMPlexMono-Bold.otf</string>
+		<string>Inconsolata-Regular.ttf</string>
+		<string>Inconsolata-Bold.ttf</string>
 	</array>
 	<key>UIRequiresFullScreen</key>
 	<false/>
