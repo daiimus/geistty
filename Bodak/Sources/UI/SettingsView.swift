@@ -37,11 +37,13 @@ class AppSettings: ObservableObject {
     ]
     
     // Available monospace fonts on iOS
+    // Note: "Departure Mono" is bundled with the app
+    // System fonts: SF Mono, Menlo, Courier New, Monaco
     static let fontFamilies = [
+        "Departure Mono",  // Bundled custom font
         "SF Mono",
         "Menlo",
-        "Courier New",
-        "Monaco"
+        "Courier New"
     ]
 }
 
@@ -113,7 +115,8 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .disabled(true) // Not yet implemented
+                } footer: {
+                    Text("Font changes will apply to new terminal sessions.")
                 }
                 
                 // Font Size - Live control!
