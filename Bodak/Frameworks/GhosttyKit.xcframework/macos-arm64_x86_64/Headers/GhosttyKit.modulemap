@@ -4,4 +4,18 @@
 module GhosttyKit {
     umbrella header "ghostty.h"
     export *
+    
+    // Exclude vt headers from umbrella - they are separate C APIs
+    // not needed by the main Ghostty embedding API
+    exclude header "ghostty/vt.h"
+    exclude header "ghostty/vt/key.h"
+    exclude header "ghostty/vt/result.h"
+    exclude header "ghostty/vt/color.h"
+    exclude header "ghostty/vt/key/event.h"
+    exclude header "ghostty/vt/key/encoder.h"
+    exclude header "ghostty/vt/wasm.h"
+    exclude header "ghostty/vt/osc.h"
+    exclude header "ghostty/vt/allocator.h"
+    exclude header "ghostty/vt/paste.h"
+    exclude header "ghostty/vt/sgr.h"
 }

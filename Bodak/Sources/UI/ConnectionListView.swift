@@ -152,6 +152,13 @@ struct ConnectionListView: View {
             } message: {
                 Text(errorMessage ?? "Unknown error")
             }
+            // Keyboard shortcut handlers (Cmd+N, Cmd+O)
+            .onReceive(NotificationCenter.default.publisher(for: .showNewConnection)) { _ in
+                showingAddConnection = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .showQuickConnect)) { _ in
+                showingQuickConnect = true
+            }
         }
     }
     
@@ -181,35 +188,75 @@ struct ConnectionListView: View {
     
     @ViewBuilder
     private func connectionContextMenu(for profile: ConnectionProfile) -> some View {
-        Button {
-            connect(to: profile)
-        } label: {
-            Label("Connect", systemImage: "bolt.fill")
-        }
-        
-        Button {
-            profileManager.toggleFavorite(profile)
-        } label: {
-            if profile.isFavorite {
-                Label("Remove from Favorites", systemImage: "star.slash")
-            } else {
-                Label("Add to Favorites", systemImage: "star")
+        Group {
+            Button {
+                connect(to: profile)
+            } label: {
+                Label("Connect", systemImage: "bolt.fill")
+            }
+            
+            Button {
+                profileManager.toggleFavorite(profile)
+            } label: {
+                if profile.isFavorite {
+                    Label("Remove from Favorites", systemImage: "star.slash")
+                } else {
+                    Label("Add to Favorites", systemImage: "star")
+                }
+            }
+            
+            Divider()
+            
+            Button {
+                selectedProfile = profile
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            
+            Button {
+                duplicateProfile(profile)
+            } label: {
+                Label("Duplicate", systemImage: "plus.square.on.square")
+            }
+            
+            Divider()
+            
+            // Copy actions
+            Button {
+                UIPasteboard.general.string = profile.host
+            } label: {
+                Label("Copy Host", systemImage: "doc.on.doc")
+            }
+            
+            Button {
+                UIPasteboard.general.string = "\(profile.username)@\(profile.host):\(profile.port)"
+            } label: {
+                Label("Copy Connection String", systemImage: "terminal")
+            }
+            
+            Divider()
+            
+            Button(role: .destructive) {
+                profileManager.deleteProfile(profile)
+            } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
-        
-        Button {
-            selectedProfile = profile
-        } label: {
-            Label("Edit", systemImage: "pencil")
-        }
-        
-        Divider()
-        
-        Button(role: .destructive) {
-            profileManager.deleteProfile(profile)
-        } label: {
-            Label("Delete", systemImage: "trash")
-        }
+    }
+    
+    private func duplicateProfile(_ profile: ConnectionProfile) {
+        let duplicate = ConnectionProfile(
+            id: UUID(),
+            name: "\(profile.name) Copy",
+            host: profile.host,
+            port: profile.port,
+            username: profile.username,
+            authMethod: profile.authMethod,
+            sshKeyName: profile.sshKeyName,
+            useTmux: profile.useTmux,
+            tmuxSessionName: profile.tmuxSessionName
+        )
+        profileManager.addProfile(duplicate)
     }
     
     // MARK: - Actions
