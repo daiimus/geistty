@@ -329,9 +329,20 @@ class TerminalViewModel: ObservableObject {
     /// Reference to the Ghostty surface view
     weak var surfaceView: Ghostty.SurfaceView? {
         didSet {
-            // Sync font size when surfaceView is set
+            // Cancel any existing subscription
+            fontSizeCancellable?.cancel()
+            fontSizeCancellable = nil
+            
+            // Sync font size when surfaceView is set and observe changes
             if let surface = surfaceView {
                 currentFontSize = surface.currentFontSize
+                
+                // Observe font size changes from the surface (e.g., pinch-to-zoom)
+                fontSizeCancellable = surface.$currentFontSize
+                    .receive(on: DispatchQueue.main)
+                    .sink { [weak self] newSize in
+                        self?.currentFontSize = newSize
+                    }
             }
         }
     }

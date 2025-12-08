@@ -923,7 +923,9 @@ extension Ghostty {
             indicator.backgroundColor = UIColor.white.withAlphaComponent(0.4)
             indicator.layer.cornerRadius = 2
             indicator.alpha = 0
-            indicator.frame = CGRect(x: bounds.width - 6, y: 0, width: 4, height: 40)
+            // Start with x = -10 (off-screen left); layoutSubviews will position it correctly
+            // This prevents the visual "slide in from left" when bounds.width is initially 0
+            indicator.frame = CGRect(x: -10, y: 0, width: 4, height: 40)
             addSubview(indicator)
             scrollIndicator = indicator
         }
@@ -2172,9 +2174,12 @@ extension Ghostty {
             print("[Bodak] 📐 layoutSubviews: bounds=\(bounds)")
             sizeDidChange(bounds.size)
             
-            // Keep scroll indicator on right edge
+            // Keep scroll indicator on right edge (without animation)
             if let indicator = scrollIndicator {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
                 indicator.frame.origin.x = bounds.width - 6
+                CATransaction.commit()
             }
         }
     }
