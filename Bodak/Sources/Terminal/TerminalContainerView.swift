@@ -666,11 +666,14 @@ struct BodakTerminalView: UIViewRepresentable {
     @ObservedObject var viewModel: TerminalViewModel
     
     func makeUIView(context: Context) -> UIView {
+        // Get theme background color
+        let themeBgColor = UIColor(ThemeManager.shared.selectedTheme.background)
+        
         // Check if Ghostty is ready
         guard ghosttyApp.readiness == .ready, let app = ghosttyApp.app else {
             logger.warning("⚠️ Ghostty not ready, showing placeholder")
             let placeholder = UIView()
-            placeholder.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+            placeholder.backgroundColor = themeBgColor
             return placeholder
         }
         
@@ -684,8 +687,8 @@ struct BodakTerminalView: UIViewRepresentable {
         // Create Ghostty surface with the config
         let surfaceView = Ghostty.SurfaceView(app, baseConfig: config)
         
-        // Configure for dark terminal appearance
-        surfaceView.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+        // Background color is set in SurfaceView.init() from theme
+        // No need to override here
         
         // Wire up the write callback - when terminal wants to send data, send to SSH
         surfaceView.onWrite = { [weak viewModel] data in
