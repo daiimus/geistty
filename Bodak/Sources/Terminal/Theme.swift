@@ -35,6 +35,11 @@ struct TerminalTheme: Identifiable, Equatable {
         return luminance > 0.5
     }
     
+    /// Check if this is a dark theme
+    var isDark: Bool {
+        !isLightTheme
+    }
+    
     /// Default dark theme (Ghostty default colors)
     static let `default` = TerminalTheme(
         id: "default",

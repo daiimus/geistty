@@ -218,6 +218,8 @@ struct SettingsView: View {
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .preferredColorScheme(themeManager.selectedTheme.isDark ? .dark : .light)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -227,23 +229,26 @@ struct SettingsView: View {
                     }
                 }
             }
-            // Sync GUI changes to config file
-            .onChange(of: settings.cursorStyle) { _, _ in
-                ConfigSyncManager.shared.onGUISettingChanged()
-            }
-            .onChange(of: settings.fontFamily) { _, _ in
-                ConfigSyncManager.shared.onGUISettingChanged()
-            }
-            .onChange(of: settings.fontThicken) { _, _ in
-                ConfigSyncManager.shared.onGUISettingChanged()
-            }
-            .onChange(of: themeManager.selectedTheme.id) { _, _ in
-                ConfigSyncManager.shared.onGUISettingChanged()
-            }
-            .onDisappear {
-                // Reload terminal config when settings close
+            // Sync GUI changes to config file (file is source of truth)
+            .onChange(of: settings.cursorStyle) { _, newValue in
+                ConfigSyncManager.shared.updateCursorStyle(newValue)
+                // Immediately reload so change is visible
                 NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
             }
+            .onChange(of: settings.fontFamily) { _, newValue in
+                ConfigSyncManager.shared.updateFontFamily(newValue)
+                NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
+            }
+            .onChange(of: settings.fontThicken) { _, newValue in
+                ConfigSyncManager.shared.updateFontThicken(newValue)
+                NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
+            }
+            .onChange(of: themeManager.selectedTheme.id) { _, _ in
+                ConfigSyncManager.shared.updateTheme(themeManager.selectedTheme)
+                // Immediately reload so theme change is visible
+                NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
+            }
+            // No auto-reload on dismiss - changes are applied immediately above
         }
     }
 }
@@ -285,6 +290,8 @@ struct ThemePickerView: View {
                 }
             }
         }
+        .listStyle(.insetGrouped)
+        .preferredColorScheme(themeManager.selectedTheme.isDark ? .dark : .light)
         .navigationTitle("Color Theme")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -413,6 +420,8 @@ struct FontPickerView: View {
                 }
             }
         }
+        .listStyle(.insetGrouped)
+        .preferredColorScheme(ThemeManager.shared.selectedTheme.isDark ? .dark : .light)
         .navigationTitle("Font Family")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -484,6 +493,7 @@ struct ConfigEditorView: View {
             .background(Color(theme.background).opacity(0.8))
         }
         .background(Color(theme.background))
+        .preferredColorScheme(theme.isDark ? .dark : .light)
         .navigationTitle("Config Editor")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
