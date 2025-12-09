@@ -777,6 +777,9 @@ class RawTerminalUIViewController: UIViewController {
         NotificationCenter.default.addObserver(forName: .showSettings, object: nil, queue: .main) { [weak self] _ in
             self?.handleSettingsButton()
         }
+        NotificationCenter.default.addObserver(forName: .reloadConfiguration, object: nil, queue: .main) { [weak self] _ in
+            self?.reloadConfiguration()
+        }
         
         // Copy/Paste
         NotificationCenter.default.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
@@ -935,6 +938,17 @@ class RawTerminalUIViewController: UIViewController {
         }
         
         present(hostingController, animated: true)
+    }
+    
+    private func reloadConfiguration() {
+        logger.info("🔄 Reloading configuration...")
+        viewModel?.updateConfig()
+        
+        // Update background color in case theme changed
+        let themeBg = ThemeManager.shared.selectedTheme.background
+        view.backgroundColor = UIColor(themeBg)
+        
+        logger.info("✅ Configuration reloaded")
     }
     
     override func viewDidLayoutSubviews() {

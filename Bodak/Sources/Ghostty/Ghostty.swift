@@ -127,11 +127,15 @@ extension Ghostty {
                 fontThicken = true  // Default to on for crisp text
             }
             
+            // Get cursor style (block, bar, underline)
+            let cursorStyle = defaults.string(forKey: "terminal.cursorStyle") ?? "block"
+            
             // Get theme config from ThemeManager
             let themeConfig = ThemeManager.shared.getThemeConfigString()
             
             logger.info("📝 Creating config string with font: \(fontFamily) -> \(ghosttyFontFamily)")
             logger.info("📝 Font thicken: \(fontThicken)")
+            logger.info("📝 Cursor style: \(cursorStyle)")
             logger.info("📝 Theme: \(ThemeManager.shared.selectedTheme.name)")
             
             return """
@@ -155,6 +159,7 @@ extension Ghostty {
             bold-color = bright
             
             # Blinking cursor for visibility
+            cursor-style = \(cursorStyle)
             cursor-style-blink = true
             
             # URL detection and hyperlinks
@@ -1299,14 +1304,17 @@ extension Ghostty {
         /// Track scroll state for physics-based scrolling
         private var scrollDisplayLink: CADisplayLink?
         private var scrollVelocity: CGFloat = 0
-        private let scrollDeceleration: CGFloat = 0.95  // Slower deceleration for smoother momentum
-        private let scrollMinVelocity: CGFloat = 0.3
+        private let scrollDeceleration: CGFloat = 0.92  // Momentum decay per frame (lower = stops faster)
+        private let scrollMinVelocity: CGFloat = 0.1    // Stop when velocity falls below this
         
         /// Track accumulated scroll for gesture
         private var accumulatedScrollY: CGFloat = 0
         
-        /// Simple scroll sensitivity (original value that worked)
-        private let scrollSensitivity: CGFloat = 0.5
+        /// Scroll sensitivity - lower = slower scrolling
+        private let scrollSensitivity: CGFloat = 0.15
+        
+        /// Momentum velocity multiplier (how much gesture velocity translates to momentum)
+        private let momentumMultiplier: CGFloat = 0.03
         
         /// Handle two-finger touch scrolling
         @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
@@ -1316,6 +1324,7 @@ extension Ghostty {
             
             switch gesture.state {
             case .began:
+                stopScrollMomentum()
                 accumulatedScrollY = 0
                 
             case .changed:
@@ -1328,6 +1337,10 @@ extension Ghostty {
                 ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
                 
             case .ended, .cancelled:
+                // Get gesture velocity and start momentum scrolling
+                let velocity = gesture.velocity(in: self).y
+                // Negative because pan down = scroll up
+                startScrollMomentum(velocity: -velocity * momentumMultiplier)
                 accumulatedScrollY = 0
                 
             default:
@@ -1346,6 +1359,7 @@ extension Ghostty {
             
             switch gesture.state {
             case .began:
+                stopScrollMomentum()
                 accumulatedTrackpadScrollY = 0
                 
             case .changed:
@@ -1359,6 +1373,10 @@ extension Ghostty {
                 ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
                 
             case .ended, .cancelled:
+                // Get gesture velocity and start momentum scrolling
+                let velocity = gesture.velocity(in: self).y
+                // Natural direction for trackpad
+                startScrollMomentum(velocity: velocity * momentumMultiplier)
                 accumulatedTrackpadScrollY = 0
                 
             default:

@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @State private var showConnectionSheet = false
     @State private var showConnectionList = false
+    @State private var showSettings = false
     @State private var connectionInfo = ConnectionInfo()
     @State private var connectedSession: SSHSession?
     
@@ -115,6 +116,18 @@ struct ContentView: View {
                     appState.connectionStatus = .connected
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
+            showSettings = true
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(
+                currentFontSize: 14,
+                onFontSizeChanged: { _ in },
+                onResetFontSize: { },
+                onFontFamilyChanged: { },
+                onThemeChanged: { }
+            )
         }
     }
     
