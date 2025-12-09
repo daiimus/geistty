@@ -109,11 +109,11 @@ struct SettingsView: View {
                         Picker("", selection: $settings.cursorStyle) {
                             Text("Block").tag("block")
                             Text("Bar").tag("bar")
+                            Text("Underline").tag("underline")
                         }
                         .pickerStyle(.segmented)
-                        .frame(width: 140)
+                        .frame(width: 200)
                     }
-                    .disabled(true) // Not yet implemented
                 }
                 
                 // Font Family
@@ -184,35 +184,21 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 
-                // iCloud Sync
+                // Ghostty Configuration
                 Section {
-                    HStack {
-                        Image(systemName: ConnectionProfileManager.shared.iCloudSyncEnabled ? "icloud.fill" : "icloud.slash")
-                            .foregroundStyle(ConnectionProfileManager.shared.iCloudSyncEnabled ? .blue : .secondary)
-                        Text("iCloud Sync")
-                        Spacer()
-                        Text(ConnectionProfileManager.shared.iCloudSyncEnabled ? "Enabled" : "Not Available")
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    if ConnectionProfileManager.shared.iCloudSyncEnabled {
-                        Button {
-                            ConnectionProfileManager.shared.forceiCloudSync()
-                        } label: {
-                            HStack {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                Text("Sync Now")
-                            }
+                    NavigationLink {
+                        ConfigEditorView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.text")
+                                .foregroundStyle(.blue)
+                            Text("Edit Config File")
                         }
                     }
                 } header: {
-                    Text("Sync")
+                    Text("Terminal Configuration")
                 } footer: {
-                    if ConnectionProfileManager.shared.iCloudSyncEnabled {
-                        Text("Connection profiles sync automatically across your devices.")
-                    } else {
-                        Text("Sign in to iCloud in Settings to sync connection profiles across devices.")
-                    }
+                    Text("Advanced: Edit the Ghostty config file directly. Changes apply on next connection.")
                 }
                 
                 // About
@@ -240,6 +226,23 @@ struct SettingsView: View {
                         dismiss()
                     }
                 }
+            }
+            // Sync GUI changes to config file
+            .onChange(of: settings.cursorStyle) { _, _ in
+                ConfigSyncManager.shared.onGUISettingChanged()
+            }
+            .onChange(of: settings.fontFamily) { _, _ in
+                ConfigSyncManager.shared.onGUISettingChanged()
+            }
+            .onChange(of: settings.fontThicken) { _, _ in
+                ConfigSyncManager.shared.onGUISettingChanged()
+            }
+            .onChange(of: themeManager.selectedTheme.id) { _, _ in
+                ConfigSyncManager.shared.onGUISettingChanged()
+            }
+            .onDisappear {
+                // Reload terminal config when settings close
+                NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
             }
         }
     }
@@ -415,6 +418,293 @@ struct FontPickerView: View {
     }
 }
 
+// MARK: - Config Editor
+
+struct ConfigEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var themeManager = ThemeManager.shared
+    @State private var configText: String = ""
+    @State private var originalText: String = ""
+    @State private var showResetConfirmation = false
+    @State private var saveResult: SaveResult? = nil
+    
+    enum SaveResult {
+        case success
+        case failure(String)
+    }
+    
+    private var configPath: URL {
+        Ghostty.Config.configFilePath
+    }
+    
+    private var hasChanges: Bool {
+        configText != originalText
+    }
+    
+    private var theme: TerminalTheme {
+        themeManager.selectedTheme
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Syntax-highlighted editor
+            HighlightedConfigEditor(
+                text: $configText,
+                theme: theme
+            )
+            
+            // Status bar
+            HStack {
+                if let result = saveResult {
+                    switch result {
+                    case .success:
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    case .failure(let error):
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                } else if hasChanges {
+                    Label("Modified", systemImage: "pencil.circle.fill")
+                        .foregroundStyle(.orange)
+                } else {
+                    Label("No changes", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                Text(configPath.lastPathComponent)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color(theme.background).opacity(0.8))
+        }
+        .background(Color(theme.background))
+        .navigationTitle("Config Editor")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                if hasChanges {
+                    Button("Discard") {
+                        configText = originalText
+                        saveResult = nil
+                    }
+                }
+            }
+            
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        saveConfig()
+                    } label: {
+                        Label("Save", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(!hasChanges)
+                    
+                    Button {
+                        showResetConfirmation = true
+                    } label: {
+                        Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+                    }
+                    
+                    Divider()
+                    
+                    Button {
+                        UIPasteboard.general.string = configText
+                    } label: {
+                        Label("Copy All", systemImage: "doc.on.doc")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .alert("Reset Configuration?", isPresented: $showResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                resetToDefaults()
+            }
+        } message: {
+            Text("This will replace your config with the default settings generated from app preferences.")
+        }
+        .onAppear {
+            loadConfig()
+        }
+        .onDisappear {
+            // Auto-save if there are changes
+            if hasChanges {
+                saveConfig()
+            }
+            // Sync config file changes back to GUI settings
+            ConfigSyncManager.shared.onConfigFileChanged()
+            // Reload terminal configuration
+            NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
+        }
+    }
+    
+    private func loadConfig() {
+        if FileManager.default.fileExists(atPath: configPath.path),
+           let content = try? String(contentsOf: configPath, encoding: .utf8) {
+            configText = content
+            originalText = content
+        } else {
+            let defaultConfig = Ghostty.Config.getConfigString()
+            configText = defaultConfig
+            originalText = defaultConfig
+        }
+    }
+    
+    private func saveConfig() {
+        do {
+            try configText.write(to: configPath, atomically: true, encoding: .utf8)
+            originalText = configText
+            withAnimation {
+                saveResult = .success
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                if case .success = saveResult {
+                    withAnimation {
+                        saveResult = nil
+                    }
+                }
+            }
+        } catch {
+            withAnimation {
+                saveResult = .failure("Save failed")
+            }
+        }
+    }
+    
+    private func resetToDefaults() {
+        let defaultConfig = Ghostty.Config.getConfigString()
+        configText = defaultConfig
+        saveConfig()
+    }
+}
+
+// MARK: - Syntax Highlighted Text Editor
+
+struct HighlightedConfigEditor: UIViewRepresentable {
+    @Binding var text: String
+    let theme: TerminalTheme
+    
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        textView.autocapitalizationType = .none
+        textView.autocorrectionType = .no
+        textView.smartDashesType = .no
+        textView.smartQuotesType = .no
+        textView.smartInsertDeleteType = .no
+        textView.keyboardType = .asciiCapable
+        textView.backgroundColor = UIColor(theme.background)
+        textView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
+        return textView
+    }
+    
+    func updateUIView(_ textView: UITextView, context: Context) {
+        // Update background color if theme changed
+        textView.backgroundColor = UIColor(theme.background)
+        
+        // Only update if text actually changed from outside
+        if textView.text != text {
+            let selectedRange = textView.selectedRange
+            textView.attributedText = highlightedText(text)
+            // Restore cursor position
+            if selectedRange.location <= textView.text.count {
+                textView.selectedRange = selectedRange
+            }
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    private func highlightedText(_ text: String) -> NSAttributedString {
+        let attributed = NSMutableAttributedString(string: text)
+        let fullRange = NSRange(location: 0, length: text.utf16.count)
+        
+        // Use theme colors from palette
+        // Palette indices: 0=black, 1=red, 2=green, 3=yellow, 4=blue, 5=magenta, 6=cyan, 7=white
+        let foregroundColor = UIColor(theme.foreground)
+        let commentColor = UIColor(theme.palette[2]).withAlphaComponent(0.7) // green
+        let keyColor = UIColor(theme.palette[6]) // cyan
+        let valueColor = UIColor(theme.palette[3]) // yellow
+        let stringColor = UIColor(theme.palette[5]) // magenta
+        
+        // Apply default styling
+        attributed.addAttribute(.foregroundColor, value: foregroundColor, range: fullRange)
+        attributed.addAttribute(.font, value: UIFont.monospacedSystemFont(ofSize: 14, weight: .regular), range: fullRange)
+        
+        let lines = text.components(separatedBy: "\n")
+        var currentIndex = 0
+        
+        for line in lines {
+            let lineLength = line.utf16.count
+            let lineRange = NSRange(location: currentIndex, length: lineLength)
+            
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            
+            if trimmed.hasPrefix("#") {
+                // Comment line - green/dim
+                attributed.addAttribute(.foregroundColor, value: commentColor, range: lineRange)
+            } else if let equalsIndex = line.firstIndex(of: "=") {
+                // Key = Value line
+                let keyEndIndex = line.distance(from: line.startIndex, to: equalsIndex)
+                let keyRange = NSRange(location: currentIndex, length: keyEndIndex)
+                attributed.addAttribute(.foregroundColor, value: keyColor, range: keyRange)
+                
+                // Value part (after =)
+                let valueStart = currentIndex + keyEndIndex + 1
+                let valueLength = lineLength - keyEndIndex - 1
+                if valueLength > 0 {
+                    let valueRange = NSRange(location: valueStart, length: valueLength)
+                    attributed.addAttribute(.foregroundColor, value: valueColor, range: valueRange)
+                    
+                    // Check for quoted strings within value
+                    let valueString = String(line[line.index(after: equalsIndex)...])
+                    if let quoteStart = valueString.firstIndex(of: "\""),
+                       let quoteEnd = valueString.lastIndex(of: "\""),
+                       quoteStart != quoteEnd {
+                        let quoteStartOffset = valueString.distance(from: valueString.startIndex, to: quoteStart)
+                        let quoteEndOffset = valueString.distance(from: valueString.startIndex, to: quoteEnd)
+                        let stringRange = NSRange(location: valueStart + quoteStartOffset, length: quoteEndOffset - quoteStartOffset + 1)
+                        attributed.addAttribute(.foregroundColor, value: stringColor, range: stringRange)
+                    }
+                }
+            }
+            
+            currentIndex += lineLength + 1 // +1 for newline
+        }
+        
+        return attributed
+    }
+    
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: HighlightedConfigEditor
+        
+        init(_ parent: HighlightedConfigEditor) {
+            self.parent = parent
+        }
+        
+        func textViewDidChange(_ textView: UITextView) {
+            // Update binding
+            parent.text = textView.text
+            
+            // Re-apply highlighting
+            let selectedRange = textView.selectedRange
+            textView.attributedText = parent.highlightedText(textView.text)
+            textView.selectedRange = selectedRange
+        }
+    }
+}
+
 #Preview {
     SettingsView(
         currentFontSize: 14,
@@ -424,3 +714,4 @@ struct FontPickerView: View {
         onThemeChanged: {}
     )
 }
+
