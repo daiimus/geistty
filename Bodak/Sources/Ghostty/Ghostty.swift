@@ -70,119 +70,84 @@ extension Ghostty {
             }
             config = cfg
             
-            // Write config file with user preferences
-            // Note: Loading requires rebuilding the Ghostty static library with the new API
-            Self.writeConfigFile()
+            // Load config from file (source of truth)
+            // getConfigString() creates default file if needed
+            let configStr = Self.getConfigString()
+            configStr.withCString { cstr in
+                ghostty_config_load_string(cfg, cstr, UInt(configStr.utf8.count))
+                logger.info("Loaded config from file into Ghostty")
+            }
             
             ghostty_config_finalize(config)
         }
         
-        /// Write a Ghostty config file with the user's preferences
-        /// This file will be loaded when we have the updated Ghostty library
-        static func writeConfigFile() {
-            // Get font family from user defaults
-            let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
-            
-            // Map font family names to Ghostty-compatible names
-            let ghosttyFontFamily = mapFontFamily(fontFamily)
-            
-            // Build config file content
-            var configContent = """
-            # Bodak Terminal Configuration
-            # This file is auto-generated from app settings
-            
-            font-family = "\(ghosttyFontFamily)"
-            
-            """
-            
-            // Add any other config options here
-            configContent += """
-            # Terminal appearance
-            background-opacity = 1.0
-            window-padding-x = 4
-            window-padding-y = 4
-            
-            """
-            
-            // Write to file
-            do {
-                try configContent.write(to: configFilePath, atomically: true, encoding: .utf8)
-                logger.info("Wrote Ghostty config to: \(configFilePath.path)")
-            } catch {
-                logger.error("Failed to write Ghostty config: \(error)")
+        /// Get config string - FILE IS SOURCE OF TRUTH
+        /// If ghostty.conf exists, read from it; otherwise generate defaults
+        static func getConfigString() -> String {
+            // Check if config file exists and read from it
+            if FileManager.default.fileExists(atPath: configFilePath.path),
+               let content = try? String(contentsOf: configFilePath, encoding: .utf8) {
+                logger.info("📖 Reading config from file: \(configFilePath.path)")
+                return content
             }
+            
+            // No file exists, generate default config and save it
+            logger.info("📝 No config file found, creating with defaults")
+            let defaultConfig = generateDefaultConfig()
+            
+            // Save the default config to file so user can edit it
+            do {
+                try defaultConfig.write(to: configFilePath, atomically: true, encoding: .utf8)
+                logger.info("📝 Created default config file at: \(configFilePath.path)")
+            } catch {
+                logger.error("Failed to write default config: \(error)")
+            }
+            
+            return defaultConfig
         }
         
-        /// Get the config string for current settings
-        static func getConfigString() -> String {
-            let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
-            let ghosttyFontFamily = mapFontFamily(fontFamily)
-            
-            // Get font rendering settings (default to true if not set)
-            let defaults = UserDefaults.standard
-            let fontThicken: Bool
-            if defaults.object(forKey: "terminal.fontThicken") != nil {
-                fontThicken = defaults.bool(forKey: "terminal.fontThicken")
-            } else {
-                fontThicken = true  // Default to on for crisp text
-            }
-            
-            // Get cursor style (block, bar, underline)
-            let cursorStyle = defaults.string(forKey: "terminal.cursorStyle") ?? "block"
-            
-            // Get theme config from ThemeManager
-            let themeConfig = ThemeManager.shared.getThemeConfigString()
-            
-            logger.info("📝 Creating config string with font: \(fontFamily) -> \(ghosttyFontFamily)")
-            logger.info("📝 Font thicken: \(fontThicken)")
-            logger.info("📝 Cursor style: \(cursorStyle)")
-            logger.info("📝 Theme: \(ThemeManager.shared.selectedTheme.name)")
-            
+        /// Generate a default config string (used when no file exists)
+        /// This is a static template - no dependencies on ThemeManager or UserDefaults
+        static func generateDefaultConfig() -> String {
             return """
-            font-family = "\(ghosttyFontFamily)"
-            background-opacity = 1.0
-            window-padding-x = 4
-            window-padding-y = 4
+            # Bodak Terminal Configuration
+            # This file is the source of truth - edit directly
+            # Reload with Cmd+Shift+, or from Settings
             
-            # Font rendering for crisp text on Retina displays
-            font-thicken = \(fontThicken)
+            # === Font Settings ===
+            font-family = "SF Mono"
+            font-thicken = true
             
-            # Freetype hinting options for optimal clarity
-            # light hinting preserves glyph shapes while improving alignment
+            # Freetype hinting for clarity
             freetype-load-flags = hinting, autohint, light
             
-            # Fancy text rendering features
-            # Use Unicode standard for proper emoji and non-English character widths
+            # Unicode standard for emoji/CJK widths
             grapheme-width-method = unicode
             
-            # Bold text uses bright colors (classic terminal look)
-            bold-color = bright
-            
-            # Blinking cursor for visibility
-            cursor-style = \(cursorStyle)
+            # === Cursor ===
+            cursor-style = block
             cursor-style-blink = true
             
-            # URL detection and hyperlinks
-            link-url = true
+            # === Colors ===
+            # Using Ghostty default theme (or specify: theme = tokyo-night)
+            background-opacity = 1.0
+            bold-color = bright
             
-            # === TUI App Optimizations ===
-            # For apps like Yazi, kew, aichat, browsh, mpv
-            
-            # Kitty graphics protocol - enables image previews in Yazi, ranger, etc.
-            # 500MB limit for image-heavy workflows (default is 320MB)
-            image-storage-limit = 500000000
-            
-            # OSC 52 clipboard - allows remote apps to copy to local clipboard
-            clipboard-read = allow
-            clipboard-write = allow
-            
-            # Mouse reporting - essential for TUI navigation
-            # (enabled by default, but explicit for clarity)
-            
-            # Scrollback for reviewing output
+            # === Terminal Behavior ===
+            window-padding-x = 4
+            window-padding-y = 4
             scrollback-limit = 10000
             
-            \(themeConfig)
+            # URL detection
+            link-url = true
+            
+            # === Clipboard ===
+            clipboard-read = allow
+            clipboard-write = allow
+            copy-on-select = false
+            
+            # === Graphics (for TUI apps like Yazi) ===
+            image-storage-limit = 500000000
             """
         }
         
@@ -2421,29 +2386,25 @@ extension Ghostty {
             }
         }
         
-        /// Update the terminal configuration (e.g., font family)
-        /// This creates a new config with current settings and applies it to the surface
+        /// Reload configuration from file and apply to surface
+        /// File is the source of truth - just read and apply
         func updateConfig() {
             guard let surface = surface else {
                 logger.warning("Cannot update config: surface is nil")
                 return
             }
             
-            // Log current state before update
-            let fontFamily = UserDefaults.standard.string(forKey: "terminal.fontFamily") ?? "SF Mono"
-            logger.info("🔧 updateConfig called - current font preference: \(fontFamily)")
+            logger.info("🔧 Reloading config from file...")
             
-            // Create a new config with current user preferences
+            // Read config directly from file and apply
             guard let newConfig = Config.createConfigWithCurrentSettings() else {
-                logger.error("Failed to create new config for update")
+                logger.error("Failed to create config from file")
                 return
             }
             
-            logger.info("🔧 Applying new config to surface...")
-            
             // Apply the new config to the surface
             ghostty_surface_update_config(surface, newConfig)
-            logger.info("✅ Updated surface config with font: \(fontFamily)")
+            logger.info("✅ Config reloaded from file")
             
             // Free the config after applying (Ghostty makes a copy)
             ghostty_config_free(newConfig)
