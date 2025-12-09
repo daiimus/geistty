@@ -1656,6 +1656,15 @@ extension Ghostty {
             }
         }
         
+        /// Select all text in the terminal scrollback
+        func selectAll() {
+            guard let surface = surface else { return }
+            let action = "select_all"
+            if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                logger.warning("select_all action failed")
+            }
+        }
+        
         // MARK: - Hardware Keyboard Support (UIResponder presses)
         
         /// Track current modifier state for Ctrl toggle button
@@ -1674,6 +1683,50 @@ extension Ghostty {
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
             for press in presses {
                 guard let key = press.key else { continue }
+                
+                // Check for Command (Cmd) modifier for app shortcuts
+                let hasCmd = key.modifierFlags.contains(.command)
+                if hasCmd {
+                    let char = key.charactersIgnoringModifiers.lowercased()
+                    switch char {
+                    case "c":
+                        // Cmd+C - Copy
+                        self.copy(nil)
+                        return
+                    case "v":
+                        // Cmd+V - Paste
+                        self.paste(nil)
+                        return
+                    case "a":
+                        // Cmd+A - Select All
+                        self.selectAll()
+                        return
+                    case "k":
+                        // Cmd+K - Clear Screen
+                        if let data = "\u{0C}".data(using: .utf8) {
+                            onWrite?(data)
+                        }
+                        return
+                    case "0":
+                        // Cmd+0 - Reset Font Size
+                        resetFontSize()
+                        return
+                    case "+", "=":
+                        // Cmd++ - Increase Font Size
+                        increaseFontSize()
+                        return
+                    case "-":
+                        // Cmd+- - Decrease Font Size
+                        decreaseFontSize()
+                        return
+                    case "w":
+                        // Cmd+W - Disconnect (post notification)
+                        NotificationCenter.default.post(name: Notification.Name("terminalDisconnect"), object: nil)
+                        return
+                    default:
+                        break
+                    }
+                }
                 
                 // Check for Ctrl modifier
                 let hasCtrl = key.modifierFlags.contains(.control) || ctrlToggleActive

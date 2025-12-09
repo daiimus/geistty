@@ -86,6 +86,36 @@ struct ContentView: View {
             transaction.animation = nil
         }
         .animation(nil, value: appState.connectionStatus)
+        // Handle navigation notifications from menu bar
+        .onReceive(NotificationCenter.default.publisher(for: .showNewConnection)) { _ in
+            // Disconnect and show new connection
+            appState.connectionStatus = .disconnected
+            showConnectionList = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showQuickConnect)) { _ in
+            // Disconnect and show quick connect
+            appState.connectionStatus = .disconnected
+            showConnectionSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showConnectionProfiles)) { _ in
+            // Disconnect and show connection list
+            appState.connectionStatus = .disconnected
+            showConnectionList = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalDisconnect)) { _ in
+            // Go back to disconnected state
+            appState.connectionStatus = .disconnected
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalReconnect)) { _ in
+            // Reconnect using saved connection params
+            if appState.currentHost != nil {
+                // Briefly disconnect then reconnect
+                appState.connectionStatus = .disconnected
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    appState.connectionStatus = .connected
+                }
+            }
+        }
     }
     
     private func connect() {
