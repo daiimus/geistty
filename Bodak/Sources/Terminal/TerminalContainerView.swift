@@ -703,8 +703,15 @@ class RawTerminalUIViewController: UIViewController {
     // Constraint for top edge - adjusted based on status bar visibility
     private var surfaceTopConstraint: NSLayoutConstraint?
     
+    // Constraint for bottom edge - adjusted based on keyboard visibility
+    private var surfaceBottomConstraint: NSLayoutConstraint?
+    
     // Settings observation
     private var settingsObserver: NSObjectProtocol?
+    
+    // Keyboard observers
+    private var keyboardWillShowObserver: NSObjectProtocol?
+    private var keyboardWillHideObserver: NSObjectProtocol?
     
     // Secure keyboard entry state
     private var secureKeyboardEntry = false
@@ -741,8 +748,111 @@ class RawTerminalUIViewController: UIViewController {
             self?.updateStatusBarAndLayout()
         }
         
+        // Observe keyboard frame changes
+        setupKeyboardObservers()
+        
         // Observe menu bar commands
         setupMenuBarNotifications()
+    }
+    
+    private func setupKeyboardObservers() {
+        keyboardWillShowObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleKeyboardWillShow(notification)
+        }
+        
+        keyboardWillHideObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleKeyboardWillHide(notification)
+        }
+    }
+    
+    private func handleKeyboardWillShow(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int else {
+            return
+        }
+        
+        let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
+        
+        // Convert keyboard frame to view coordinates
+        let keyboardHeight = view.convert(keyboardFrame, from: nil).height
+        
+        // Calculate the new size BEFORE animating
+        let newHeight = view.bounds.height - keyboardHeight
+        let newSize = CGSize(width: view.bounds.width, height: newHeight)
+        
+        // Notify Ghostty of size change BEFORE animation to pre-render
+        // This prevents the white flash during resize
+        if let surface = self.surfaceView {
+            surface.sizeDidChange(newSize)
+        }
+        
+        // Disable implicit CALayer animations during resize
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        
+        // Animate the bottom constraint
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
+            animations: {
+                self.surfaceBottomConstraint?.constant = -keyboardHeight
+                self.view.layoutIfNeeded()
+            },
+            completion: { _ in
+                CATransaction.commit()
+            }
+        )
+        
+        logger.debug("⌨️ Keyboard will show, height: \(keyboardHeight)")
+    }
+    
+    private func handleKeyboardWillHide(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int else {
+            return
+        }
+        
+        let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
+        
+        // Calculate the new size BEFORE animating (full height)
+        let newSize = CGSize(width: view.bounds.width, height: view.bounds.height)
+        
+        // Notify Ghostty of size change BEFORE animation to pre-render
+        if let surface = self.surfaceView {
+            surface.sizeDidChange(newSize)
+        }
+        
+        // Disable implicit CALayer animations during resize
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        
+        // Animate the bottom constraint back to 0
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
+            animations: {
+                self.surfaceBottomConstraint?.constant = 0
+                self.view.layoutIfNeeded()
+            },
+            completion: { _ in
+                CATransaction.commit()
+            }
+        )
+        
+        logger.debug("⌨️ Keyboard will hide")
     }
     
     private func setupMenuBarNotifications() {
@@ -983,11 +1093,13 @@ class RawTerminalUIViewController: UIViewController {
         view.addSubview(surface)
         
         // Create constraints - top constraint is variable based on status bar
+        // Bottom constraint is variable based on keyboard
         surfaceTopConstraint = surface.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
+        surfaceBottomConstraint = surface.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 0)
         
         NSLayoutConstraint.activate([
             surfaceTopConstraint!,
-            surface.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            surfaceBottomConstraint!,
             surface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
@@ -1024,12 +1136,28 @@ class RawTerminalUIViewController: UIViewController {
             settingsObserver = nil
         }
         
+        // Remove keyboard observers
+        if let observer = keyboardWillShowObserver {
+            NotificationCenter.default.removeObserver(observer)
+            keyboardWillShowObserver = nil
+        }
+        if let observer = keyboardWillHideObserver {
+            NotificationCenter.default.removeObserver(observer)
+            keyboardWillHideObserver = nil
+        }
+        
         viewModel?.disconnect()
         viewModel?.surfaceView = nil
     }
     
     deinit {
         if let observer = settingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = keyboardWillShowObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = keyboardWillHideObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
