@@ -40,6 +40,18 @@ struct TerminalContainerView: View {
             onSetup: { setupConnection() }
         )
         .ignoresSafeArea(.all)
+        // Handle remote disconnect - navigate back to connection screen
+        .onChange(of: terminalViewModel.disconnectedByRemote) { _, disconnected in
+            if disconnected {
+                logger.info("🔌 Remote disconnect detected, navigating back")
+                if let error = terminalViewModel.disconnectError {
+                    appState.connectionStatus = .error(error)
+                } else {
+                    // Clean disconnect - show error with reconnect option
+                    appState.connectionStatus = .error("Connection closed by remote host")
+                }
+            }
+        }
     }
     
     // MARK: - Connection

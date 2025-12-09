@@ -1,6 +1,17 @@
 import SwiftUI
 import GhosttyKit
 
+/// Wrapper view that creates per-window AppState for multi-window support
+struct WindowContentView: View {
+    // Each window gets its own AppState instance
+    @StateObject private var appState = AppState()
+    
+    var body: some View {
+        ContentView()
+            .environmentObject(appState)
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @State private var showConnectionSheet = false
@@ -210,19 +221,41 @@ struct ErrorView: View {
     let backgroundColor: Color
     @EnvironmentObject var appState: AppState
     
+    /// Formatted connection info for display
+    private var connectionDescription: String? {
+        guard let host = appState.currentHost,
+              let username = appState.currentUsername else {
+            return nil
+        }
+        let port = appState.currentPort ?? 22
+        if port == 22 {
+            return "\(username)@\(host)"
+        } else {
+            return "\(username)@\(host):\(port)"
+        }
+    }
+    
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "exclamationmark.triangle")
+            Image(systemName: "wifi.slash")
                 .font(.system(size: 60))
-                .foregroundStyle(.red)
+                .foregroundStyle(.orange)
             
-            Text("Connection Error")
+            Text("Disconnected")
                 .font(.title2)
+            
+            // Show which connection was lost
+            if let conn = connectionDescription {
+                Text(conn)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+            }
             
             Text(message)
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal)
             
             VStack(spacing: 12) {
                 // Reconnect button (uses last connection if available)
@@ -351,7 +384,6 @@ struct ConnectionSheet: View {
 }
 
 #Preview {
-    ContentView()
-        .environmentObject(AppState())
+    WindowContentView()
         .environmentObject(Ghostty.App())
 }
