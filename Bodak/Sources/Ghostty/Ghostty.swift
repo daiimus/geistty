@@ -1879,6 +1879,13 @@ extension Ghostty {
         /// Track if we're doing mouse-based selection (indirect pointer)
         private var isMouseSelecting = false
         
+        /// Key repeat timer and state
+        private var keyRepeatTimer: Timer?
+        private var keyRepeatInitialDelayTimer: Timer?
+        private var heldKeyEvent: Input.KeyEvent?
+        private static let keyRepeatInitialDelay: TimeInterval = 0.4
+        private static let keyRepeatInterval: TimeInterval = 0.05
+        
         /// Edit menu interaction for copy/paste (iOS 16+)
         private var editMenuInteraction: UIEditMenuInteraction?
         
@@ -2051,6 +2058,10 @@ extension Ghostty {
                     finalEvent.withCValue { cEvent in
                         _ = ghostty_surface_key(surface, cEvent)
                     }
+                    
+                    // Start key repeat timer
+                    startKeyRepeat(for: finalEvent)
+                    
                     return
                 }
             }
@@ -2058,11 +2069,48 @@ extension Ghostty {
             super.pressesBegan(presses, with: event)
         }
         
+        /// Start key repeat after initial delay
+        private func startKeyRepeat(for keyEvent: Input.KeyEvent) {
+            stopKeyRepeat()
+            
+            heldKeyEvent = Input.KeyEvent(
+                key: keyEvent.key,
+                action: .repeat,
+                text: keyEvent.text,
+                composing: keyEvent.composing,
+                mods: keyEvent.mods,
+                consumedMods: keyEvent.consumedMods,
+                unshiftedCodepoint: keyEvent.unshiftedCodepoint
+            )
+            
+            keyRepeatInitialDelayTimer = Timer.scheduledTimer(withTimeInterval: Self.keyRepeatInitialDelay, repeats: false) { [weak self] _ in
+                self?.keyRepeatTimer = Timer.scheduledTimer(withTimeInterval: Self.keyRepeatInterval, repeats: true) { [weak self] _ in
+                    guard let self = self, let surface = self.surface, let event = self.heldKeyEvent else { return }
+                    event.withCValue { cEvent in
+                        _ = ghostty_surface_key(surface, cEvent)
+                    }
+                }
+            }
+        }
+        
+        /// Stop key repeat
+        private func stopKeyRepeat() {
+            keyRepeatInitialDelayTimer?.invalidate()
+            keyRepeatInitialDelayTimer = nil
+            keyRepeatTimer?.invalidate()
+            keyRepeatTimer = nil
+            heldKeyEvent = nil
+        }
+        
+        override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            super.pressesChanged(presses, with: event)
+        }
+        
         override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            // Send key release events for proper key repeat handling
+            stopKeyRepeat()
+            
             for press in presses {
                 guard let surface = surface else { continue }
-                
                 if let keyEvent = Input.KeyEvent(press: press, action: .release) {
                     keyEvent.withCValue { cEvent in
                         _ = ghostty_surface_key(surface, cEvent)
@@ -2073,6 +2121,7 @@ extension Ghostty {
         }
         
         override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            stopKeyRepeat()
             super.pressesCancelled(presses, with: event)
         }
         
