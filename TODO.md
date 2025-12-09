@@ -197,9 +197,32 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 
 ---
 
-## 📋 Phase 6: Ghostty Menu System & Config — IN PROGRESS
+## 📋 Phase 6: Session Management & Navigation — IN PROGRESS
 
-The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch interfaces, with a user-friendly settings UI that generates the standard Ghostty config file format.
+The goal is to complete the session lifecycle: start screen → connect → use terminal → disconnect/switch → back to start. Leverage native Ghostty and iPadOS window management.
+
+### Session Lifecycle
+- [ ] **New Connection** (Cmd+N) - Open new connection sheet from terminal
+- [ ] **Quick Connect** (Cmd+O) - Quick connect dialog from anywhere
+- [ ] **Close/Disconnect** (Cmd+W) - Clean session teardown
+- [ ] **Reconnect** - Reconnect to same host after disconnect
+- [ ] **Back to Start** - Navigate from terminal back to connection list
+- [ ] **Session switching** - Switch between active sessions
+
+### Window Management (iPadOS + Ghostty)
+- [ ] **iPadOS Scenes** - Multiple independent terminal windows
+  - [ ] UISceneDelegate implementation
+  - [ ] Scene state restoration
+  - [ ] Each scene = independent SSH session
+- [ ] **Stage Manager integration** - Multiple windows side by side
+- [ ] **External display** - Dedicated terminal on second screen
+- [ ] **Ghostty splits** (stretch) - Multiple surfaces in one window
+
+### Connection State
+- [ ] **Connection status indicators** - Visual state (connecting/connected/disconnected)
+- [ ] **Session persistence** - Remember open sessions across app restart
+- [ ] **Auto-reconnect option** - Reconnect on network recovery
+- [ ] **Keep-alive pings** - Prevent idle disconnect
 
 ### Menu Structure (Ghostty macOS style)
 
@@ -219,13 +242,10 @@ The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch 
 - [x] Increase Font Size (Cmd++)
 - [x] Decrease Font Size (Cmd+-)
 - [ ] Toggle Full Screen (hides status bar)
-- [ ] Show/Hide Toolbar
 
 **Terminal Menu:**
 - [x] Clear Screen (Cmd+K)
 - [ ] Reset Terminal (Cmd+Shift+R)
-- [ ] **Secure Keyboard Entry** toggle
-- [ ] Change Title...
 - [ ] Terminal Inspector (debug info)
 
 **Connection Menu:**
@@ -234,68 +254,28 @@ The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch 
 - [ ] SSH Key Manager
 - [ ] Connection Profiles
 
-**Window Menu:**
-- [ ] Minimize (iPad)
-- [ ] Zoom (iPad Stage Manager)
+---
 
-**Help Menu:**
-- [ ] Ghostty Documentation (link)
-- [ ] Config Reference (link to ghostty.org/docs/config)
-- [ ] Keyboard Shortcuts
+## 📋 Phase 7: Configuration System — IN PROGRESS
 
-### Configuration System
+Config file (`ghostty.conf`) is now the source of truth.
 
-**Friendly Settings UI:**
-- [x] Font family picker (visual)
-- [x] Font size slider (live preview)
-- [x] Theme explorer with palette previews
-- [ ] **Config file editor** (in-app text editor for power users)
-- [ ] **Reload Configuration** action (Cmd+Shift+,)
-- [ ] Auto-generate ghostty config from UI settings
-- [ ] Import/Export config files
+**Completed:**
+- [x] Config file as source of truth
+- [x] Reload config from file (Cmd+Shift+,)
+- [x] Theme selector writes inline colors to config
+- [x] Settings UI adapts to theme (preferredColorScheme)
+- [x] Font/cursor/theme changes write to config file
+- [x] In-app config editor
 
-**Config File Support:**
-- [ ] Read/write standard Ghostty config format
-- [ ] Support all documented options from ghostty.org/docs/config
-- [ ] Config file location: App Documents/ghostty/config
-- [ ] Live reload on file changes
+**Remaining:**
 - [ ] Syntax validation & error reporting
-
-**Theme System:**
-- [x] 18 bundled themes
-- [ ] **Theme Explorer** (Ghostty-style browser)
-- [ ] Custom theme import (.conf format)
-- [ ] Theme preview in real terminal
-- [ ] Favorites/recently used themes
-
-### Terminal Chrome (UIKit implementation)
-
-**Status bar management:**
-- [x] Toggle to show/hide iOS status bar
-- [x] Terminal adjusts layout when status bar visible
-- [x] Animated transitions
-- [x] Live settings updates
-
-**Navigation/Chrome overlay:**
-- [x] Menu button (ellipsis circle) with dropdown
-- [x] Edge tap to reveal (top/bottom)
-- [x] Auto-hide timer
-- [ ] Back button (optional, for navigation)
-- [ ] Session title display
-
-**State Observers:**
-- [ ] Terminal title changes (OSC sequences) ⭐ MEDIUM PRIORITY
-- [ ] Disconnected by remote detection
-- [ ] Text selection state
-
-**Other Features:**
-- [ ] Keyboard shortcut handlers
-- [ ] Shake to clear terminal
-- [ ] Link preview tooltip (URL hover)
+- [ ] Config import/export
+- [ ] Theme import (.conf format)
 
 ---
 
-## 📋 Phase 7: Advanced Features — PLANNED
+## 📋 Phase 8: Advanced Features — PLANNED
 
 - [ ] **Secure Enclave keys** (hardware-backed SSH keys)
 - [x] **Multiple sessions** (native iOS multi-window via WindowGroup + UISupportsMultipleScenes)
@@ -314,15 +294,48 @@ The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch 
 
 ---
 
-## 📋 Phase 8: Release Preparation — PLANNED
+## 📋 Phase 9: Release Preparation — PLANNED
 
-- [ ] Performance optimization
+### Apple Developer Setup
+- [ ] Enroll in Apple Developer Program ($99/year)
+- [ ] Create App ID (com.bodak.app)
+- [ ] Enable iCloud entitlement (for connection sync)
+- [ ] Create App Store Connect listing
+
+### TestFlight Beta
+- [ ] Archive release build
+- [ ] Upload to App Store Connect
+- [ ] Internal testing (your devices)
+- [ ] External beta testers
+- [ ] Collect crash reports & feedback
+
+### App Store Assets
+- [ ] App icon (1024x1024)
+- [ ] Screenshots (iPad Pro, iPhone)
+- [ ] App preview video (optional)
+- [ ] App description
+- [ ] Keywords for search
+- [ ] Privacy policy URL
+- [ ] Support URL
+
+### Compliance
+- [ ] Export compliance (encryption - SSH uses crypto)
+- [ ] Privacy policy (what data is collected/stored)
+- [ ] Age rating questionnaire
+
+### Polish
+- [ ] Launch screen / splash
+- [ ] Onboarding flow (first launch)
 - [ ] Accessibility (VoiceOver, Dynamic Type)
-- [ ] Localization
-- [ ] App Store assets (screenshots, description)
-- [ ] Privacy policy
-- [ ] TestFlight beta
-- [ ] App Store submission
+- [ ] Localization (English first, others later)
+- [ ] Performance profiling
+- [ ] Memory leak check
+
+### Submission
+- [ ] App Review Guidelines compliance check
+- [ ] Submit for review
+- [ ] Respond to any rejections
+- [ ] Release to App Store
 
 ---
 
