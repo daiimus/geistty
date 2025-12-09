@@ -24,9 +24,6 @@ class AppSettings: ObservableObject {
     
     // MARK: - UI Settings
     
-    @AppStorage("ui.autoHideChrome") var autoHideChrome: Bool = true
-    @AppStorage("ui.autoHideDelay") var autoHideDelay: Double = 3.0
-    @AppStorage("ui.showConnectionInfo") var showConnectionInfo: Bool = false
     @AppStorage("ui.showStatusBar") var showStatusBar: Bool = false
     
     private init() {}
@@ -181,18 +178,6 @@ struct SettingsView: View {
                 
                 // Interface
                 Section("Interface") {
-                    Toggle("Auto-hide Header/Toolbar", isOn: $settings.autoHideChrome)
-                    
-                    if settings.autoHideChrome {
-                        HStack {
-                            Text("Hide Delay")
-                            Spacer()
-                            Text("\(settings.autoHideDelay, specifier: "%.1f")s")
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(value: $settings.autoHideDelay, in: 1...10, step: 0.5)
-                    }
-                    
                     Toggle("Show Status Bar", isOn: $settings.showStatusBar)
                     Text("Display iOS time, battery, and network indicators")
                         .font(.caption)
