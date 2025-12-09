@@ -62,7 +62,8 @@ struct BodakApp: App {
             }
             
             // MARK: - Edit Menu
-            // Add Select All to the standard edit menu
+            // Add Select All to the edit menu
+            // Note: System provides "Show Keyboard" / "Hide Keyboard" automatically
             CommandGroup(replacing: .pasteboard) {
                 Button("Copy") {
                     NotificationCenter.default.post(name: .terminalCopy, object: nil)
