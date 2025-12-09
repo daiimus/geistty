@@ -3,7 +3,7 @@ import GhosttyKit
 
 @main
 struct BodakApp: App {
-    @StateObject private var appState = AppState()
+    // Ghostty backend is shared across all windows
     @StateObject private var ghosttyApp = Ghostty.App()
     
     init() {
@@ -22,8 +22,8 @@ struct BodakApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(appState)
+            // Each window gets its own AppState for independent sessions
+            WindowContentView()
                 .environmentObject(ghosttyApp)
                 .onAppear {
                     // Ensure window background is set after scene is created
