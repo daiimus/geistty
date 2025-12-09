@@ -22,5 +22,20 @@
 	<false/>
 	<key>UISupportsMultipleScenes</key>
 	<true/>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ssh._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Bodak uses local network access to connect to SSH servers on your local network.</string>
 </dict>
 </plist>
