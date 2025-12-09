@@ -230,13 +230,11 @@ surfaceView.onWrite = { data in
 - [Departure Mono](https://departuremono.com/) by Helena Zhang - Beautiful monospace font for terminals
 - [libssh2](https://libssh2.org/) - The SSH library powering our connections (via DimaRU's [Libssh2Prebuild](https://github.com/DimaRU/Libssh2Prebuild))
 
-## Contributing
-
-Contributions welcome! Please open an issue to discuss major changes before submitting a PR.
-
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+Bodak is proprietary software. All rights reserved.
+
+Third-party dependencies are used under their respective licenses - see [LICENSES.md](LICENSES.md) for details.
 
 ---
 
