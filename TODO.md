@@ -179,7 +179,105 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 
 ---
 
-## 📋 Phase 6: Advanced Features — PLANNED
+## 📋 Phase 6: Ghostty Menu System & Config — IN PROGRESS
+
+The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch interfaces, with a user-friendly settings UI that generates the standard Ghostty config file format.
+
+### Menu Structure (Ghostty macOS style)
+
+**File Menu:**
+- [ ] New Connection (Cmd+N)
+- [ ] Quick Connect (Cmd+O)
+- [ ] Close/Disconnect (Cmd+W)
+
+**Edit Menu:**
+- [x] Copy (Cmd+C)
+- [x] Paste (Cmd+V)
+- [ ] Select All (Cmd+A)
+- [ ] Find... (Cmd+F) - stretch goal
+
+**View Menu:**
+- [ ] Reset Font Size (Cmd+0)
+- [ ] Increase Font Size (Cmd++)
+- [ ] Decrease Font Size (Cmd+-)
+- [ ] Toggle Full Screen (hides status bar)
+- [ ] Show/Hide Toolbar
+
+**Terminal Menu:**
+- [ ] Clear Screen (Cmd+K)
+- [ ] Reset Terminal (Cmd+Shift+R)
+- [ ] **Secure Keyboard Entry** toggle
+- [ ] Change Title...
+- [ ] Terminal Inspector (debug info)
+
+**Connection Menu:**
+- [ ] Reconnect
+- [ ] Duplicate Session
+- [ ] SSH Key Manager
+- [ ] Connection Profiles
+
+**Window Menu:**
+- [ ] Minimize (iPad)
+- [ ] Zoom (iPad Stage Manager)
+
+**Help Menu:**
+- [ ] Ghostty Documentation (link)
+- [ ] Config Reference (link to ghostty.org/docs/config)
+- [ ] Keyboard Shortcuts
+
+### Configuration System
+
+**Friendly Settings UI:**
+- [x] Font family picker (visual)
+- [x] Font size slider (live preview)
+- [x] Theme explorer with palette previews
+- [ ] **Config file editor** (in-app text editor for power users)
+- [ ] **Reload Configuration** action (Cmd+Shift+,)
+- [ ] Auto-generate ghostty config from UI settings
+- [ ] Import/Export config files
+
+**Config File Support:**
+- [ ] Read/write standard Ghostty config format
+- [ ] Support all documented options from ghostty.org/docs/config
+- [ ] Config file location: App Documents/ghostty/config
+- [ ] Live reload on file changes
+- [ ] Syntax validation & error reporting
+
+**Theme System:**
+- [x] 18 bundled themes
+- [ ] **Theme Explorer** (Ghostty-style browser)
+- [ ] Custom theme import (.conf format)
+- [ ] Theme preview in real terminal
+- [ ] Favorites/recently used themes
+
+### Terminal Chrome (UIKit implementation)
+
+**Status bar management:**
+- [x] Toggle to show/hide iOS status bar
+- [x] Terminal adjusts layout when status bar visible
+- [x] Animated transitions
+- [x] Live settings updates
+
+**Navigation/Chrome overlay:**
+- [x] Menu button (ellipsis circle) with dropdown
+- [x] Edge tap to reveal (top/bottom)
+- [x] Auto-hide timer
+- [ ] Back button (optional, for navigation)
+- [ ] Session title display
+
+**State Observers:**
+- [ ] Terminal title changes (OSC sequences)
+- [ ] Disconnected by remote detection
+- [ ] Text selection state
+
+**Other Features:**
+- [ ] Keyboard shortcut handlers
+- [ ] Shake to clear terminal
+- [ ] Link preview tooltip (URL hover)
+
+---
+
+## 📋 Phase 7: Advanced Features — PLANNED
 
 - [ ] **Secure Enclave keys** (hardware-backed SSH keys)
 - [ ] **Multiple sessions** (tabs or split view)
@@ -190,7 +288,7 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 
 ---
 
-## 📋 Phase 7: Release Preparation — PLANNED
+## 📋 Phase 8: Release Preparation — PLANNED
 
 - [ ] Performance optimization
 - [ ] Accessibility (VoiceOver, Dynamic Type)

@@ -35,9 +35,38 @@ struct TerminalContainerView: View {
     // Constants for auto-hide behavior
     private let edgeTapThreshold: CGFloat = 60 // Pixels from edge to reveal chrome
     
+    // Use pure UIKit terminal view (no SwiftUI UIViewRepresentable) to prevent flash
+    // The flash was caused by SwiftUI's view update mechanism with UIViewRepresentable
+    private let usePureUIKit = true
+    
+    /// Theme background color to prevent flash
+    private var themeBackground: Color {
+        Color(ThemeManager.shared.selectedTheme.background)
+    }
+    
     var body: some View {
+        if usePureUIKit {
+            // Pure UIKit UIViewController - NO FLASH!
+            // This bypasses SwiftUI's view update mechanism which was causing the gray flash
+            RawTerminalViewController(
+                ghosttyApp: ghosttyApp,
+                viewModel: terminalViewModel,
+                onSetup: { setupConnection() }
+            )
+            .ignoresSafeArea(.all)
+        } else {
+            fullBody
+        }
+    }
+    
+    @ViewBuilder
+    var fullBody: some View {
         GeometryReader { geometry in
             ZStack {
+                // Black background behind everything
+                Color.black
+                    .ignoresSafeArea(.all)
+                
                 // Main terminal surface (full screen)
                 // When status bar is hidden, use full screen
                 // When status bar is shown, add top padding to avoid overlap
@@ -162,7 +191,8 @@ struct TerminalContainerView: View {
                     .animation(.easeInOut(duration: 0.15), value: hoverUrl)
                 }
             }
-            .animation(.easeInOut(duration: 0.3), value: showChrome)
+            // TEMPORARILY DISABLED: Testing if animations cause white flash
+            // .animation(.easeInOut(duration: 0.3), value: showChrome)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .statusBarHidden(!settings.showStatusBar)
@@ -929,6 +959,406 @@ struct ShakeDetector: UIViewControllerRepresentable {
 extension View {
     func onShake(perform action: @escaping () -> Void) -> some View {
         self.background(ShakeDetector(onShake: action))
+    }
+}
+
+// MARK: - Ultra Barebones Mode: Pure UIKit Terminal
+
+/// A UIViewControllerRepresentable that hosts a pure UIKit view controller
+/// containing the Ghostty SurfaceView. This bypasses all SwiftUI view management
+/// to test if the flash is caused by SwiftUI.
+struct RawTerminalViewController: UIViewControllerRepresentable {
+    let ghosttyApp: Ghostty.App
+    @ObservedObject var viewModel: TerminalViewModel
+    let onSetup: () -> Void
+    
+    func makeUIViewController(context: Context) -> RawTerminalUIViewController {
+        let vc = RawTerminalUIViewController()
+        vc.ghosttyApp = ghosttyApp
+        vc.viewModel = viewModel
+        vc.onSetup = onSetup
+        return vc
+    }
+    
+    func updateUIViewController(_ uiViewController: RawTerminalUIViewController, context: Context) {
+        // No updates needed
+    }
+}
+
+/// Pure UIKit view controller that directly hosts the Ghostty SurfaceView
+class RawTerminalUIViewController: UIViewController {
+    var ghosttyApp: Ghostty.App?
+    var viewModel: TerminalViewModel?
+    var onSetup: (() -> Void)?
+    private var surfaceView: Ghostty.SurfaceView?
+    
+    // Constraint for top edge - adjusted based on status bar visibility
+    private var surfaceTopConstraint: NSLayoutConstraint?
+    
+    // Settings observation
+    private var settingsObserver: NSObjectProtocol?
+    
+    // Chrome overlay
+    private var chromeView: UIView?
+    private var chromeVisible = false
+    private var chromeHideTimer: Timer?
+    private let chromeAutoHideDelay: TimeInterval = 3.0
+    
+    // Status bar preference (read from UserDefaults)
+    private var showStatusBar: Bool {
+        UserDefaults.standard.bool(forKey: "ui.showStatusBar")
+    }
+    
+    private var autoHideChrome: Bool {
+        UserDefaults.standard.bool(forKey: "ui.autoHideChrome")
+    }
+    
+    override var prefersStatusBarHidden: Bool {
+        !showStatusBar
+    }
+    
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        .lightContent
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        // Set the view's background to theme color
+        let themeBg = ThemeManager.shared.selectedTheme.background
+        view.backgroundColor = UIColor(themeBg)
+        
+        // Create and add the surface view
+        createSurfaceView()
+        
+        // Create chrome overlay (after surface so it's on top)
+        createChromeOverlay()
+        
+        // Observe settings changes
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateStatusBarAndLayout()
+        }
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // Setup connection after view appears
+        onSetup?()
+        
+        // Initial layout update
+        updateStatusBarAndLayout()
+    }
+    private func updateStatusBarAndLayout() {
+        // Tell UIKit to re-query prefersStatusBarHidden
+        setNeedsStatusBarAppearanceUpdate()
+        
+        // Update the layout
+        UIView.animate(withDuration: 0.25) {
+            self.updateTopConstraint()
+            self.view.layoutIfNeeded()
+        }
+        
+        // Notify surface of size change
+        if let surface = surfaceView {
+            surface.sizeDidChange(surface.bounds.size)
+        }
+    }
+    
+    private func updateTopConstraint() {
+        if showStatusBar {
+            // When status bar is visible, offset by safe area top
+            surfaceTopConstraint?.constant = view.safeAreaInsets.top
+        } else {
+            // When status bar is hidden, terminal takes full screen
+            surfaceTopConstraint?.constant = 0
+        }
+    }
+    
+    // MARK: - Chrome Overlay
+    
+    private func createChromeOverlay() {
+        let chrome = UIView()
+        chrome.backgroundColor = .clear
+        chrome.translatesAutoresizingMaskIntoConstraints = false
+        chrome.alpha = 0
+        chrome.isUserInteractionEnabled = true
+        view.addSubview(chrome)
+        
+        // Chrome covers the top area
+        NSLayoutConstraint.activate([
+            chrome.topAnchor.constraint(equalTo: view.topAnchor),
+            chrome.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            chrome.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            chrome.heightAnchor.constraint(equalToConstant: 100)
+        ])
+        
+        // Gradient background
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.colors = [
+            UIColor.black.withAlphaComponent(0.8).cgColor,
+            UIColor.black.withAlphaComponent(0.0).cgColor
+        ]
+        gradientLayer.frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 100)
+        chrome.layer.insertSublayer(gradientLayer, at: 0)
+        
+        // Settings menu button (single gear with dropdown menu)
+        let menuButton = UIButton(type: .system)
+        menuButton.setImage(UIImage(systemName: "ellipsis.circle")?.withConfiguration(
+            UIImage.SymbolConfiguration(pointSize: 24, weight: .medium)
+        ), for: .normal)
+        menuButton.tintColor = .white
+        menuButton.translatesAutoresizingMaskIntoConstraints = false
+        menuButton.showsMenuAsPrimaryAction = true
+        menuButton.menu = createOptionsMenu()
+        chrome.addSubview(menuButton)
+        
+        NSLayoutConstraint.activate([
+            menuButton.topAnchor.constraint(equalTo: chrome.safeAreaLayoutGuide.topAnchor, constant: 8),
+            menuButton.trailingAnchor.constraint(equalTo: chrome.trailingAnchor, constant: -16),
+            menuButton.widthAnchor.constraint(equalToConstant: 44),
+            menuButton.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        
+        self.chromeView = chrome
+        
+        // Ensure chrome is always on top
+        view.bringSubviewToFront(chrome)
+    }
+    
+    private func createOptionsMenu() -> UIMenu {
+        let pasteAction = UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+            self?.viewModel?.paste()
+        }
+        
+        let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+            self?.viewModel?.copy()
+        }
+        
+        let settingsAction = UIAction(title: "Settings", image: UIImage(systemName: "gear")) { [weak self] _ in
+            self?.handleSettingsButton()
+        }
+        
+        let disconnectAction = UIAction(title: "Disconnect", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { [weak self] _ in
+            self?.handleBackButton()
+        }
+        
+        return UIMenu(children: [pasteAction, copyAction, settingsAction, disconnectAction])
+    }
+    
+    @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: view)
+        let edgeThreshold: CGFloat = 60
+        
+        // Only respond to taps near top or bottom edges
+        if location.y < edgeThreshold || location.y > view.bounds.height - edgeThreshold {
+            toggleChrome()
+        } else if chromeVisible {
+            // Tap elsewhere while chrome visible - reset timer
+            startChromeHideTimer()
+        }
+    }
+    
+    private func toggleChrome() {
+        if chromeVisible {
+            hideChrome()
+        } else {
+            showChrome()
+        }
+    }
+    
+    private func showChrome() {
+        chromeVisible = true
+        UIView.animate(withDuration: 0.25) {
+            self.chromeView?.alpha = 1
+        }
+        startChromeHideTimer()
+    }
+    
+    private func hideChrome() {
+        chromeHideTimer?.invalidate()
+        chromeHideTimer = nil
+        chromeVisible = false
+        UIView.animate(withDuration: 0.25) {
+            self.chromeView?.alpha = 0
+        }
+    }
+    
+    private func startChromeHideTimer() {
+        chromeHideTimer?.invalidate()
+        
+        // Only auto-hide if setting is enabled
+        guard autoHideChrome else { return }
+        
+        chromeHideTimer = Timer.scheduledTimer(withTimeInterval: chromeAutoHideDelay, repeats: false) { [weak self] _ in
+            self?.hideChrome()
+        }
+    }
+    
+    @objc private func handleBackButton() {
+        // Disconnect and go back
+        viewModel?.disconnect()
+        
+        // Find the AppState and update connection status
+        if let windowScene = view.window?.windowScene {
+            for window in windowScene.windows {
+                if let rootVC = window.rootViewController {
+                    findAndDisconnect(in: rootVC)
+                }
+            }
+        }
+    }
+    
+    private func findAndDisconnect(in viewController: UIViewController) {
+        // Try to find AppState through the view hierarchy
+        // This navigates back by setting connection status to disconnected
+        if let hostingController = viewController as? UIHostingController<AnyView> {
+            // Post notification to disconnect
+            NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
+        } else if let navController = viewController as? UINavigationController {
+            navController.popViewController(animated: true)
+        } else {
+            // Fallback: post disconnect notification
+            NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
+        }
+    }
+    
+    @objc private func handleSettingsButton() {
+        // Present settings as a sheet
+        let settingsView = SettingsView(
+            currentFontSize: Int(viewModel?.currentFontSize ?? 14),
+            onFontSizeChanged: { [weak self] newSize in
+                self?.viewModel?.setFontSize(newSize)
+            },
+            onResetFontSize: { [weak self] in
+                self?.viewModel?.resetFontSize()
+            },
+            onFontFamilyChanged: { [weak self] in
+                self?.viewModel?.updateConfig()
+            },
+            onThemeChanged: { [weak self] in
+                self?.viewModel?.updateConfig()
+                // Update our background color too
+                let themeBg = ThemeManager.shared.selectedTheme.background
+                self?.view.backgroundColor = UIColor(themeBg)
+            }
+        )
+        
+        let hostingController = UIHostingController(rootView: settingsView)
+        hostingController.modalPresentationStyle = .pageSheet
+        
+        if let sheet = hostingController.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        
+        present(hostingController, animated: true)
+        
+        // Keep chrome visible while settings open
+        chromeHideTimer?.invalidate()
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        
+        // Update top constraint based on status bar visibility
+        updateTopConstraint()
+        
+        // Update gradient layer frame
+        if let chrome = chromeView,
+           let gradientLayer = chrome.layer.sublayers?.first as? CAGradientLayer {
+            gradientLayer.frame = chrome.bounds
+        }
+    }
+    
+    private func createSurfaceView() {
+        guard let ghosttyApp = ghosttyApp,
+              ghosttyApp.readiness == .ready,
+              let app = ghosttyApp.app else {
+            logger.warning("⚠️ Ghostty not ready in RawTerminalUIViewController")
+            return
+        }
+        
+        // Create surface configuration with external backend
+        var config = Ghostty.SurfaceConfiguration()
+        config.backendType = .external
+        
+        // Create Ghostty surface
+        let surface = Ghostty.SurfaceView(app, baseConfig: config)
+        self.surfaceView = surface
+        
+        // Set background color to match theme
+        let themeBg = ThemeManager.shared.selectedTheme.background
+        surface.backgroundColor = UIColor(themeBg)
+        
+        // Add to view hierarchy
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(surface)
+        
+        // Create constraints - top constraint is variable based on status bar
+        surfaceTopConstraint = surface.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
+        
+        NSLayoutConstraint.activate([
+            surfaceTopConstraint!,
+            surface.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            surface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        // Wire up callbacks
+        surface.onWrite = { [weak self] data in
+            Task { @MainActor in
+                self?.viewModel?.sendInput(data)
+            }
+        }
+        
+        surface.onResize = { [weak self] cols, rows in
+            Task { @MainActor in
+                self?.viewModel?.resize(cols: cols, rows: rows)
+            }
+        }
+        
+        // Store in view model
+        viewModel?.surfaceView = surface
+        
+        // Add edge tap gesture to the surface view (since it consumes touches)
+        let edgeTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEdgeTap(_:)))
+        edgeTapGesture.cancelsTouchesInView = false
+        surface.addGestureRecognizer(edgeTapGesture)
+        
+        // Ensure chrome is on top of surface
+        if let chrome = chromeView {
+            view.bringSubviewToFront(chrome)
+        }
+        
+        // Set focus
+        surface.focusDidChange(true)
+        surface.becomeFirstResponder()
+        
+        logger.info("✅ RawTerminalUIViewController created surface view")
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        
+        // Remove settings observer
+        if let observer = settingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+            settingsObserver = nil
+        }
+        
+        viewModel?.disconnect()
+        viewModel?.surfaceView = nil
+    }
+    
+    deinit {
+        if let observer = settingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 }
 

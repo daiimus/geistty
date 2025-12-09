@@ -991,6 +991,21 @@ extension Ghostty {
             // Initialize with a reasonable default frame (non-zero so layer bounds are non-zero)
             super.init(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
             
+            // Configure the view and its CAMetalLayer to prevent white flashes
+            // CRITICAL: Disable implicit animations to prevent any white flash during setup
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            
+            backgroundColor = .black
+            isOpaque = true
+            layer.isOpaque = true
+            if let metalLayer = layer as? CAMetalLayer {
+                metalLayer.backgroundColor = UIColor.black.cgColor
+                metalLayer.isOpaque = true
+            }
+            
+            CATransaction.commit()
+            
             print("[Bodak] 🏗️ SurfaceView initialized, frame: \(frame)")
             print("[Bodak] 🏗️ Layer class: \(type(of: layer))")
             print("[Bodak] 🏗️ contentScaleFactor: \(contentScaleFactor)")
@@ -1024,13 +1039,19 @@ extension Ghostty {
             self.surface = surface
             
             // Set background color to match theme to prevent flash during screen transitions
-            // This is the fallback color when the IOSurface has transparent pixels momentarily
+            // CRITICAL: Disable implicit animations to prevent white curtain effect
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            
             let themeBg = ThemeManager.shared.selectedTheme.background
             self.backgroundColor = UIColor(themeBg)
-            
-            // Mark view and layer as opaque to prevent blending artifacts (gray flash)
             self.isOpaque = true
             self.layer.isOpaque = true
+            if let metalLayer = self.layer as? CAMetalLayer {
+                metalLayer.backgroundColor = UIColor(themeBg).cgColor
+            }
+            
+            CATransaction.commit()
             
             print("[Bodak] 🏗️ Sublayers after ghostty_surface_new: \(layer.sublayers?.count ?? 0)")
             layer.sublayers?.forEach { sublayer in

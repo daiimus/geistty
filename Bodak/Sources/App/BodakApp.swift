@@ -6,11 +6,29 @@ struct BodakApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var ghosttyApp = Ghostty.App()
     
+    init() {
+        // CRITICAL: Set the window background color to match the theme
+        // This prevents the gray system background from showing through
+        // during any view transitions or layout changes
+        let themeBg = ThemeManager.shared.selectedTheme.background
+        let bgColor = UIColor(themeBg)
+        
+        // Set default background for all windows
+        UIWindow.appearance().backgroundColor = bgColor
+        
+        // Also set for UIView to catch any edge cases
+        // UIView.appearance().backgroundColor = bgColor  // Too aggressive, breaks other UI
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
                 .environmentObject(ghosttyApp)
+                .onAppear {
+                    // Ensure window background is set after scene is created
+                    setWindowBackground()
+                }
         }
         .commands {
             // Terminal commands (Cmd+C/V work automatically via system)
@@ -65,6 +83,21 @@ struct BodakApp: App {
                     NotificationCenter.default.post(name: .showQuickConnect, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
+            }
+        }
+    }
+    
+    /// Set the window background color to match the theme
+    private func setWindowBackground() {
+        let themeBg = ThemeManager.shared.selectedTheme.background
+        let bgColor = UIColor(themeBg)
+        
+        // Find all windows and set their background
+        for scene in UIApplication.shared.connectedScenes {
+            if let windowScene = scene as? UIWindowScene {
+                for window in windowScene.windows {
+                    window.backgroundColor = bgColor
+                }
             }
         }
     }

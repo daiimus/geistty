@@ -179,18 +179,6 @@ struct SettingsView: View {
                     .foregroundStyle(.blue)
                 }
                 
-                // Font Rendering - DPI/text quality options
-                Section {
-                    Toggle("Thicken Font Strokes", isOn: $settings.fontThicken)
-                        .onChange(of: settings.fontThicken) { _, _ in
-                            onFontFamilyChanged() // Triggers config reload
-                        }
-                } header: {
-                    Text("Text Rendering")
-                } footer: {
-                    Text("Makes font strokes slightly thicker for improved readability on Retina displays.")
-                }
-                
                 // Interface
                 Section("Interface") {
                     Toggle("Auto-hide Header/Toolbar", isOn: $settings.autoHideChrome)
@@ -204,11 +192,6 @@ struct SettingsView: View {
                         }
                         Slider(value: $settings.autoHideDelay, in: 1...10, step: 0.5)
                     }
-                    
-                    Toggle("Show Connection Info", isOn: $settings.showConnectionInfo)
-                    Text("Display hostname and connection duration in header")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     
                     Toggle("Show Status Bar", isOn: $settings.showStatusBar)
                     Text("Display iOS time, battery, and network indicators")
