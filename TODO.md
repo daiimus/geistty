@@ -92,8 +92,11 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [ ] Alt/Option modifier support (for vim, emacs) ⭐ HIGH PRIORITY - Should work now with proper Ghostty API!
   - [ ] Tab key button in accessory bar
   - [ ] Common symbols bar (~, |, `, etc.)
-  - [ ] Cmd+C/V for copy/paste (intercept and handle) ⭐ HIGH PRIORITY
-  - [ ] Font size shortcuts (Cmd+/Cmd-) ⭐ QUICK WIN
+  - [x] Cmd+C/V for copy/paste (intercept and handle) ✅
+  - [x] Cmd+A for select all ✅
+  - [x] Cmd+K for clear screen ✅
+  - [x] Cmd+W for disconnect ✅
+  - [x] Font size shortcuts (Cmd+0/+/-) ✅
   - [ ] Keyboard shortcuts help overlay
 - [x] **Proper Ghostty keyboard API integration** ✅ COMPLETE
   - [x] Refactor to use ghostty_surface_key() instead of raw byte sending
@@ -164,6 +167,10 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 - [x] Stage Manager support (works out of box with SwiftUI)
 - [x] External display mirroring (automatic via WindowGroup)
 - [x] UISupportsMultipleScenes enabled
+- [x] **iPadOS menu bar integration**
+  - [x] Native menu bar with File/Edit/View/Terminal menus
+  - [x] Keyboard shortcuts displayed in menu items
+  - [x] Embraces native iOS keyboard show/hide behavior
 
 ### Settings
 - [x] **Font family selection**
@@ -202,18 +209,18 @@ The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch 
 **Edit Menu:**
 - [x] Copy (Cmd+C)
 - [x] Paste (Cmd+V)
-- [ ] Select All (Cmd+A)
+- [x] Select All (Cmd+A)
 - [ ] Find... (Cmd+F) - stretch goal
 
 **View Menu:**
-- [ ] Reset Font Size (Cmd+0)
-- [ ] Increase Font Size (Cmd++)
-- [ ] Decrease Font Size (Cmd+-)
+- [x] Reset Font Size (Cmd+0)
+- [x] Increase Font Size (Cmd++)
+- [x] Decrease Font Size (Cmd+-)
 - [ ] Toggle Full Screen (hides status bar)
 - [ ] Show/Hide Toolbar
 
 **Terminal Menu:**
-- [ ] Clear Screen (Cmd+K)
+- [x] Clear Screen (Cmd+K)
 - [ ] Reset Terminal (Cmd+Shift+R)
 - [ ] **Secure Keyboard Entry** toggle
 - [ ] Change Title...
