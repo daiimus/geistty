@@ -439,6 +439,9 @@ extension Ghostty {
                             offset: scrollbar.offset,
                             len: scrollbar.len
                         )
+                        // Track whether we're scrolled up from the bottom
+                        // offset + len == total means we're at the bottom
+                        surfaceView.isScrolledUp = (scrollbar.offset + scrollbar.len) < scrollbar.total
                     }
                 }
                 return true
@@ -1096,16 +1099,15 @@ extension Ghostty {
             // Add long press gesture to START text selection
             let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
             longPressGesture.minimumPressDuration = 0.3
-            // NOTE: Removed delegate to avoid gesture conflicts
+            longPressGesture.delegate = self  // Allow gesture delegation for scroll/selection coordination
             addGestureRecognizer(longPressGesture)
             
-            // TEMPORARILY DISABLED: Single-finger scroll was conflicting with other gestures
-            // TODO: Re-enable once we figure out the scroll issue
-            // let singleFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleSingleFingerScroll(_:)))
-            // singleFingerScrollGesture.minimumNumberOfTouches = 1
-            // singleFingerScrollGesture.maximumNumberOfTouches = 1
-            // singleFingerScrollGesture.delegate = self
-            // addGestureRecognizer(singleFingerScrollGesture)
+            // Add single-finger pan gesture for scrolling
+            let singleFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleSingleFingerScroll(_:)))
+            singleFingerScrollGesture.minimumNumberOfTouches = 1
+            singleFingerScrollGesture.maximumNumberOfTouches = 1
+            singleFingerScrollGesture.delegate = self
+            addGestureRecognizer(singleFingerScrollGesture)
             
             // Add two-finger pan gesture for scrolling (original working gesture)
             let twoFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
@@ -1304,23 +1306,50 @@ extension Ghostty {
         /// Track scroll state for physics-based scrolling
         private var scrollDisplayLink: CADisplayLink?
         private var scrollVelocity: CGFloat = 0
-        private let scrollDeceleration: CGFloat = 0.92  // Momentum decay per frame (lower = stops faster)
-        private let scrollMinVelocity: CGFloat = 0.1    // Stop when velocity falls below this
+        private var initialMomentumVelocity: CGFloat = 0  // Track initial velocity for dynamic deceleration
+        private var momentumFrameCount: Int = 0  // Track frames for initial kick
+        
+        /// Base deceleration - adjusted dynamically based on initial velocity
+        private let baseDeceleration: CGFloat = 0.96
+        private let maxDeceleration: CGFloat = 0.985  // For fast flicks - coast longer
+        private let scrollMinVelocity: CGFloat = 0.12   // Stop when velocity falls below this
         
         /// Track accumulated scroll for gesture
         private var accumulatedScrollY: CGFloat = 0
         
-        /// Scroll sensitivity - lower = slower scrolling
-        private let scrollSensitivity: CGFloat = 0.15
+        /// Base scroll sensitivity
+        private let touchScrollSensitivity: CGFloat = 0.18
         
-        /// Momentum velocity multiplier (how much gesture velocity translates to momentum)
-        private let momentumMultiplier: CGFloat = 0.03
+        /// Momentum velocity multiplier for touch
+        private let touchMomentumMultiplier: CGFloat = 0.012
         
-        /// Handle two-finger touch scrolling
+        /// Trackpad/mouse scroll sensitivity (higher = faster)
+        private let trackpadScrollSensitivity: CGFloat = 0.35
+        
+        /// Trackpad momentum multiplier
+        private let trackpadMomentumMultiplier: CGFloat = 0.012
+        
+        /// Track if we're currently scrolled up (not at bottom)
+        /// Updated by scrollbar callback and scroll gestures
+        var isScrolledUp: Bool = false
+        
+        /// Build scroll mods for Ghostty API (packed struct: precision bit + momentum phase)
+        private func makeScrollMods(precision: Bool, momentum: UInt8 = 0) -> Int32 {
+            // ScrollMods is packed: bit 0 = precision, bits 1-3 = momentum phase
+            var mods: Int32 = 0
+            if precision {
+                mods |= 1  // bit 0
+            }
+            mods |= Int32(momentum & 0x7) << 1  // bits 1-3
+            return mods
+        }
+        
+        /// Handle two-finger touch scrolling - lifelike iOS-style physics
         @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
             guard let surface = surface else { return }
             
             let translation = gesture.translation(in: self)
+            let velocity = gesture.velocity(in: self).y
             
             switch gesture.state {
             case .began:
@@ -1328,19 +1357,28 @@ extension Ghostty {
                 accumulatedScrollY = 0
                 
             case .changed:
-                // Convert pan translation to scroll delta
                 let deltaY = translation.y - accumulatedScrollY
                 accumulatedScrollY = translation.y
                 
-                // Send scroll to Ghostty (negative because pan down = scroll up in content)
-                let scrollY = -deltaY * scrollSensitivity
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
+                // Velocity-adaptive sensitivity - faster movement = slightly more responsive
+                // This creates that "alive" feeling where the content follows your finger naturally
+                let velocityFactor = 1.0 + min(abs(velocity) / 3000.0, 0.3)  // Up to 30% boost at high speed
+                let effectiveSensitivity = touchScrollSensitivity * velocityFactor
+                
+                let scrollY = -deltaY * effectiveSensitivity
+                let mods = makeScrollMods(precision: true, momentum: 3)
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), mods)
+                
+                if scrollY < 0 {
+                    isScrolledUp = true
+                }
                 
             case .ended, .cancelled:
-                // Get gesture velocity and start momentum scrolling
-                let velocity = gesture.velocity(in: self).y
-                // Negative because pan down = scroll up
-                startScrollMomentum(velocity: -velocity * momentumMultiplier)
+                // Natural momentum - directly proportional to release velocity
+                let momentumVelocity = -velocity * touchMomentumMultiplier
+                if abs(momentumVelocity) > scrollMinVelocity {
+                    startScrollMomentum(velocity: momentumVelocity)
+                }
                 accumulatedScrollY = 0
                 
             default:
@@ -1352,10 +1390,12 @@ extension Ghostty {
         private var accumulatedTrackpadScrollY: CGFloat = 0
         
         /// Handle trackpad/mouse wheel scrolling (Magic Keyboard, external mouse)
+        /// This should feel snappier and more direct than touch scrolling
         @objc private func handleTrackpadScroll(_ gesture: UIPanGestureRecognizer) {
             guard let surface = surface else { return }
             
             let translation = gesture.translation(in: self)
+            let velocity = gesture.velocity(in: self).y
             
             switch gesture.state {
             case .began:
@@ -1363,20 +1403,25 @@ extension Ghostty {
                 accumulatedTrackpadScrollY = 0
                 
             case .changed:
-                // Convert trackpad pan to scroll delta
+                // Convert trackpad pan to scroll delta - always smooth for trackpad/mouse
                 let deltaY = translation.y - accumulatedTrackpadScrollY
                 accumulatedTrackpadScrollY = translation.y
                 
-                // Trackpad scrolling - natural scrolling direction
-                // (pan down = content moves down = scroll down in terminal)
-                let scrollY = deltaY * scrollSensitivity
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
+                // Direct smooth scrolling - trackpad/mouse should feel immediate and responsive
+                let scrollY = deltaY * trackpadScrollSensitivity
+                let mods = makeScrollMods(precision: true, momentum: 3)
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), mods)
+                
+                if scrollY > 0 {
+                    isScrolledUp = true
+                }
                 
             case .ended, .cancelled:
-                // Get gesture velocity and start momentum scrolling
-                let velocity = gesture.velocity(in: self).y
-                // Natural direction for trackpad
-                startScrollMomentum(velocity: velocity * momentumMultiplier)
+                // Start momentum scrolling (natural direction)
+                let momentumVelocity = velocity * trackpadMomentumMultiplier
+                if abs(momentumVelocity) > scrollMinVelocity {
+                    startScrollMomentum(velocity: momentumVelocity)
+                }
                 accumulatedTrackpadScrollY = 0
                 
             default:
@@ -1390,6 +1435,8 @@ extension Ghostty {
             guard abs(velocity) > scrollMinVelocity else { return }
             
             scrollVelocity = velocity
+            initialMomentumVelocity = abs(velocity)
+            momentumFrameCount = 0
             
             scrollDisplayLink?.invalidate()
             scrollDisplayLink = CADisplayLink(target: self, selector: #selector(updateScrollMomentum))
@@ -1400,6 +1447,35 @@ extension Ghostty {
             scrollDisplayLink?.invalidate()
             scrollDisplayLink = nil
             scrollVelocity = 0
+            initialMomentumVelocity = 0
+            momentumFrameCount = 0
+        }
+        
+        /// Scroll to the bottom of the terminal (return to prompt)
+        /// This is called automatically when the user starts typing
+        func scrollToBottom() {
+            guard let surface = surface, isScrolledUp else { return }
+            
+            // Use Ghostty's built-in scroll_to_bottom binding action
+            let action = "scroll_to_bottom"
+            _ = action.withCString { cstr in
+                ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
+            }
+            isScrolledUp = false
+            stopScrollMomentum()
+        }
+        
+        /// Track if momentum scrolling is active (for tap-to-stop)
+        var isMomentumScrolling: Bool {
+            scrollDisplayLink != nil
+        }
+        
+        /// Immediately stop momentum scrolling when any touch begins
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            if isMomentumScrolling {
+                stopScrollMomentum()
+            }
+            super.touchesBegan(touches, with: event)
         }
         
         @objc private func updateScrollMomentum() {
@@ -1408,22 +1484,49 @@ extension Ghostty {
                 return
             }
             
+            momentumFrameCount += 1
+            
+            // Dynamic deceleration based on initial velocity
+            // Fast flicks coast longer (higher deceleration = slower decay)
+            let velocityFactor = min(initialMomentumVelocity / 10.0, 1.0)
+            let dynamicDeceleration = baseDeceleration + (maxDeceleration - baseDeceleration) * velocityFactor
+            
+            // Initial "kick" - first few frames maintain more velocity for tactile feel
+            let kickFrames = 3
+            let deceleration: CGFloat
+            if momentumFrameCount <= kickFrames {
+                // Minimal deceleration during kick phase
+                deceleration = 0.995
+            } else {
+                deceleration = dynamicDeceleration
+            }
+            
             // Apply deceleration
-            scrollVelocity *= scrollDeceleration
+            scrollVelocity *= deceleration
             
             // Stop if velocity is too low
             if abs(scrollVelocity) < scrollMinVelocity {
+                // Send momentum ended
+                let mods = makeScrollMods(precision: true, momentum: 4)  // 4 = ended
+                ghostty_surface_mouse_scroll(surface, 0, 0, mods)
                 stopScrollMomentum()
                 return
             }
             
-            // Apply scroll momentum
-            ghostty_surface_mouse_scroll(surface, 0, Double(scrollVelocity), 0)
+            // Apply scroll momentum with precision mode
+            let mods = makeScrollMods(precision: true, momentum: 3)  // 3 = changed (momentum phase)
+            ghostty_surface_mouse_scroll(surface, 0, Double(scrollVelocity), mods)
         }
         
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            // Tap to stop momentum scrolling (like hitting a spinning wheel to stop)
+            if isMomentumScrolling {
+                NSLog("👆 Tap to stop momentum scrolling")
+                stopScrollMomentum()
+                return
+            }
+            
             NSLog("👆 Terminal tapped, becoming first responder")
-            stopScrollMomentum()
             _ = becomeFirstResponder()
             
             // If Ctrl toggle is active, this tap should open a link
@@ -1524,15 +1627,19 @@ extension Ghostty {
             if gestureRecognizer is UIHoverGestureRecognizer || otherGestureRecognizer is UIHoverGestureRecognizer {
                 return true
             }
+            // Allow pan and long press to recognize simultaneously initially
+            // Long press will cancel pan if it triggers (via isSelecting flag)
+            if gestureRecognizer is UIPanGestureRecognizer && otherGestureRecognizer is UILongPressGestureRecognizer {
+                return true
+            }
+            if gestureRecognizer is UILongPressGestureRecognizer && otherGestureRecognizer is UIPanGestureRecognizer {
+                return true
+            }
             return false
         }
         
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            // Single finger pan should wait for long press to fail (so long press can trigger selection)
-            // But use a very short delay
-            if gestureRecognizer is UIPanGestureRecognizer && otherGestureRecognizer is UILongPressGestureRecognizer {
-                return false  // Don't wait - let pan start immediately, long press will cancel it if held
-            }
+            // Pan should NOT wait for long press to fail - we handle conflicts via isSelecting
             return false
         }
 
@@ -1542,13 +1649,14 @@ extension Ghostty {
         /// Track accumulated single-finger scroll
         private var accumulatedSingleFingerScrollY: CGFloat = 0
         
-        /// Handle single-finger pan for scrolling
+        /// Handle single-finger pan for scrolling - lifelike iOS-style physics
         @objc private func handleSingleFingerScroll(_ gesture: UIPanGestureRecognizer) {
-            // Don't scroll if we're selecting
+            // Don't scroll if we're selecting text
             guard !isSelecting else { return }
             guard let surface = surface else { return }
             
             let translation = gesture.translation(in: self)
+            let velocity = gesture.velocity(in: self).y
             
             switch gesture.state {
             case .began:
@@ -1556,17 +1664,28 @@ extension Ghostty {
                 accumulatedSingleFingerScrollY = 0
                 
             case .changed:
-                // Convert pan translation to scroll delta
                 let deltaY = translation.y - accumulatedSingleFingerScrollY
                 accumulatedSingleFingerScrollY = translation.y
                 
-                // Send scroll to Ghostty (negative because pan down = scroll up in content)
-                let scrollY = -deltaY * scrollSensitivity
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), 0)
+                // Velocity-adaptive sensitivity - faster movement = slightly more responsive
+                let velocityFactor = 1.0 + min(abs(velocity) / 3000.0, 0.3)
+                let effectiveSensitivity = touchScrollSensitivity * velocityFactor
+                
+                let scrollY = -deltaY * effectiveSensitivity
+                let mods = makeScrollMods(precision: true, momentum: 3)
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollY), mods)
+                
+                if scrollY < 0 {
+                    isScrolledUp = true
+                }
                 
             case .ended, .cancelled:
+                // Natural momentum - directly proportional to release velocity
+                let momentumVelocity = -velocity * touchMomentumMultiplier
+                if abs(momentumVelocity) > scrollMinVelocity {
+                    startScrollMomentum(velocity: momentumVelocity)
+                }
                 accumulatedSingleFingerScrollY = 0
-                stopScrollMomentum()
                 
             default:
                 break
