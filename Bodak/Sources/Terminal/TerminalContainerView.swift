@@ -13,7 +13,7 @@ import os.log
 
 private let logger = Logger(subsystem: "com.bodak", category: "Terminal")
 
-/// Container view that wraps the Ghostty terminal surface with auto-hiding chrome
+/// Container view that wraps the Ghostty terminal surface
 struct TerminalContainerView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var ghosttyApp: Ghostty.App
@@ -22,22 +22,9 @@ struct TerminalContainerView: View {
     @StateObject private var terminalViewModel = TerminalViewModel()
     @State private var keyboardHeight: CGFloat = 0
     
-    // Auto-hide UI state
-    @State private var showChrome: Bool = true
-    @State private var hideTimer: Timer?
-    @State private var isSelectingText: Bool = false
-    @State private var showSettings: Bool = false
-    
     // Link preview state
     @State private var hoverUrl: String? = nil
     @State private var hoverUrlCancellable: AnyCancellable? = nil
-    
-    // Constants for auto-hide behavior
-    private let edgeTapThreshold: CGFloat = 60 // Pixels from edge to reveal chrome
-    
-    // Use pure UIKit terminal view (no SwiftUI UIViewRepresentable) to prevent flash
-    // The flash was caused by SwiftUI's view update mechanism with UIViewRepresentable
-    private let usePureUIKit = true
     
     /// Theme background color to prevent flash
     private var themeBackground: Color {
@@ -45,293 +32,14 @@ struct TerminalContainerView: View {
     }
     
     var body: some View {
-        if usePureUIKit {
-            // Pure UIKit UIViewController - NO FLASH!
-            // This bypasses SwiftUI's view update mechanism which was causing the gray flash
-            RawTerminalViewController(
-                ghosttyApp: ghosttyApp,
-                viewModel: terminalViewModel,
-                onSetup: { setupConnection() }
-            )
-            .ignoresSafeArea(.all)
-        } else {
-            fullBody
-        }
-    }
-    
-    @ViewBuilder
-    var fullBody: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Black background behind everything
-                Color.black
-                    .ignoresSafeArea(.all)
-                
-                // Main terminal surface (full screen)
-                // When status bar is hidden, use full screen
-                // When status bar is shown, add top padding to avoid overlap
-                BodakTerminalView(viewModel: terminalViewModel)
-                    .environmentObject(ghosttyApp)
-                    .ignoresSafeArea(.all)
-                    .padding(.top, settings.showStatusBar ? geometry.safeAreaInsets.top : 0)
-                
-                // Overlay for detecting taps on edges to reveal chrome
-                VStack {
-                    // Top edge tap area (reveals navigation)
-                    Color.clear
-                        .frame(height: edgeTapThreshold)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            revealChrome()
-                        }
-                    
-                    Spacer()
-                    
-                    // Bottom edge tap area (reveals toolbar)
-                    Color.clear
-                        .frame(height: edgeTapThreshold)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            revealChrome()
-                        }
-                }
-                .allowsHitTesting(!showChrome && !isSelectingText)
-                
-                // Top chrome (navigation bar overlay)
-                VStack {
-                    if showChrome {
-                        HStack {
-                            Button(action: disconnect) {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 17, weight: .semibold))
-                            }
-                            
-                            Spacer()
-                            
-                            // Title and duration (only if enabled in settings)
-                            if settings.showConnectionInfo {
-                                VStack(spacing: 2) {
-                                    Text(terminalTitle)
-                                        .font(.headline)
-                                        .lineLimit(1)
-                                    
-                                    // Connection duration badge
-                                    if terminalViewModel.connectionDuration > 0 {
-                                        Text(terminalViewModel.formattedDuration)
-                                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            
-                            Spacer()
-                            
-                            Menu {
-                                Button(action: { terminalViewModel.paste() }) {
-                                    Label("Paste", systemImage: "doc.on.clipboard")
-                                }
-                                Button(action: { terminalViewModel.copy() }) {
-                                    Label("Copy", systemImage: "doc.on.doc")
-                                }
-                                Divider()
-                                Button(action: { showSettings = true }) {
-                                    Label("Settings", systemImage: "gear")
-                                }
-                                Divider()
-                                Button(role: .destructive, action: disconnect) {
-                                    Label("Disconnect", systemImage: "xmark.circle")
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis.circle")
-                                    .font(.system(size: 20))
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, geometry.safeAreaInsets.top + 8)
-                        .padding(.bottom, 12)
-                        .background(
-                            LinearGradient(
-                                colors: [ThemeManager.shared.selectedTheme.background.opacity(0.95), ThemeManager.shared.selectedTheme.background.opacity(0)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                    
-                    Spacer()
-                }
-                
-                // Link preview tooltip (shows URL when hovering over a link)
-                if let url = hoverUrl {
-                    VStack {
-                        Spacer()
-                        
-                        HStack(spacing: 6) {
-                            Image(systemName: "link")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.blue)
-                            
-                            Text(url)
-                                .font(.system(size: 13, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .foregroundColor(.white)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.black.opacity(0.85))
-                                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-                        )
-                        .padding(.bottom, showChrome ? 80 + max(geometry.safeAreaInsets.bottom, keyboardHeight) : 20)
-                    }
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                    .animation(.easeInOut(duration: 0.15), value: hoverUrl)
-                }
-            }
-            // TEMPORARILY DISABLED: Testing if animations cause white flash
-            // .animation(.easeInOut(duration: 0.3), value: showChrome)
-        }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-        .statusBarHidden(!settings.showStatusBar)
-        .persistentSystemOverlays(.hidden) // Hides home indicator
-        .navigationBarHidden(true)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
-            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                keyboardHeight = keyboardFrame.height
-                revealChrome() // Show chrome when keyboard appears
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            keyboardHeight = 0
-        }
-        // Keyboard shortcut handlers
-        .onReceive(NotificationCenter.default.publisher(for: .terminalClearScreen)) { _ in
-            terminalViewModel.clearScreen()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .terminalReset)) { _ in
-            terminalViewModel.resetTerminal()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .terminalIncreaseFontSize)) { _ in
-            terminalViewModel.increaseFontSize()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .terminalDecreaseFontSize)) { _ in
-            terminalViewModel.decreaseFontSize()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .terminalResetFontSize)) { _ in
-            terminalViewModel.resetFontSize()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .terminalDisconnect)) { _ in
-            disconnect()
-        }
-        .onAppear {
-            setupConnection()
-            startAutoHideTimer()
-            
-            // Subscribe to hoverUrl changes from surface view
-            // We need a small delay since surfaceView is created in BodakTerminalView's makeUIView
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                subscribeToHoverUrl()
-            }
-        }
-        .onDisappear {
-            hideTimer?.invalidate()
-            hoverUrlCancellable?.cancel()
-            hoverUrlCancellable = nil
-            terminalViewModel.disconnect()
-            terminalViewModel.surfaceView = nil
-        }
-        .onChange(of: terminalViewModel.title) { _, newTitle in
-            if !newTitle.isEmpty {
-                terminalTitle = newTitle
-            }
-        }
-        .onChange(of: terminalViewModel.disconnectedByRemote) { _, disconnected in
-            if disconnected {
-                if let error = terminalViewModel.disconnectError {
-                    appState.connectionStatus = .error(error)
-                } else {
-                    appState.connectionStatus = .disconnected
-                }
-            }
-        }
-        .onChange(of: terminalViewModel.isSelectingText) { _, selecting in
-            isSelectingText = selecting
-            if selecting {
-                revealChrome() // Keep chrome visible during selection
-            }
-        }
-        // Tap anywhere on terminal to reset auto-hide timer
-        .onTapGesture {
-            if showChrome {
-                startAutoHideTimer()
-            }
-        }
-        // Shake device to clear the terminal screen
-        .onShake {
-            terminalViewModel.clearScreen()
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(
-                currentFontSize: Int(terminalViewModel.currentFontSize),
-                onFontSizeChanged: { newSize in terminalViewModel.setFontSize(newSize) },
-                onResetFontSize: { terminalViewModel.resetFontSize() },
-                onFontFamilyChanged: { terminalViewModel.updateConfig() },
-                onThemeChanged: { terminalViewModel.updateConfig() }
-            )
-        }
-    }
-    
-    // MARK: - Auto-hide Logic
-    
-    private func revealChrome() {
-        withAnimation {
-            showChrome = true
-        }
-        startAutoHideTimer()
-    }
-    
-    private func hideChrome() {
-        // Don't hide if disabled, keyboard is showing, or user is selecting text
-        guard settings.autoHideChrome && keyboardHeight == 0 && !isSelectingText else { return }
-        
-        withAnimation {
-            showChrome = false
-        }
-    }
-    
-    private func startAutoHideTimer() {
-        guard settings.autoHideChrome else { return }
-        
-        hideTimer?.invalidate()
-        hideTimer = Timer.scheduledTimer(withTimeInterval: settings.autoHideDelay, repeats: false) { _ in
-            Task { @MainActor in
-                hideChrome()
-            }
-        }
-    }
-    
-    // MARK: - Link Preview
-    
-    private func subscribeToHoverUrl() {
-        guard let surfaceView = terminalViewModel.surfaceView else {
-            // Retry after a short delay if surface view isn't ready yet
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                subscribeToHoverUrl()
-            }
-            return
-        }
-        
-        // Subscribe to hoverUrl changes
-        hoverUrlCancellable = surfaceView.$hoverUrl
-            .receive(on: DispatchQueue.main)
-            .sink { [self] url in
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    self.hoverUrl = url
-                }
-            }
+        // Pure UIKit UIViewController - NO FLASH!
+        // This bypasses SwiftUI's view update mechanism which was causing the gray flash
+        RawTerminalViewController(
+            ghosttyApp: ghosttyApp,
+            viewModel: terminalViewModel,
+            onSetup: { setupConnection() }
+        )
+        .ignoresSafeArea(.all)
     }
     
     // MARK: - Connection
@@ -998,22 +706,12 @@ class RawTerminalUIViewController: UIViewController {
     // Settings observation
     private var settingsObserver: NSObjectProtocol?
     
-    // Chrome overlay
-    private var chromeView: UIView?
-    private var chromeVisible = false
-    private var chromeHideTimer: Timer?
-    private let chromeAutoHideDelay: TimeInterval = 3.0
-    
     // Secure keyboard entry state
     private var secureKeyboardEntry = false
     
     // Status bar preference (read from UserDefaults)
     private var showStatusBar: Bool {
         UserDefaults.standard.bool(forKey: "ui.showStatusBar")
-    }
-    
-    private var autoHideChrome: Bool {
-        UserDefaults.standard.bool(forKey: "ui.autoHideChrome")
     }
     
     override var prefersStatusBarHidden: Bool {
@@ -1033,9 +731,6 @@ class RawTerminalUIViewController: UIViewController {
         
         // Create and add the surface view
         createSurfaceView()
-        
-        // Create chrome overlay (after surface so it's on top)
-        createChromeOverlay()
         
         // Observe settings changes
         settingsObserver = NotificationCenter.default.addObserver(
@@ -1133,109 +828,7 @@ class RawTerminalUIViewController: UIViewController {
         }
     }
     
-    // MARK: - Chrome Overlay
-    
-    private func createChromeOverlay() {
-        let chrome = UIView()
-        chrome.backgroundColor = .clear
-        chrome.translatesAutoresizingMaskIntoConstraints = false
-        chrome.alpha = 0
-        chrome.isUserInteractionEnabled = true
-        view.addSubview(chrome)
-        
-        // Chrome covers the top area
-        NSLayoutConstraint.activate([
-            chrome.topAnchor.constraint(equalTo: view.topAnchor),
-            chrome.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            chrome.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            chrome.heightAnchor.constraint(equalToConstant: 100)
-        ])
-        
-        // Gradient background
-        let gradientLayer = CAGradientLayer()
-        gradientLayer.colors = [
-            UIColor.black.withAlphaComponent(0.8).cgColor,
-            UIColor.black.withAlphaComponent(0.0).cgColor
-        ]
-        gradientLayer.frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 100)
-        chrome.layer.insertSublayer(gradientLayer, at: 0)
-        
-        // Settings menu button (single gear with dropdown menu)
-        let menuButton = UIButton(type: .system)
-        menuButton.setImage(UIImage(systemName: "ellipsis.circle")?.withConfiguration(
-            UIImage.SymbolConfiguration(pointSize: 24, weight: .medium)
-        ), for: .normal)
-        menuButton.tintColor = .white
-        menuButton.translatesAutoresizingMaskIntoConstraints = false
-        menuButton.showsMenuAsPrimaryAction = true
-        menuButton.menu = createOptionsMenu()
-        chrome.addSubview(menuButton)
-        
-        NSLayoutConstraint.activate([
-            menuButton.topAnchor.constraint(equalTo: chrome.safeAreaLayoutGuide.topAnchor, constant: 8),
-            menuButton.trailingAnchor.constraint(equalTo: chrome.trailingAnchor, constant: -16),
-            menuButton.widthAnchor.constraint(equalToConstant: 44),
-            menuButton.heightAnchor.constraint(equalToConstant: 44)
-        ])
-        
-        self.chromeView = chrome
-        
-        // Ensure chrome is always on top
-        view.bringSubviewToFront(chrome)
-    }
-    
-    private func createOptionsMenu() -> UIMenu {
-        // Quick actions for touch access (full menu is in iPadOS menu bar)
-        let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-            self?.viewModel?.copy()
-        }
-        
-        let pasteAction = UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
-            self?.viewModel?.paste()
-        }
-        
-        let clearAction = UIAction(title: "Clear Screen", image: UIImage(systemName: "xmark.rectangle")) { [weak self] _ in
-            self?.handleClearScreen()
-        }
-        
-        let settingsAction = UIAction(title: "Settings", image: UIImage(systemName: "gear")) { [weak self] _ in
-            self?.handleSettingsButton()
-        }
-        
-        let disconnectAction = UIAction(title: "Disconnect", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { [weak self] _ in
-            self?.handleBackButton()
-        }
-        
-        return UIMenu(children: [copyAction, pasteAction, clearAction, settingsAction, disconnectAction])
-    }
-    
     // MARK: - Menu Action Handlers
-    
-    private func handleNewConnection() {
-        // Disconnect current and go to connection list
-        viewModel?.disconnect()
-        NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
-    }
-    
-    private func handleQuickConnect() {
-        // Show quick connect sheet
-        let alert = UIAlertController(title: "Quick Connect", message: "Enter host address", preferredStyle: .alert)
-        alert.addTextField { textField in
-            textField.placeholder = "user@hostname"
-            textField.keyboardType = .URL
-            textField.autocapitalizationType = .none
-            textField.autocorrectionType = .no
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Connect", style: .default) { [weak self] _ in
-            if let text = alert.textFields?.first?.text, !text.isEmpty {
-                // Parse and connect - for now just show it
-                // TODO: Implement actual quick connect
-                print("Quick connect to: \(text)")
-            }
-        })
-        present(alert, animated: true)
-    }
     
     private func handleSelectAll() {
         // Select all text in terminal
@@ -1261,10 +854,6 @@ class RawTerminalUIViewController: UIViewController {
         let newValue = !showStatusBar
         UserDefaults.standard.set(newValue, forKey: "ui.showStatusBar")
         updateStatusBarAndLayout()
-        // Recreate menu to update checkmark
-        if let menuButton = chromeView?.subviews.first(where: { $0 is UIButton }) as? UIButton {
-            menuButton.menu = createOptionsMenu()
-        }
     }
     
     private func handleClearScreen() {
@@ -1279,10 +868,6 @@ class RawTerminalUIViewController: UIViewController {
     
     private func toggleSecureKeyboardEntry() {
         secureKeyboardEntry.toggle()
-        // Recreate menu to update checkmark
-        if let menuButton = chromeView?.subviews.first(where: { $0 is UIButton }) as? UIButton {
-            menuButton.menu = createOptionsMenu()
-        }
         // TODO: Actually implement secure keyboard entry
         // This would prevent other apps from seeing keystrokes
     }
@@ -1314,81 +899,10 @@ class RawTerminalUIViewController: UIViewController {
         present(alert, animated: true)
     }
     
-    @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
-        let location = gesture.location(in: view)
-        let edgeThreshold: CGFloat = 60
-        
-        // Only respond to taps near top or bottom edges
-        if location.y < edgeThreshold || location.y > view.bounds.height - edgeThreshold {
-            toggleChrome()
-        } else if chromeVisible {
-            // Tap elsewhere while chrome visible - reset timer
-            startChromeHideTimer()
-        }
-    }
-    
-    private func toggleChrome() {
-        if chromeVisible {
-            hideChrome()
-        } else {
-            showChrome()
-        }
-    }
-    
-    private func showChrome() {
-        chromeVisible = true
-        UIView.animate(withDuration: 0.25) {
-            self.chromeView?.alpha = 1
-        }
-        startChromeHideTimer()
-    }
-    
-    private func hideChrome() {
-        chromeHideTimer?.invalidate()
-        chromeHideTimer = nil
-        chromeVisible = false
-        UIView.animate(withDuration: 0.25) {
-            self.chromeView?.alpha = 0
-        }
-    }
-    
-    private func startChromeHideTimer() {
-        chromeHideTimer?.invalidate()
-        
-        // Only auto-hide if setting is enabled
-        guard autoHideChrome else { return }
-        
-        chromeHideTimer = Timer.scheduledTimer(withTimeInterval: chromeAutoHideDelay, repeats: false) { [weak self] _ in
-            self?.hideChrome()
-        }
-    }
-    
     @objc private func handleBackButton() {
         // Disconnect and go back
         viewModel?.disconnect()
-        
-        // Find the AppState and update connection status
-        if let windowScene = view.window?.windowScene {
-            for window in windowScene.windows {
-                if let rootVC = window.rootViewController {
-                    findAndDisconnect(in: rootVC)
-                }
-            }
-        }
-    }
-    
-    private func findAndDisconnect(in viewController: UIViewController) {
-        // Try to find AppState through the view hierarchy
-        // This navigates back by setting connection status to disconnected
-        if let hostingController = viewController as? UIHostingController<AnyView> {
-            // Post notification to disconnect
-            NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
-        } else if let navController = viewController as? UINavigationController {
-            navController.popViewController(animated: true)
-        } else {
-            // Fallback: post disconnect notification
-            NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
-        }
+        NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
     }
     
     @objc private func handleSettingsButton() {
@@ -1421,9 +935,6 @@ class RawTerminalUIViewController: UIViewController {
         }
         
         present(hostingController, animated: true)
-        
-        // Keep chrome visible while settings open
-        chromeHideTimer?.invalidate()
     }
     
     override func viewDidLayoutSubviews() {
@@ -1431,12 +942,6 @@ class RawTerminalUIViewController: UIViewController {
         
         // Update top constraint based on status bar visibility
         updateTopConstraint()
-        
-        // Update gradient layer frame
-        if let chrome = chromeView,
-           let gradientLayer = chrome.layer.sublayers?.first as? CAGradientLayer {
-            gradientLayer.frame = chrome.bounds
-        }
     }
     
     private func createSurfaceView() {
@@ -1488,16 +993,6 @@ class RawTerminalUIViewController: UIViewController {
         
         // Store in view model
         viewModel?.surfaceView = surface
-        
-        // Add edge tap gesture to the surface view (since it consumes touches)
-        let edgeTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEdgeTap(_:)))
-        edgeTapGesture.cancelsTouchesInView = false
-        surface.addGestureRecognizer(edgeTapGesture)
-        
-        // Ensure chrome is on top of surface
-        if let chrome = chromeView {
-            view.bringSubviewToFront(chrome)
-        }
         
         // Set focus
         surface.focusDidChange(true)
