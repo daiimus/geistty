@@ -31,6 +31,7 @@
 		A1000009 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000001 /* CSSH */; };
 		A1000010 /* Ghostty.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* Ghostty.swift */; };
 708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */; };
+		A1000013 /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* GhosttyInput.swift */; };
 		A1000011 /* GhosttyTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* GhosttyTerminalView.swift */; };
 		A1000012 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000013 /* GhosttyKit.xcframework */; };
 		A1000020 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* KeychainManager.swift */; };
@@ -81,6 +82,7 @@
 		A2000010 /* Bodak.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Bodak.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000011 /* Ghostty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.swift; sourceTree = "<group>"; };
 5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSyncManager.swift; sourceTree = "<group>"; };
+		A2000014 /* GhosttyInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInput.swift; sourceTree = "<group>"; };
 		A2000012 /* GhosttyTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTerminalView.swift; sourceTree = "<group>"; };
 		A2000013 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		A2000020 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
@@ -175,6 +177,7 @@
 			children = (
 				A2000011 /* Ghostty.swift */,
 						5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */,
+				A2000014 /* GhosttyInput.swift */,
 				A2000012 /* GhosttyTerminalView.swift */,
 			);
 			path = Ghostty;
@@ -341,6 +344,7 @@
 				A1000002 /* ContentView.swift in Sources */,
 				A1000010 /* Ghostty.swift in Sources */,
 						708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */,
+				A1000013 /* GhosttyInput.swift in Sources */,
 				A1000011 /* GhosttyTerminalView.swift in Sources */,
 				A1000003 /* TerminalContainerView.swift in Sources */,
 				A1000004 /* SSHSession.swift in Sources */,
