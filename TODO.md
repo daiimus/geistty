@@ -84,6 +84,7 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Function keys (F1-F12)
   - [x] Home/End/PageUp/PageDown
   - [x] UIKey → macOS keycode mapping
+  - [x] Key repeat support (timer-based, 0.4s delay, 20/sec rate)
 - [x] **Keyboard accessory bar**
   - [x] Esc button
   - [x] Ctrl toggle button (sticky modifier)
@@ -98,6 +99,7 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Cmd+W for disconnect ✅
   - [x] Font size shortcuts (Cmd+0/+/-) ✅
   - [ ] Keyboard shortcuts help overlay
+  - [ ] Key repeat delay/rate as configurable settings
 - [x] **Proper Ghostty keyboard API integration** ✅ COMPLETE
   - [x] Refactor to use ghostty_surface_key() instead of raw byte sending
   - [x] Build KeyEvent struct matching macOS implementation (GhosttyInput.swift)
