@@ -31,25 +31,59 @@ struct BodakApp: App {
                 }
         }
         .commands {
-            // Terminal commands (Cmd+C/V work automatically via system)
-            CommandGroup(replacing: .textEditing) {
-                // Keep standard edit commands
+            // MARK: - App Menu (Bodak menu)
+            // Add Preferences to the app menu (Cmd+,)
+            CommandGroup(replacing: .appSettings) {
+                Button("Preferences…") {
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
+                }
+                .keyboardShortcut(",", modifiers: .command)
             }
             
-            // Custom terminal commands shown in Cmd-hold menu on iPad
-            CommandMenu("Terminal") {
-                Button("Clear Screen") {
-                    NotificationCenter.default.post(name: .terminalClearScreen, object: nil)
+            // MARK: - File Menu
+            // Replace "New" with connection-related items
+            CommandGroup(replacing: .newItem) {
+                Button("New Connection…") {
+                    NotificationCenter.default.post(name: .showNewConnection, object: nil)
                 }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut("n", modifiers: .command)
                 
-                Button("Reset Terminal") {
-                    NotificationCenter.default.post(name: .terminalReset, object: nil)
+                Button("Quick Connect…") {
+                    NotificationCenter.default.post(name: .showQuickConnect, object: nil)
                 }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keyboardShortcut("n", modifiers: [.command, .shift])
                 
                 Divider()
                 
+                Button("Close Connection") {
+                    NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
+                }
+                .keyboardShortcut("w", modifiers: .command)
+            }
+            
+            // MARK: - Edit Menu
+            // Add Select All to the standard edit menu
+            CommandGroup(replacing: .pasteboard) {
+                Button("Copy") {
+                    NotificationCenter.default.post(name: .terminalCopy, object: nil)
+                }
+                .keyboardShortcut("c", modifiers: .command)
+                
+                Button("Paste") {
+                    NotificationCenter.default.post(name: .terminalPaste, object: nil)
+                }
+                .keyboardShortcut("v", modifiers: .command)
+                
+                Divider()
+                
+                Button("Select All") {
+                    NotificationCenter.default.post(name: .terminalSelectAll, object: nil)
+                }
+                .keyboardShortcut("a", modifiers: .command)
+            }
+            
+            // MARK: - View Menu
+            CommandGroup(replacing: .toolbar) {
                 Button("Increase Font Size") {
                     NotificationCenter.default.post(name: .terminalIncreaseFontSize, object: nil)
                 }
@@ -64,25 +98,50 @@ struct BodakApp: App {
                     NotificationCenter.default.post(name: .terminalResetFontSize, object: nil)
                 }
                 .keyboardShortcut("0", modifiers: .command)
+            }
+            
+            // MARK: - Terminal Menu (Custom)
+            CommandMenu("Terminal") {
+                Button("Clear Screen") {
+                    NotificationCenter.default.post(name: .terminalClearScreen, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                
+                Button("Reset Terminal") {
+                    NotificationCenter.default.post(name: .terminalReset, object: nil)
+                }
                 
                 Divider()
                 
-                Button("Disconnect") {
-                    NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
+                Button("Reconnect") {
+                    NotificationCenter.default.post(name: .terminalReconnect, object: nil)
                 }
-                .keyboardShortcut("w", modifiers: .command)
+                .keyboardShortcut("r", modifiers: [.command, .shift])
             }
             
+            // MARK: - Connection Menu (Custom)
             CommandMenu("Connection") {
-                Button("New Connection") {
-                    NotificationCenter.default.post(name: .showNewConnection, object: nil)
+                Button("Connection Profiles…") {
+                    NotificationCenter.default.post(name: .showConnectionProfiles, object: nil)
                 }
-                .keyboardShortcut("n", modifiers: .command)
                 
-                Button("Quick Connect") {
-                    NotificationCenter.default.post(name: .showQuickConnect, object: nil)
+                Button("SSH Key Manager…") {
+                    NotificationCenter.default.post(name: .showSSHKeyManager, object: nil)
                 }
-                .keyboardShortcut("o", modifiers: .command)
+                
+                Divider()
+                
+                Button("Toggle Secure Keyboard Entry") {
+                    NotificationCenter.default.post(name: .terminalToggleSecureKeyboard, object: nil)
+                }
+            }
+            
+            // MARK: - Help Menu
+            CommandGroup(replacing: .help) {
+                Button("Keyboard Shortcuts") {
+                    NotificationCenter.default.post(name: .showKeyboardShortcuts, object: nil)
+                }
+                .keyboardShortcut("/", modifiers: .command)
             }
         }
     }
@@ -106,14 +165,27 @@ struct BodakApp: App {
 // MARK: - Notification Names for Keyboard Shortcuts
 
 extension Notification.Name {
+    // Terminal actions
     static let terminalClearScreen = Notification.Name("terminalClearScreen")
     static let terminalReset = Notification.Name("terminalReset")
     static let terminalIncreaseFontSize = Notification.Name("terminalIncreaseFontSize")
     static let terminalDecreaseFontSize = Notification.Name("terminalDecreaseFontSize")
     static let terminalResetFontSize = Notification.Name("terminalResetFontSize")
     static let terminalDisconnect = Notification.Name("terminalDisconnect")
+    static let terminalSelectAll = Notification.Name("terminalSelectAll")
+    static let terminalCopy = Notification.Name("terminalCopy")
+    static let terminalPaste = Notification.Name("terminalPaste")
+    static let terminalToggleStatusBar = Notification.Name("terminalToggleStatusBar")
+    static let terminalToggleSecureKeyboard = Notification.Name("terminalToggleSecureKeyboard")
+    static let terminalReconnect = Notification.Name("terminalReconnect")
+    
+    // Navigation/UI
     static let showNewConnection = Notification.Name("showNewConnection")
     static let showQuickConnect = Notification.Name("showQuickConnect")
+    static let showSSHKeyManager = Notification.Name("showSSHKeyManager")
+    static let showConnectionProfiles = Notification.Name("showConnectionProfiles")
+    static let showKeyboardShortcuts = Notification.Name("showKeyboardShortcuts")
+    static let showSettings = Notification.Name("showSettings")
 }
 
 /// Global application state

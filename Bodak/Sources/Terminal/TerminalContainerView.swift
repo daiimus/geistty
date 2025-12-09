@@ -1004,6 +1004,9 @@ class RawTerminalUIViewController: UIViewController {
     private var chromeHideTimer: Timer?
     private let chromeAutoHideDelay: TimeInterval = 3.0
     
+    // Secure keyboard entry state
+    private var secureKeyboardEntry = false
+    
     // Status bar preference (read from UserDefaults)
     private var showStatusBar: Bool {
         UserDefaults.standard.bool(forKey: "ui.showStatusBar")
@@ -1042,6 +1045,57 @@ class RawTerminalUIViewController: UIViewController {
         ) { [weak self] _ in
             self?.updateStatusBarAndLayout()
         }
+        
+        // Observe menu bar commands
+        setupMenuBarNotifications()
+    }
+    
+    private func setupMenuBarNotifications() {
+        // Terminal actions
+        NotificationCenter.default.addObserver(forName: .terminalClearScreen, object: nil, queue: .main) { [weak self] _ in
+            self?.handleClearScreen()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalReset, object: nil, queue: .main) { [weak self] _ in
+            self?.handleResetTerminal()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalIncreaseFontSize, object: nil, queue: .main) { [weak self] _ in
+            self?.handleIncreaseFontSize()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalDecreaseFontSize, object: nil, queue: .main) { [weak self] _ in
+            self?.handleDecreaseFontSize()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalResetFontSize, object: nil, queue: .main) { [weak self] _ in
+            self?.handleResetFontSize()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalSelectAll, object: nil, queue: .main) { [weak self] _ in
+            self?.handleSelectAll()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalToggleStatusBar, object: nil, queue: .main) { [weak self] _ in
+            self?.toggleStatusBar()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalToggleSecureKeyboard, object: nil, queue: .main) { [weak self] _ in
+            self?.toggleSecureKeyboardEntry()
+        }
+        NotificationCenter.default.addObserver(forName: .showKeyboardShortcuts, object: nil, queue: .main) { [weak self] _ in
+            self?.showKeyboardShortcutsHelp()
+        }
+        NotificationCenter.default.addObserver(forName: .showSettings, object: nil, queue: .main) { [weak self] _ in
+            self?.handleSettingsButton()
+        }
+        
+        // Copy/Paste
+        NotificationCenter.default.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
+            self?.viewModel?.copy()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalPaste, object: nil, queue: .main) { [weak self] _ in
+            self?.viewModel?.paste()
+        }
+        
+        // Connection management
+        NotificationCenter.default.addObserver(forName: .terminalDisconnect, object: nil, queue: .main) { [weak self] _ in
+            self?.handleBackButton()
+        }
+        // Note: terminalReconnect is handled in ContentView which has access to appState
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -1131,12 +1185,17 @@ class RawTerminalUIViewController: UIViewController {
     }
     
     private func createOptionsMenu() -> UIMenu {
+        // Quick actions for touch access (full menu is in iPadOS menu bar)
+        let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+            self?.viewModel?.copy()
+        }
+        
         let pasteAction = UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
             self?.viewModel?.paste()
         }
         
-        let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-            self?.viewModel?.copy()
+        let clearAction = UIAction(title: "Clear Screen", image: UIImage(systemName: "xmark.rectangle")) { [weak self] _ in
+            self?.handleClearScreen()
         }
         
         let settingsAction = UIAction(title: "Settings", image: UIImage(systemName: "gear")) { [weak self] _ in
@@ -1147,7 +1206,112 @@ class RawTerminalUIViewController: UIViewController {
             self?.handleBackButton()
         }
         
-        return UIMenu(children: [pasteAction, copyAction, settingsAction, disconnectAction])
+        return UIMenu(children: [copyAction, pasteAction, clearAction, settingsAction, disconnectAction])
+    }
+    
+    // MARK: - Menu Action Handlers
+    
+    private func handleNewConnection() {
+        // Disconnect current and go to connection list
+        viewModel?.disconnect()
+        NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
+    }
+    
+    private func handleQuickConnect() {
+        // Show quick connect sheet
+        let alert = UIAlertController(title: "Quick Connect", message: "Enter host address", preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.placeholder = "user@hostname"
+            textField.keyboardType = .URL
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Connect", style: .default) { [weak self] _ in
+            if let text = alert.textFields?.first?.text, !text.isEmpty {
+                // Parse and connect - for now just show it
+                // TODO: Implement actual quick connect
+                print("Quick connect to: \(text)")
+            }
+        })
+        present(alert, animated: true)
+    }
+    
+    private func handleSelectAll() {
+        // Select all text in terminal
+        // TODO: Implement via Ghostty API if available
+        viewModel?.surfaceView?.selectAll()
+    }
+    
+    private func handleIncreaseFontSize() {
+        let currentSize = viewModel?.currentFontSize ?? 14
+        viewModel?.setFontSize(Int(currentSize) + 1)
+    }
+    
+    private func handleDecreaseFontSize() {
+        let currentSize = viewModel?.currentFontSize ?? 14
+        viewModel?.setFontSize(max(8, Int(currentSize) - 1))
+    }
+    
+    private func handleResetFontSize() {
+        viewModel?.resetFontSize()
+    }
+    
+    private func toggleStatusBar() {
+        let newValue = !showStatusBar
+        UserDefaults.standard.set(newValue, forKey: "ui.showStatusBar")
+        updateStatusBarAndLayout()
+        // Recreate menu to update checkmark
+        if let menuButton = chromeView?.subviews.first(where: { $0 is UIButton }) as? UIButton {
+            menuButton.menu = createOptionsMenu()
+        }
+    }
+    
+    private func handleClearScreen() {
+        // Send clear screen escape sequence (Ctrl+L equivalent)
+        viewModel?.send(text: "\u{0C}")  // Form feed / Ctrl+L
+    }
+    
+    private func handleResetTerminal() {
+        // Send reset terminal escape sequence
+        viewModel?.send(text: "\u{1B}c")  // ESC c - Full reset
+    }
+    
+    private func toggleSecureKeyboardEntry() {
+        secureKeyboardEntry.toggle()
+        // Recreate menu to update checkmark
+        if let menuButton = chromeView?.subviews.first(where: { $0 is UIButton }) as? UIButton {
+            menuButton.menu = createOptionsMenu()
+        }
+        // TODO: Actually implement secure keyboard entry
+        // This would prevent other apps from seeing keystrokes
+    }
+    
+    private func showKeyboardShortcutsHelp() {
+        let shortcuts = """
+        Keyboard Shortcuts
+        
+        Cmd+C        Copy
+        Cmd+V        Paste
+        Cmd+K        Clear Screen
+        Cmd+0        Reset Font Size
+        Cmd++        Increase Font Size
+        Cmd+-        Decrease Font Size
+        Cmd+W        Disconnect
+        
+        Ctrl+C       Interrupt (SIGINT)
+        Ctrl+D       EOF / Logout
+        Ctrl+L       Clear Screen
+        Ctrl+Z       Suspend
+        
+        Arrow Keys   Navigate
+        Tab          Complete
+        Esc          Cancel
+        """
+        
+        let alert = UIAlertController(title: nil, message: shortcuts, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
     
     @objc private func handleEdgeTap(_ gesture: UITapGestureRecognizer) {
