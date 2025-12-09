@@ -117,7 +117,7 @@ struct BodakApp: App {
                 Button("Reload Configuration") {
                     NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
                 }
-                .keyboardShortcut("r", modifiers: [.command, .option])
+                .keyboardShortcut(",", modifiers: [.command, .shift])
                 
                 Divider()
                 
