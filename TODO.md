@@ -294,7 +294,7 @@ Config file (`ghostty.conf`) is now the source of truth.
 
 ---
 
-## 📋 Phase 9: Release Preparation — PLANNED
+## 📋 Phase 9: Release Preparation — IN PROGRESS
 
 ### Apple Developer Setup
 - [ ] Enroll in Apple Developer Program ($99/year)
@@ -303,6 +303,7 @@ Config file (`ghostty.conf`) is now the source of truth.
 - [ ] Create App Store Connect listing
 
 ### TestFlight Beta
+- [x] TestFlight distribution guide (TESTFLIGHT.md)
 - [ ] Archive release build
 - [ ] Upload to App Store Connect
 - [ ] Internal testing (your devices)
@@ -310,21 +311,23 @@ Config file (`ghostty.conf`) is now the source of truth.
 - [ ] Collect crash reports & feedback
 
 ### App Store Assets
-- [ ] App icon (1024x1024)
-- [ ] Screenshots (iPad Pro, iPhone)
+- [x] App icon (1024x1024) - light/dark variants
+- [x] Launch screen (UILaunchScreen in Info.plist)
+- [x] App Store metadata guide (APP_STORE.md)
+- [ ] Screenshots (iPad Pro, iPhone) - guide in APP_STORE.md
 - [ ] App preview video (optional)
-- [ ] App description
-- [ ] Keywords for search
-- [ ] Privacy policy URL
-- [ ] Support URL
+- [x] App description
+- [x] Keywords for search
+- [x] Privacy policy (PRIVACY.md)
+- [ ] Support URL (GitHub repo)
 
 ### Compliance
-- [ ] Export compliance (encryption - SSH uses crypto)
-- [ ] Privacy policy (what data is collected/stored)
+- [x] Export compliance (ITSAppUsesNonExemptEncryption=NO - exempt)
+- [x] Privacy policy (PRIVACY.md)
 - [ ] Age rating questionnaire
 
 ### Polish
-- [ ] Launch screen / splash
+- [x] Launch screen / splash
 - [ ] Onboarding flow (first launch)
 - [ ] Accessibility (VoiceOver, Dynamic Type)
 - [ ] Localization (English first, others later)
