@@ -81,6 +81,23 @@ struct BodakApp: App {
                     NotificationCenter.default.post(name: .terminalSelectAll, object: nil)
                 }
                 .keyboardShortcut("a", modifiers: .command)
+                
+                Divider()
+                
+                Button("Find…") {
+                    NotificationCenter.default.post(name: .terminalFind, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: .command)
+                
+                Button("Find Next") {
+                    NotificationCenter.default.post(name: .terminalFindNext, object: nil)
+                }
+                .keyboardShortcut("g", modifiers: .command)
+                
+                Button("Find Previous") {
+                    NotificationCenter.default.post(name: .terminalFindPrevious, object: nil)
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
             }
             
             // MARK: - View Menu
@@ -186,6 +203,9 @@ extension Notification.Name {
     static let terminalToggleStatusBar = Notification.Name("terminalToggleStatusBar")
     static let terminalToggleSecureKeyboard = Notification.Name("terminalToggleSecureKeyboard")
     static let terminalReconnect = Notification.Name("terminalReconnect")
+    static let terminalFind = Notification.Name("terminalFind")
+    static let terminalFindNext = Notification.Name("terminalFindNext")
+    static let terminalFindPrevious = Notification.Name("terminalFindPrevious")
     static let reloadConfiguration = Notification.Name("reloadConfiguration")
     
     // Navigation/UI

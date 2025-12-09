@@ -706,7 +706,7 @@ struct RawTerminalViewController: UIViewControllerRepresentable {
 }
 
 /// Pure UIKit view controller that directly hosts the Ghostty SurfaceView
-class RawTerminalUIViewController: UIViewController {
+class RawTerminalUIViewController: UIViewController, UITextFieldDelegate {
     var ghosttyApp: Ghostty.App?
     var viewModel: TerminalViewModel?
     var onSetup: (() -> Void)?
@@ -727,6 +727,12 @@ class RawTerminalUIViewController: UIViewController {
     
     // Secure keyboard entry state
     private var secureKeyboardEntry = false
+    
+    // Search bar UI
+    private var searchBarContainer: UIView?
+    private var searchTextField: UITextField?
+    private var searchResultsLabel: UILabel?
+    private var isSearchBarVisible = false
     
     // Status bar preference (read from UserDefaults)
     private var showStatusBar: Bool {
@@ -916,6 +922,17 @@ class RawTerminalUIViewController: UIViewController {
             self?.handleBackButton()
         }
         // Note: terminalReconnect is handled in ContentView which has access to appState
+        
+        // Find/Search
+        NotificationCenter.default.addObserver(forName: .terminalFind, object: nil, queue: .main) { [weak self] _ in
+            self?.showSearchBar()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalFindNext, object: nil, queue: .main) { [weak self] _ in
+            self?.searchNext()
+        }
+        NotificationCenter.default.addObserver(forName: .terminalFindPrevious, object: nil, queue: .main) { [weak self] _ in
+            self?.searchPrevious()
+        }
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -1137,6 +1154,189 @@ class RawTerminalUIViewController: UIViewController {
         surface.becomeFirstResponder()
         
         logger.info("✅ RawTerminalUIViewController created surface view")
+    }
+    
+    // MARK: - Search Bar
+    
+    private func showSearchBar() {
+        if isSearchBarVisible {
+            // If already visible, focus the text field
+            searchTextField?.becomeFirstResponder()
+            return
+        }
+        
+        isSearchBarVisible = true
+        
+        // Create search bar container
+        let container = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+        container.layer.cornerRadius = 10
+        container.clipsToBounds = true
+        container.translatesAutoresizingMaskIntoConstraints = false
+        searchBarContainer = container
+        
+        // Create horizontal stack for search controls
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.spacing = 8
+        stackView.alignment = .center
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Search text field
+        let textField = UITextField()
+        textField.placeholder = "Search..."
+        textField.font = .systemFont(ofSize: 14)
+        textField.textColor = .white
+        textField.tintColor = .systemOrange
+        textField.backgroundColor = UIColor.white.withAlphaComponent(0.1)
+        textField.layer.cornerRadius = 6
+        textField.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 8, height: 0))
+        textField.leftViewMode = .always
+        textField.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 8, height: 0))
+        textField.rightViewMode = .always
+        textField.returnKeyType = .search
+        textField.autocorrectionType = .no
+        textField.autocapitalizationType = .none
+        textField.delegate = self
+        textField.addTarget(self, action: #selector(searchTextChanged(_:)), for: .editingChanged)
+        searchTextField = textField
+        
+        // Results label
+        let resultsLabel = UILabel()
+        resultsLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        resultsLabel.textColor = .secondaryLabel
+        resultsLabel.text = ""
+        searchResultsLabel = resultsLabel
+        
+        // Previous button
+        let prevButton = UIButton(type: .system)
+        prevButton.setImage(UIImage(systemName: "chevron.up"), for: .normal)
+        prevButton.tintColor = .white
+        prevButton.addTarget(self, action: #selector(searchPreviousPressed), for: .touchUpInside)
+        
+        // Next button
+        let nextButton = UIButton(type: .system)
+        nextButton.setImage(UIImage(systemName: "chevron.down"), for: .normal)
+        nextButton.tintColor = .white
+        nextButton.addTarget(self, action: #selector(searchNextPressed), for: .touchUpInside)
+        
+        // Close button
+        let closeButton = UIButton(type: .system)
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = .white
+        closeButton.addTarget(self, action: #selector(hideSearchBar), for: .touchUpInside)
+        
+        // Add to stack
+        stackView.addArrangedSubview(textField)
+        stackView.addArrangedSubview(resultsLabel)
+        stackView.addArrangedSubview(prevButton)
+        stackView.addArrangedSubview(nextButton)
+        stackView.addArrangedSubview(closeButton)
+        
+        container.contentView.addSubview(stackView)
+        view.addSubview(container)
+        
+        // Constraints
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            container.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            container.heightAnchor.constraint(equalToConstant: 44),
+            
+            stackView.leadingAnchor.constraint(equalTo: container.contentView.leadingAnchor, constant: 8),
+            stackView.trailingAnchor.constraint(equalTo: container.contentView.trailingAnchor, constant: -8),
+            stackView.centerYAnchor.constraint(equalTo: container.contentView.centerYAnchor),
+            
+            textField.widthAnchor.constraint(equalToConstant: 180),
+            textField.heightAnchor.constraint(equalToConstant: 28),
+            
+            resultsLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 50),
+            
+            prevButton.widthAnchor.constraint(equalToConstant: 32),
+            nextButton.widthAnchor.constraint(equalToConstant: 32),
+            closeButton.widthAnchor.constraint(equalToConstant: 32)
+        ])
+        
+        // Animate in
+        container.alpha = 0
+        container.transform = CGAffineTransform(translationX: 0, y: -20)
+        UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.5) {
+            container.alpha = 1
+            container.transform = .identity
+        }
+        
+        // Focus text field
+        textField.becomeFirstResponder()
+        
+        // Start search mode in Ghostty
+        surfaceView?.startSearch()
+        
+        logger.info("🔍 Search bar shown")
+    }
+    
+    @objc private func hideSearchBar() {
+        guard isSearchBarVisible else { return }
+        isSearchBarVisible = false
+        
+        // Animate out
+        UIView.animate(withDuration: 0.2, animations: {
+            self.searchBarContainer?.alpha = 0
+            self.searchBarContainer?.transform = CGAffineTransform(translationX: 0, y: -20)
+        }) { _ in
+            self.searchBarContainer?.removeFromSuperview()
+            self.searchBarContainer = nil
+            self.searchTextField = nil
+            self.searchResultsLabel = nil
+        }
+        
+        // End search mode in Ghostty
+        surfaceView?.endSearch()
+        
+        // Return focus to surface
+        surfaceView?.becomeFirstResponder()
+        
+        logger.info("🔍 Search bar hidden")
+    }
+    
+    @objc private func searchTextChanged(_ textField: UITextField) {
+        guard let query = textField.text, !query.isEmpty else {
+            searchResultsLabel?.text = ""
+            return
+        }
+        surfaceView?.updateSearch(query)
+    }
+    
+    @objc private func searchNextPressed() {
+        searchNext()
+    }
+    
+    @objc private func searchPreviousPressed() {
+        searchPrevious()
+    }
+    
+    private func searchNext() {
+        surfaceView?.searchNext()
+    }
+    
+    private func searchPrevious() {
+        surfaceView?.searchPrevious()
+    }
+    
+    // MARK: - UITextFieldDelegate
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        // Return key navigates to next result
+        searchNext()
+        return false
+    }
+    
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        // Handle Escape key to close search bar
+        if isSearchBarVisible,
+           let key = presses.first?.key,
+           key.keyCode == .keyboardEscape {
+            hideSearchBar()
+            return
+        }
+        super.pressesBegan(presses, with: event)
     }
     
     override func viewWillDisappear(_ animated: Bool) {
