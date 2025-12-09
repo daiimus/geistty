@@ -8,56 +8,84 @@ struct ContentView: View {
     @State private var connectionInfo = ConnectionInfo()
     @State private var connectedSession: SSHSession?
     
+    /// Theme background color for consistent styling
+    private var themeBackground: Color {
+        Color(ThemeManager.shared.selectedTheme.background)
+    }
+    
     var body: some View {
-        NavigationStack {
-            Group {
-                switch appState.connectionStatus {
-                case .disconnected:
-                    DisconnectedView(
-                        showConnectionSheet: $showConnectionSheet,
-                        showConnectionList: $showConnectionList
-                    )
-                case .connecting:
-                    ConnectingView()
-                case .connected:
-                    TerminalContainerView()
-                case .error(let message):
-                    ErrorView(message: message, showConnectionSheet: $showConnectionSheet)
+        // When connected, show ONLY the terminal - no NavigationStack, no chrome
+        // This ensures the DisconnectedView is completely removed from hierarchy
+        Group {
+            if appState.connectionStatus == .connected {
+                TerminalContainerView()
+                    .background(themeBackground)
+                    .ignoresSafeArea()
+            } else {
+                // Non-connected states use NavigationStack with welcome/error UI
+                NavigationStack {
+                    Group {
+                        switch appState.connectionStatus {
+                        case .disconnected:
+                            DisconnectedView(
+                                showConnectionSheet: $showConnectionSheet,
+                                showConnectionList: $showConnectionList,
+                                backgroundColor: themeBackground
+                            )
+                        case .connecting:
+                            ConnectingView(backgroundColor: themeBackground)
+                        case .connected:
+                            // This case won't be reached due to outer if
+                            EmptyView()
+                        case .error(let message):
+                            ErrorView(
+                                message: message,
+                                showConnectionSheet: $showConnectionSheet,
+                                backgroundColor: themeBackground
+                            )
+                        }
+                    }
+                    .navigationTitle("Bodak")
+                    .toolbar {
+                        ToolbarItem(placement: .primaryAction) {
+                            Menu {
+                                Button {
+                                    showConnectionSheet = true
+                                } label: {
+                                    Label("Quick Connect", systemImage: "bolt.fill")
+                                }
+                                
+                                Button {
+                                    showConnectionList = true
+                                } label: {
+                                    Label("Saved Connections", systemImage: "list.bullet")
+                                }
+                            } label: {
+                                Image(systemName: "plus.circle")
+                            }
+                        }
+                    }
                 }
-            }
-            .navigationTitle("Bodak")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button {
-                            showConnectionSheet = true
-                        } label: {
-                            Label("Quick Connect", systemImage: "bolt.fill")
-                        }
-                        
-                        Button {
-                            showConnectionList = true
-                        } label: {
-                            Label("Saved Connections", systemImage: "list.bullet")
-                        }
-                    } label: {
-                        Image(systemName: "plus.circle")
+                .background(themeBackground)
+                .sheet(isPresented: $showConnectionSheet) {
+                    ConnectionSheet(connectionInfo: $connectionInfo, onConnect: connect)
+                }
+                .sheet(isPresented: $showConnectionList) {
+                    ConnectionListView { session in
+                        // Session already connected via ConnectionListView
+                        connectedSession = session
+                        appState.sshSession = session
+                        appState.connectionStatus = .connected
+                        showConnectionList = false
                     }
                 }
             }
         }
-        .sheet(isPresented: $showConnectionSheet) {
-            ConnectionSheet(connectionInfo: $connectionInfo, onConnect: connect)
+        // Disable ALL animations on state transitions to prevent flash
+        .transaction { transaction in
+            transaction.animation = nil
         }
-        .sheet(isPresented: $showConnectionList) {
-            ConnectionListView { session in
-                // Session already connected via ConnectionListView
-                connectedSession = session
-                appState.sshSession = session
-                appState.connectionStatus = .connected
-                showConnectionList = false
-            }
-        }
+        .animation(nil, value: appState.connectionStatus)
     }
     
     private func connect() {
@@ -80,6 +108,7 @@ struct ContentView: View {
 struct DisconnectedView: View {
     @Binding var showConnectionSheet: Bool
     @Binding var showConnectionList: Bool
+    let backgroundColor: Color
     
     var body: some View {
         VStack(spacing: 20) {
@@ -110,10 +139,14 @@ struct DisconnectedView: View {
             }
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(backgroundColor)
     }
 }
 
 struct ConnectingView: View {
+    let backgroundColor: Color
+    
     var body: some View {
         VStack(spacing: 20) {
             ProgressView()
@@ -123,12 +156,15 @@ struct ConnectingView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(backgroundColor)
     }
 }
 
 struct ErrorView: View {
     let message: String
     @Binding var showConnectionSheet: Bool
+    let backgroundColor: Color
     @EnvironmentObject var appState: AppState
     
     var body: some View {
@@ -168,6 +204,8 @@ struct ErrorView: View {
             }
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(backgroundColor)
     }
 }
 
