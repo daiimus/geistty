@@ -113,6 +113,13 @@ struct BodakApp: App {
                 
                 Divider()
                 
+                Button("Reload Configuration") {
+                    NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                
+                Divider()
+                
                 Button("Reconnect") {
                     NotificationCenter.default.post(name: .terminalReconnect, object: nil)
                 }
@@ -178,6 +185,7 @@ extension Notification.Name {
     static let terminalToggleStatusBar = Notification.Name("terminalToggleStatusBar")
     static let terminalToggleSecureKeyboard = Notification.Name("terminalToggleSecureKeyboard")
     static let terminalReconnect = Notification.Name("terminalReconnect")
+    static let reloadConfiguration = Notification.Name("reloadConfiguration")
     
     // Navigation/UI
     static let showNewConnection = Notification.Name("showNewConnection")
