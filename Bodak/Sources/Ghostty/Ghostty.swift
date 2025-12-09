@@ -1059,17 +1059,12 @@ extension Ghostty {
             
             CATransaction.commit()
             
-            print("[Bodak] 🏗️ SurfaceView initialized, frame: \(frame)")
-            print("[Bodak] 🏗️ Layer class: \(type(of: layer))")
-            print("[Bodak] 🏗️ contentScaleFactor: \(contentScaleFactor)")
-            
             // NOTE: We do NOT configure the metal layer here.
             // Ghostty's Metal renderer creates its own IOSurfaceLayer and adds it as a sublayer.
             // The renderer handles all Metal configuration internally.
             
             // Setup the surface - this is where Ghostty's Metal renderer is initialized
             // and where addSublayer will be called on this view
-            print("[Bodak] 🏗️ About to call ghostty_surface_new...")
             let surfaceConfig = baseConfig ?? SurfaceConfiguration()
             
             // For external backend, we need to set up a write callback
@@ -1081,7 +1076,6 @@ extension Ghostty {
             let surface = surfaceConfig.withCValue(view: self, writeCallback: writeCallback) { config in
                 ghostty_surface_new(app, &config)
             }
-            print("[Bodak] 🏗️ ghostty_surface_new returned: \(surface != nil ? "success" : "nil")")
             
             guard let surface = surface else {
                 self.error = GhosttyError.surfaceCreationFailed
@@ -1106,10 +1100,6 @@ extension Ghostty {
             
             CATransaction.commit()
             
-            print("[Bodak] 🏗️ Sublayers after ghostty_surface_new: \(layer.sublayers?.count ?? 0)")
-            layer.sublayers?.forEach { sublayer in
-                print("[Bodak] 🏗️   Sublayer: \(type(of: sublayer)), frame: \(sublayer.frame)")
-            }
             logger.info("Ghostty surface created successfully with backend: \(surfaceConfig.backendType)")
             
             // Enable user interaction and add tap gesture to become first responder
@@ -1167,6 +1157,9 @@ extension Ghostty {
             trackpadScrollGesture.maximumNumberOfTouches = 0
             addGestureRecognizer(trackpadScrollGesture)
             
+            // Note: Mouse click-drag selection is handled via touchesBegan/Moved/Ended
+            // for instant response (no gesture delay)
+            
             // Add pointer interaction for external mouse/trackpad support
             let pointerInteraction = UIPointerInteraction(delegate: self)
             addInteraction(pointerInteraction)
@@ -1212,7 +1205,6 @@ extension Ghostty {
                 
                 // Restore first responder if needed
                 if !self.isFirstResponder {
-                    NSLog("⌨️ Restoring keyboard focus after app became active")
                     _ = self.becomeFirstResponder()
                 } else {
                     // Already first responder, reload input views to refresh keyboard state
@@ -1544,12 +1536,71 @@ extension Ghostty {
         }
         
         /// Immediately stop momentum scrolling when any touch begins
+        /// Also handle mouse click for instant selection start
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
             if isMomentumScrolling {
                 stopScrollMomentum()
             }
+            
+            // Handle mouse click (indirect pointer) for instant selection start
+            // This fires before the pan gesture recognizes, giving us immediate response
+            if let touch = touches.first, touch.type == .indirectPointer, let surface = surface {
+                let point = touch.location(in: self)
+                let scale = contentScaleFactor
+                let ghosttyX = point.x * scale
+                let ghosttyY = point.y * scale
+                
+                isMouseSelecting = true
+                isSelecting = true
+                mouseClickPoint = point  // Remember where we clicked
+                
+                // Immediately send mouse press at click position
+                ghostty_surface_mouse_pos(surface, ghosttyX, ghosttyY, GHOSTTY_MODS_NONE)
+                _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            }
+            
             super.touchesBegan(touches, with: event)
         }
+        
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+            // Update mouse selection position during drag
+            if isMouseSelecting, let touch = touches.first, touch.type == .indirectPointer, let surface = surface {
+                let point = touch.location(in: self)
+                let scale = contentScaleFactor
+                ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+            }
+            super.touchesMoved(touches, with: event)
+        }
+        
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+            // Complete mouse selection on mouse release
+            if isMouseSelecting, let touch = touches.first, touch.type == .indirectPointer, let surface = surface {
+                let point = touch.location(in: self)
+                let scale = contentScaleFactor
+                ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+                _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+                isMouseSelecting = false
+                isSelecting = false
+                justFinishedSelecting = true
+            }
+            super.touchesEnded(touches, with: event)
+        }
+        
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            // Cancel mouse selection
+            if isMouseSelecting, let touch = touches.first, touch.type == .indirectPointer, let surface = surface {
+                let point = touch.location(in: self)
+                let scale = contentScaleFactor
+                ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+                _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+                isMouseSelecting = false
+                isSelecting = false
+            }
+            super.touchesCancelled(touches, with: event)
+        }
+        
+        /// Track where mouse was clicked (for determining if it was a click vs drag)
+        private var mouseClickPoint: CGPoint = .zero
         
         @objc private func updateScrollMomentum() {
             guard let surface = surface else {
@@ -1592,22 +1643,24 @@ extension Ghostty {
         }
         
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            // Don't process tap if we just finished selecting (prevents clearing selection)
+            if justFinishedSelecting {
+                justFinishedSelecting = false
+                return
+            }
+            
             // Tap to stop momentum scrolling (like hitting a spinning wheel to stop)
             if isMomentumScrolling {
-                NSLog("👆 Tap to stop momentum scrolling")
                 stopScrollMomentum()
                 return
             }
             
-            NSLog("👆 Terminal tapped, becoming first responder")
             _ = becomeFirstResponder()
             
             // If Ctrl toggle is active, this tap should open a link
             if ctrlToggleActive, let surface = surface {
                 let point = gesture.location(in: self)
                 let scale = contentScaleFactor
-                
-                NSLog("👆 Ctrl+tap at \(point) - attempting to open link")
                 
                 // Send mouse position and click with Ctrl modifier
                 ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_CTRL)
@@ -1627,8 +1680,6 @@ extension Ghostty {
             let point = gesture.location(in: self)
             let scale = contentScaleFactor
             
-            NSLog("👆👆 Two-finger tap at \(point) - attempting to open link")
-            
             // Send mouse position
             ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_CTRL)
             
@@ -1643,8 +1694,6 @@ extension Ghostty {
             
             let point = gesture.location(in: self)
             let scale = contentScaleFactor
-            
-            NSLog("👆👆 Double-tap at \(point) - selecting word")
             
             // Position the mouse
             ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
@@ -1667,8 +1716,6 @@ extension Ghostty {
             let point = gesture.location(in: self)
             let scale = contentScaleFactor
             
-            NSLog("👆👆👆 Triple-tap at \(point) - selecting line")
-            
             // Position the mouse
             ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
             
@@ -1685,7 +1732,6 @@ extension Ghostty {
         
         /// Handle two-finger double-tap to reset font size
         @objc private func handleTwoFingerDoubleTap(_ gesture: UITapGestureRecognizer) {
-            NSLog("👆👆 Two-finger double-tap - resetting font size")
             resetFontSize()
             
             // Provide haptic feedback
@@ -1715,9 +1761,29 @@ extension Ghostty {
             // Pan should NOT wait for long press to fail - we handle conflicts via isSelecting
             return false
         }
+        
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            // Single-finger scroll should NOT receive indirect pointer (mouse/trackpad) touches
+            // Mouse click-drag is handled via touchesBegan/Moved/Ended for selection
+            if gestureRecognizer is UIPanGestureRecognizer {
+                // Allow trackpad scroll gesture (0 touches) to work
+                if let pan = gestureRecognizer as? UIPanGestureRecognizer,
+                   pan.minimumNumberOfTouches == 0 {
+                    return true
+                }
+                // Block other pan gestures from receiving mouse input
+                if touch.type == .indirectPointer {
+                    return false
+                }
+            }
+            return true
+        }
 
-        /// Track if we're in selection mode (from long press)
+        /// Track if we're in selection mode (from long press or mouse drag)
         private var isSelecting = false
+        
+        /// Track when we just finished selecting (to prevent tap from clearing selection)
+        private var justFinishedSelecting = false
         
         /// Track accumulated single-finger scroll
         private var accumulatedSingleFingerScrollY: CGFloat = 0
@@ -1725,7 +1791,9 @@ extension Ghostty {
         /// Handle single-finger pan for scrolling - lifelike iOS-style physics
         @objc private func handleSingleFingerScroll(_ gesture: UIPanGestureRecognizer) {
             // Don't scroll if we're selecting text
-            guard !isSelecting else { return }
+            if isSelecting {
+                return
+            }
             guard let surface = surface else { return }
             
             let translation = gesture.translation(in: self)
@@ -1770,39 +1838,46 @@ extension Ghostty {
             
             let point = gesture.location(in: self)
             let scale = contentScaleFactor
+            let ghosttyX = point.x * scale
+            let ghosttyY = point.y * scale
             
             switch gesture.state {
             case .began:
-                NSLog("🎯 Long press began at \(point)")
                 isSelecting = true
-                // Start selection (simulate left mouse button press)
-                ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+                
+                // Start selection (mouse button press)
+                ghostty_surface_mouse_pos(surface, ghosttyX, ghosttyY, GHOSTTY_MODS_NONE)
                 _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
                 
             case .changed:
                 if isSelecting {
-                    // Update selection (move mouse with button held)
-                    ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+                    // Update selection (drag with button held)
+                    ghostty_surface_mouse_pos(surface, ghosttyX, ghosttyY, GHOSTTY_MODS_NONE)
                 }
                 
-            case .ended, .cancelled:
+            case .ended:
                 if isSelecting {
-                    NSLog("🎯 Long press ended at \(point)")
                     // End selection (release mouse button)
-                    ghostty_surface_mouse_pos(surface, point.x * scale, point.y * scale, GHOSTTY_MODS_NONE)
+                    ghostty_surface_mouse_pos(surface, ghosttyX, ghosttyY, GHOSTTY_MODS_NONE)
                     _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
                     isSelecting = false
-                    
-                    // Check if we have a selection and show copy menu
-                    if ghostty_surface_has_selection(surface) {
-                        showCopyMenu(at: point)
-                    }
+                    justFinishedSelecting = true
+                }
+                
+            case .cancelled, .failed:
+                if isSelecting {
+                    ghostty_surface_mouse_pos(surface, ghosttyX, ghosttyY, GHOSTTY_MODS_NONE)
+                    _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+                    isSelecting = false
                 }
                 
             default:
                 break
             }
         }
+        
+        /// Track if we're doing mouse-based selection (indirect pointer)
+        private var isMouseSelecting = false
         
         /// Edit menu interaction for copy/paste (iOS 16+)
         private var editMenuInteraction: UIEditMenuInteraction?
@@ -1846,7 +1921,6 @@ extension Ghostty {
                 if let textPtr = textStruct.text, textStruct.text_len > 0 {
                     let selectedText = String(cString: textPtr)
                     UIPasteboard.general.string = selectedText
-                    NSLog("📋 Copied \(textStruct.text_len) characters to clipboard")
                 }
                 ghostty_surface_free_text(surface, &textStruct)
             }
@@ -2023,7 +2097,6 @@ extension Ghostty {
             // Convert to Data and call the onWrite callback
             if let data = data, len > 0 {
                 let swiftData = Data(bytes: data, count: Int(len))
-                NSLog("⌨️ externalWriteCallback: \(len) bytes from terminal to SSH")
                 DispatchQueue.main.async {
                     surfaceView.onWrite?(swiftData)
                 }
@@ -2046,16 +2119,12 @@ extension Ghostty {
         func close() {
             guard let surface = surface else { return }
             
-            NSLog("🔒 SurfaceView.close() - freeing surface")
-            
             // Clear the onWrite callback to prevent callbacks during/after free
             onWrite = nil
             
             // Free the surface
             ghostty_surface_free(surface)
             self.surface = nil
-            
-            NSLog("🔒 SurfaceView.close() - surface freed")
         }
         
         // MARK: - Surface API
@@ -2190,23 +2259,17 @@ extension Ghostty {
         override var canBecomeFirstResponder: Bool { true }
         
         override func becomeFirstResponder() -> Bool {
-            NSLog("⌨️ becomeFirstResponder called, isFirstResponder=\(isFirstResponder)")
             let result = super.becomeFirstResponder()
             if result {
                 focusDidChange(true)
-                NSLog("⌨️ becomeFirstResponder succeeded")
-            } else {
-                NSLog("⌨️ becomeFirstResponder FAILED")
             }
             return result
         }
         
         override func resignFirstResponder() -> Bool {
-            NSLog("⌨️ resignFirstResponder called")
             let result = super.resignFirstResponder()
             if result {
                 focusDidChange(false)
-                NSLog("⌨️ resignFirstResponder succeeded")
             }
             return result
         }
@@ -2368,16 +2431,11 @@ extension Ghostty {
 
         /// Notify size change
         func sizeDidChange(_ size: CGSize) {
-            guard let surface = surface else {
-                print("[Bodak] ⚠️ sizeDidChange called but surface is nil")
-                return
-            }
+            guard let surface = surface else { return }
             
             let scale = contentScaleFactor
             let scaledWidth = UInt32(size.width * scale)
             let scaledHeight = UInt32(size.height * scale)
-            
-            print("[Bodak] 📐 sizeDidChange: size=\(size), scale=\(scale), scaled=\(scaledWidth)x\(scaledHeight)")
             
             ghostty_surface_set_content_scale(surface, scale, scale)
             ghostty_surface_set_size(surface, scaledWidth, scaledHeight)
@@ -2386,7 +2444,6 @@ extension Ghostty {
             // We must manually resize it to match the view's bounds, otherwise it stays at (0,0,0,0).
             // On macOS, the IOSurfaceLayer IS the view's layer, so it auto-sizes.
             if let sublayers = layer.sublayers {
-                print("[Bodak] 📐 Resizing \(sublayers.count) sublayers to match bounds: \(bounds)")
                 for sublayer in sublayers {
                     // Disable implicit animations for immediate resize
                     CATransaction.begin()
@@ -2394,7 +2451,6 @@ extension Ghostty {
                     sublayer.frame = bounds
                     sublayer.contentsScale = scale
                     CATransaction.commit()
-                    print("[Bodak] 📐   Sublayer \(type(of: sublayer)) new frame: \(sublayer.frame)")
                 }
             }
             
@@ -2403,7 +2459,6 @@ extension Ghostty {
             if let gridSize = surfaceSize {
                 let cols = Int(gridSize.columns)
                 let rows = Int(gridSize.rows)
-                print("[Bodak] 📐 Grid size: \(cols)x\(rows)")
                 onResize?(cols, rows)
             }
         }
@@ -2452,21 +2507,14 @@ extension Ghostty {
             
             // The IMP signature: void function(id self, SEL _cmd, id sublayer)
             let imp: @convention(c) (AnyObject, Selector, AnyObject) -> Void = { (self_, sel_, sublayer) in
-                print("[Bodak] ⚡ addSublayer called from Ghostty - forwarding to layer")
-                print("[Bodak] ⚡ self: \(type(of: self_)), sublayer: \(type(of: sublayer))")
                 if let view = self_ as? UIView {
                     if let caLayer = sublayer as? CALayer {
                         view.layer.addSublayer(caLayer)
-                        print("[Bodak] ✅ Successfully added sublayer to view.layer")
                     } else {
                         // Try to cast through AnyObject to id and use ObjC runtime
-                        print("[Bodak] ⚠️ sublayer is not CALayer, attempting ObjC cast")
                         let obj = sublayer as AnyObject
                         if obj.isKind(of: CALayer.self) {
                             view.layer.addSublayer(obj as! CALayer)
-                            print("[Bodak] ✅ Successfully added sublayer via ObjC cast")
-                        } else {
-                            print("[Bodak] ❌ Failed to cast sublayer to CALayer")
                         }
                     }
                 }
@@ -2482,40 +2530,29 @@ extension Ghostty {
                 typeEncoding
             )
             
-            if success {
-                print("[Bodak] ✅ Registered 'addSublayer' (no colon) method for SurfaceView")
-            } else {
+            if !success {
                 // Method already exists - try to replace it
-                print("[Bodak] ⚠️ Method already exists, attempting to replace")
                 let method = class_getInstanceMethod(SurfaceView.self, selector)
                 if let method = method {
                     method_setImplementation(method, unsafeBitCast(imp, to: IMP.self))
-                    print("[Bodak] ✅ Replaced 'addSublayer' method implementation")
                 }
             }
             
             // Also add "addSublayer:" (with colon) just in case
             let selectorWithColon = sel_registerName("addSublayer:")
-            let successColon = class_addMethod(
+            _ = class_addMethod(
                 SurfaceView.self,
                 selectorWithColon,
                 unsafeBitCast(imp, to: IMP.self),
                 typeEncoding
             )
-            if successColon {
-                print("[Bodak] ✅ Registered 'addSublayer:' (with colon) method for SurfaceView")
-            }
         }
         
         /// Override to forward unrecognized selectors to self.layer
         /// This catches any CALayer methods that Ghostty might call on the view
         override func forwardingTarget(for aSelector: Selector!) -> Any? {
-            let selectorName = NSStringFromSelector(aSelector)
-            print("[Bodak] 🔀 forwardingTarget called for: \(selectorName)")
-            
             // Check if the layer responds to this selector
             if layer.responds(to: aSelector) {
-                print("[Bodak] 🔀 Forwarding \(selectorName) to layer")
                 return layer
             }
             return super.forwardingTarget(for: aSelector)
@@ -2524,7 +2561,6 @@ extension Ghostty {
         /// Override method resolution to catch unhandled methods
         override class func resolveInstanceMethod(_ sel: Selector!) -> Bool {
             let selectorName = NSStringFromSelector(sel)
-            print("[Bodak] 🔍 resolveInstanceMethod for: \(selectorName)")
             
             // If it's addSublayer (with or without colon), register our handler
             if selectorName == "addSublayer" || selectorName == "addSublayer:" {
@@ -2537,7 +2573,6 @@ extension Ghostty {
         
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            print("[Bodak] 📐 didMoveToWindow: window=\(window != nil ? "present" : "nil"), frame=\(frame)")
             sizeDidChange(frame.size)
             
             // Focus management: request keyboard focus when added to window
@@ -2547,7 +2582,6 @@ extension Ghostty {
                     guard let self = self, self.window != nil else { return }
                     // Only become first responder if we're visible and in the window
                     if !self.isFirstResponder {
-                        NSLog("⌨️ Requesting keyboard focus")
                         _ = self.becomeFirstResponder()
                     }
                 }
@@ -2561,7 +2595,6 @@ extension Ghostty {
         
         override func layoutSubviews() {
             super.layoutSubviews()
-            print("[Bodak] 📐 layoutSubviews: bounds=\(bounds)")
             sizeDidChange(bounds.size)
             
             // Keep scroll indicator on right edge (without animation)

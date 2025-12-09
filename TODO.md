@@ -89,15 +89,24 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Ctrl toggle button (sticky modifier)
   - [x] Arrow key buttons
 - [ ] **Additional keyboard improvements**
-  - [ ] Alt/Option modifier support (for vim, emacs)
+  - [ ] Alt/Option modifier support (for vim, emacs) ⭐ HIGH PRIORITY - Should work now with proper Ghostty API!
   - [ ] Tab key button in accessory bar
   - [ ] Common symbols bar (~, |, `, etc.)
-  - [ ] Cmd+C/V for copy/paste (intercept and handle)
+  - [ ] Cmd+C/V for copy/paste (intercept and handle) ⭐ HIGH PRIORITY
+  - [ ] Font size shortcuts (Cmd+/Cmd-) ⭐ QUICK WIN
   - [ ] Keyboard shortcuts help overlay
+- [x] **Proper Ghostty keyboard API integration** ✅ COMPLETE
+  - [x] Refactor to use ghostty_surface_key() instead of raw byte sending
+  - [x] Build KeyEvent struct matching macOS implementation (GhosttyInput.swift)
+  - [x] Map UIKey to Ghostty key codes (UIKeyboardHIDUsage → macOS keycodes)
+  - [x] Support all modifiers (Shift, Ctrl, Alt, Super, Caps, Num)
+  - [x] Handle key repeat properly (press/repeat/release actions)
+  - [x] Enable Ghostty keybinding system
 
 ### Terminal Features
 - [x] **Copy/paste support**
   - [x] Text selection (long press + drag using Ghostty mouse API)
+  - [x] Mouse/trackpad click-drag selection (instant response)
   - [x] Copy to clipboard (uses ghostty_surface_read_selection)
   - [x] Paste from clipboard (via toolbar menu and system paste)
   - [x] System edit menu integration (canPerformAction)
@@ -144,7 +153,7 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
   - [x] Unified CredentialManager for multiple sources
   - [x] Password entry at connection time (saved to Keychain)
   - ~~1Password/LastPass integration~~ (Not possible on iOS - their SSH integration uses desktop SSH Agent, not available via iOS APIs. Export keys from password manager and import into Bodak via Files app)
-- [ ] **Connection status indicators**
+- [ ] **Connection status indicators** ⭐ MEDIUM PRIORITY
 - [x] **Handle remote disconnect**
   - [x] Detect SSH channel EOF/close
   - [x] Show disconnect via navigation
@@ -266,7 +275,7 @@ The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch 
 - [ ] Session title display
 
 **State Observers:**
-- [ ] Terminal title changes (OSC sequences)
+- [ ] Terminal title changes (OSC sequences) ⭐ MEDIUM PRIORITY
 - [ ] Disconnected by remote detection
 - [ ] Text selection state
 
@@ -280,11 +289,19 @@ The goal is to replicate the macOS Ghostty menu structure adapted for iOS touch 
 ## 📋 Phase 7: Advanced Features — PLANNED
 
 - [ ] **Secure Enclave keys** (hardware-backed SSH keys)
-- [ ] **Multiple sessions** (tabs or split view)
-- [ ] **SFTP browser** (file upload/download)
+- [x] **Multiple sessions** (native iOS multi-window via WindowGroup + UISupportsMultipleScenes)
+- [ ] **SFTP browser** (integrate with iPadOS Files app) ⭐ HIGH VALUE
+  - [ ] FileProvider extension for Files.app integration
+  - [ ] Browse remote directories
+  - [ ] Upload/download files
+  - [ ] Quick Look preview support
 - [ ] **Mosh support** (stretch goal)
 - [ ] **Snippet library** (saved commands)
 - [ ] **Port forwarding**
+- [ ] **Selection visual feedback** (fade-out after copy-on-select)
+  - [ ] Show selection highlight during drag
+  - [ ] Animated fade-out after release to indicate copy succeeded
+  - [ ] Would require Ghostty-side changes to keep selection visible briefly
 
 ---
 
