@@ -714,6 +714,12 @@ extension Ghostty.Input {
         }
         
         /// Create from iOS UIPress
+        /// 
+        /// Note: We deliberately set `text` to nil for special keys. iOS represents special keys
+        /// like Escape, arrows, etc. as string constants (e.g., "UIKeyInputEscape") rather than
+        /// actual characters. This mirrors macOS Ghostty's approach of filtering PUA (Private Use Area)
+        /// codepoints that represent function keys. Ghostty's KeyEncoder handles these keys properly
+        /// using just the keycode.
         init?(press: UIPress, action: Action) {
             guard let uiKey = press.key else { return nil }
             
@@ -724,14 +730,25 @@ extension Ghostty.Input {
             
             self.action = action
             self.key = ghosttyKey
-            self.text = uiKey.characters
+            
+            // Get text, filtering out iOS special key constants
+            // iOS uses "UIKeyInput*" strings for special keys (Escape, arrows, etc.)
+            // Similar to how macOS uses Unicode PUA (0xF700-0xF8FF) for function keys
+            let rawText = uiKey.characters
+            if rawText.hasPrefix("UIKeyInput") {
+                self.text = nil
+            } else {
+                self.text = rawText
+            }
+            
             self.composing = false
             self.mods = Mods(uiMods: uiKey.modifierFlags)
             self.consumedMods = []
             
             // Get unshifted codepoint from charactersIgnoringModifiers
+            // Filter out UIKeyInput constants here too
             let chars = uiKey.charactersIgnoringModifiers
-            if let scalar = chars.unicodeScalars.first {
+            if !chars.hasPrefix("UIKeyInput"), let scalar = chars.unicodeScalars.first {
                 self.unshiftedCodepoint = scalar.value
             } else {
                 self.unshiftedCodepoint = 0
