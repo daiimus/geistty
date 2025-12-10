@@ -1053,6 +1053,20 @@ void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
 void ghostty_surface_set_display_id(ghostty_surface_t, uint32_t);
 void* ghostty_surface_quicklook_font(ghostty_surface_t);
 bool ghostty_surface_quicklook_word(ghostty_surface_t, ghostty_text_s*);
+
+// iOS ScreenSearch-based sync API (replaces xev-based search thread)
+typedef struct {
+    intptr_t total;    // Total matches found (-1 on error)
+    intptr_t selected; // Selected match index (-1 if none)
+    bool success;      // True if operation succeeded
+} ghostty_search_result_s;
+
+ghostty_search_result_s ghostty_surface_search_start(ghostty_surface_t,
+                                                      const char*,
+                                                      uintptr_t);
+ghostty_search_result_s ghostty_surface_search_next(ghostty_surface_t);
+ghostty_search_result_s ghostty_surface_search_prev(ghostty_surface_t);
+void ghostty_surface_search_end(ghostty_surface_t);
 #endif
 
 ghostty_inspector_t ghostty_surface_inspector(ghostty_surface_t);
