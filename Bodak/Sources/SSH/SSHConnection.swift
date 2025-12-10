@@ -110,9 +110,10 @@ public class SSHConnection: ObservableObject {
     /// Set this before calling connect() to capture handshake/auth tracing
     public var enableTracing: Bool = false
     
-    /// Trace categories to enable (default: all). Only used when enableTracing is true.
-    /// See LIBSSH2_TRACE_* constants for individual categories.
-    public var traceCategories: Int32 = ~0  // All categories by default
+    /// Trace categories to enable. Only used when enableTracing is true.
+    /// Default: AUTH, KEX, ERROR, PUBLICKEY, SFTP (excludes noisy CONN/TRANS/SOCKET)
+    /// Set to ~0 for all categories, or combine specific LIBSSH2_TRACE_* constants.
+    public var traceCategories: Int32 = LIBSSH2_TRACE_AUTH | LIBSSH2_TRACE_KEX | LIBSSH2_TRACE_ERROR | LIBSSH2_TRACE_PUBLICKEY | LIBSSH2_TRACE_SFTP
     
     public init(host: String, port: Int = 22, username: String) {
         self.host = host

@@ -6,12 +6,98 @@
 //
 
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.bodak", category: "SSHSession")
 
 /// Delegate protocol for SSHSession events
 protocol SSHSessionDelegate: AnyObject {
     func sshSessionDidConnect(_ session: SSHSession)
     func sshSession(_ session: SSHSession, didReceiveData data: Data)
     func sshSession(_ session: SSHSession, didDisconnectWithError error: Error?)
+}
+
+// MARK: - tmux Capture Helper
+
+/// Helper class to collect tmux capture-pane output until delimiter is seen
+private class TmuxCaptureOperation {
+    let delimiter: String
+    let startMarker: String
+    private let completion: (Result<String, Error>) -> Void
+    private var buffer = Data()
+    private(set) var isComplete = false
+    private var sawStartMarker = false
+    
+    init(delimiter: String, startMarker: String, completion: @escaping (Result<String, Error>) -> Void) {
+        self.delimiter = delimiter
+        self.startMarker = startMarker
+        self.completion = completion
+        logger.debug("TmuxCapture: Created with startMarker=\(startMarker), delimiter=\(delimiter)")
+    }
+    
+    func appendData(_ data: Data) {
+        buffer.append(data)
+        logger.debug("TmuxCapture: Received \(data.count) bytes, total buffer: \(self.buffer.count) bytes")
+        
+        // Check if we've received the start and end markers
+        if let str = String(data: buffer, encoding: .utf8) {
+            if !sawStartMarker && str.contains(startMarker) {
+                sawStartMarker = true
+                logger.debug("TmuxCapture: Found start marker!")
+            }
+            if sawStartMarker && str.contains(delimiter) {
+                isComplete = true
+                logger.debug("TmuxCapture: Found end marker! Capture complete.")
+            }
+        } else {
+            logger.warning("TmuxCapture: Buffer not valid UTF-8")
+        }
+    }
+    
+    func finish() {
+        guard let fullOutput = String(data: buffer, encoding: .utf8) else {
+            logger.error("TmuxCapture: Invalid UTF-8 output")
+            completion(.failure(SSHError.channelError("Invalid UTF-8 output")))
+            return
+        }
+        
+        logger.debug("TmuxCapture: finish() called, fullOutput length: \(fullOutput.count)")
+        logger.debug("TmuxCapture: First 500 chars: \(String(fullOutput.prefix(500)))")
+        
+        // Parse out the captured content between start and end markers
+        // The output format is:
+        // ... command echo and noise ...
+        // ___BODAK_CAPTURE_START_<uuid>___
+        // <captured pane content>
+        // ___BODAK_CAPTURE_END_<uuid>___
+        
+        guard let startRange = fullOutput.range(of: startMarker) else {
+            logger.error("TmuxCapture: Start marker not found in output")
+            completion(.failure(SSHError.channelError("Capture start marker not found")))
+            return
+        }
+        
+        guard let endRange = fullOutput.range(of: delimiter) else {
+            logger.error("TmuxCapture: End marker not found in output")
+            completion(.failure(SSHError.channelError("Capture end marker not found")))
+            return
+        }
+        
+        // Get content between markers
+        let contentStart = startRange.upperBound
+        let contentEnd = endRange.lowerBound
+        
+        guard contentStart < contentEnd else {
+            logger.debug("TmuxCapture: Empty capture (markers adjacent)")
+            completion(.success(""))  // Empty capture
+            return
+        }
+        
+        let content = String(fullOutput[contentStart..<contentEnd])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        logger.info("TmuxCapture: Successfully captured \(content.count) chars")
+        completion(.success(content))
+    }
 }
 
 /// Represents an SSH session - wraps SSHConnection for SwiftUI usage
@@ -59,6 +145,10 @@ class SSHSession: ObservableObject, Identifiable {
         connection = SSHConnection(host: host, port: port, username: username)
         connection?.delegate = self
         
+        #if DEBUG
+        connection?.enableTracing = true
+        #endif
+        
         try await connection?.connect()
         try await connection?.authenticatePassword(password)
         try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
@@ -78,6 +168,10 @@ class SSHSession: ObservableObject, Identifiable {
         connection = SSHConnection(host: host, port: port, username: username)
         connection?.delegate = self
         
+        #if DEBUG
+        connection?.enableTracing = true
+        #endif
+        
         try await connection?.connect()
         try await connection?.authenticateKey(privateKeyPath: privateKeyPath, passphrase: passphrase)
         try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
@@ -96,6 +190,10 @@ class SSHSession: ObservableObject, Identifiable {
         
         connection = SSHConnection(host: profile.host, port: profile.port, username: profile.username)
         connection?.delegate = self
+        
+        #if DEBUG
+        connection?.enableTracing = true
+        #endif
         
         try await connection?.connect()
         
@@ -172,6 +270,73 @@ class SSHSession: ObservableObject, Identifiable {
         write(command)
     }
     
+    // MARK: - tmux Integration
+    
+    /// Check if this session is using tmux
+    var isTmuxSession: Bool {
+        return useTmux
+    }
+    
+    /// Capture the current tmux pane's scrollback content
+    /// Uses `tmux capture-pane` to get the entire history
+    /// - Parameter completion: Called with the captured text or error
+    func captureTmuxPane(completion: @escaping (Result<String, Error>) -> Void) {
+        logger.debug("captureTmuxPane: Called, useTmux=\(self.useTmux)")
+        guard useTmux else {
+            logger.warning("captureTmuxPane: Not in tmux session")
+            completion(.failure(SSHError.notInTmux))
+            return
+        }
+        
+        // Generate unique markers for this capture operation
+        let uuid = UUID().uuidString.prefix(8)
+        let startMarker = "___BODAK_CAPTURE_START_\(uuid)___"
+        let endMarker = "___BODAK_CAPTURE_END_\(uuid)___"
+        
+        logger.debug("captureTmuxPane: Creating capture operation with markers")
+        
+        // Create capture operation
+        let capture = TmuxCaptureOperation(delimiter: endMarker, startMarker: startMarker, completion: completion)
+        pendingTmuxCapture = capture
+        
+        // Send the capture command with markers:
+        // 1. Echo start marker
+        // 2. Capture pane (-p prints to stdout, -S - from start, -E - to end)
+        // 3. Echo end marker
+        // The space prefix avoids shell history
+        // Note: Output will be intercepted and not displayed in terminal
+        let command = " echo '\(startMarker)' && tmux capture-pane -p -S - -E - && echo '\(endMarker)'\n"
+        logger.debug("captureTmuxPane: Sending capture command")
+        write(command)
+        
+        // Timeout after 5 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            if let capture = self?.pendingTmuxCapture, capture.delimiter == endMarker {
+                logger.error("captureTmuxPane: Timeout after 5 seconds")
+                self?.pendingTmuxCapture = nil
+                completion(.failure(SSHError.timeout))
+            }
+        }
+    }
+    
+    /// Pending tmux capture operation (for collecting output)
+    private var pendingTmuxCapture: TmuxCaptureOperation?
+    
+    /// Internal: Process received data for pending tmux capture
+    fileprivate func processTmuxCapture(data: Data) -> Bool {
+        guard let capture = pendingTmuxCapture else { return false }
+        
+        capture.appendData(data)
+        
+        if capture.isComplete {
+            pendingTmuxCapture = nil
+            capture.finish()
+            return true
+        }
+        
+        return false
+    }
+    
     /// Resize the PTY
     func resize(cols: Int, rows: Int) {
         terminalCols = cols
@@ -198,6 +363,16 @@ class SSHSession: ObservableObject, Identifiable {
     
     // Internal method to handle received data, called from connection delegate
     fileprivate func handleReceivedData(_ data: Data) {
+        // Check if we're capturing tmux pane output
+        // While capturing, ALL data goes to the capture buffer - don't forward to terminal
+        // (otherwise the user would see the capture command output displayed)
+        if pendingTmuxCapture != nil {
+            logger.debug("handleReceivedData: Capture in progress, routing \(data.count) bytes to capture buffer")
+            _ = processTmuxCapture(data: data)
+            // Whether complete or not, don't forward capture data to terminal
+            return
+        }
+        
         delegate?.sshSession(self, didReceiveData: data)
     }
 }
