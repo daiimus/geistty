@@ -594,10 +594,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		AF000001 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/DimaRU/Libssh2Prebuild";
+			repositoryURL = "https://github.com/daiimus/Libssh2Prebuild";
 			requirement = {
 				kind = exactVersion;
-				version = "1.11.0-OpenSSL-1-1-1w";
+				version = "1.11.0-OpenSSL-1-1-1w-debug";
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
