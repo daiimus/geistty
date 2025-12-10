@@ -828,6 +828,7 @@ extension Ghostty {
         @Published var searchState: SearchState? = nil {
             didSet {
                 if let searchState {
+                    logger.debug("🔍 SearchState set, subscribing to needle changes")
                     // Set up debounced search using new ScreenSearch-based sync API
                     // Use 200ms debounce to avoid crashes from rapid typing
                     searchNeedleCancellable = searchState.$needle
@@ -835,6 +836,7 @@ extension Ghostty {
                         .removeDuplicates()
                         .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
                         .sink { [weak self] needle in
+                            logger.debug("🔍 Needle changed to: '\(needle)', calling performSyncSearch")
                             self?.performSyncSearch(needle: needle)
                         }
                 } else if oldValue != nil {
@@ -864,6 +866,7 @@ extension Ghostty {
         /// Perform synchronous search on background queue, update UI on main queue
         /// This uses the new ScreenSearch-based sync API with autoscroll
         private func performSyncSearch(needle: String) {
+            logger.debug("🔍 performSyncSearch called with needle: '\(needle)'")
             // Cancel any previous search
             currentSearchTask?.cancel()
             
@@ -897,9 +900,17 @@ extension Ghostty {
                         }
                         
                         // Call the search_start API (initializes search and scrolls to first match)
+                        logger.debug("🔍 Calling ghostty_surface_search_start with needle: '\(needleCopy)'")
                         let result = needleCopy.withCString { needlePtr in
                             ghostty_surface_search_start(surface, needlePtr, UInt(needleCopy.utf8.count))
                         }
+                        
+                        // screen_type: 0 = primary (has scrollback), 1 = alternate (e.g. tmux - no scrollback)
+                        let isAlternateScreen = result.screen_type == 1
+                        if isAlternateScreen {
+                            logger.info("🔍 Search on alternate screen (tmux/vim) - limited to visible rows only")
+                        }
+                        logger.info("🔍 ghostty_surface_search_start returned: success=\(result.success), total=\(result.total), selected=\(result.selected), screen_type=\(result.screen_type), has_scrollback=\(result.has_scrollback)")
                         
                         continuation.resume()
                         
@@ -911,6 +922,7 @@ extension Ghostty {
                             if result.success {
                                 self?.searchState?.total = result.total >= 0 ? UInt(result.total) : nil
                                 self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
+                                self?.searchState?.isAlternateScreen = isAlternateScreen
                             }
                         }
                     }
@@ -2803,6 +2815,12 @@ extension Ghostty {
     
     // MARK: - Search State
     
+    /// Search mode - determines which buffer to search
+    enum SearchMode {
+        case ghostty  // Normal Ghostty scrollback search
+        case tmux     // Search tmux's internal scrollback via capture-pane
+    }
+    
     /// Observable search state for the terminal, matching macOS Ghostty implementation
     class SearchState: ObservableObject {
         /// The current search query (needle)
@@ -2814,6 +2832,25 @@ extension Ghostty {
         /// Currently selected match index (nil if no selection)
         @Published var selected: UInt? = nil
         
+        /// Whether the terminal is on alternate screen (e.g., tmux, vim)
+        /// When true, search only sees visible rows (no scrollback)
+        @Published var isAlternateScreen: Bool = false
+        
+        /// The search mode (ghostty vs tmux)
+        @Published var searchMode: SearchMode = .ghostty
+        
+        /// Captured tmux pane content (for tmux search mode)
+        @Published var tmuxContent: String? = nil
+        
+        /// Positions of matches in tmux content (line numbers)
+        @Published var tmuxMatchLines: [Int] = []
+        
+        /// Whether a tmux capture is in progress
+        @Published var isCapturing: Bool = false
+        
+        /// Error message if capture failed
+        @Published var captureError: String? = nil
+        
         /// Initialize with optional starting query
         init(needle: String = "") {
             self.needle = needle
@@ -2824,6 +2861,12 @@ extension Ghostty {
             needle = ""
             total = nil
             selected = nil
+            isAlternateScreen = false
+            searchMode = .ghostty
+            tmuxContent = nil
+            tmuxMatchLines = []
+            isCapturing = false
+            captureError = nil
         }
     }
 }
