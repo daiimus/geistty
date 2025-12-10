@@ -10,6 +10,24 @@ import os.log
 @_implementationOnly import CSSH
 
 private let logger = Logger(subsystem: "com.bodak", category: "SSHConnection")
+private let sshTraceLogger = Logger(subsystem: "com.bodak", category: "libssh2")
+
+// MARK: - libssh2 Trace Handler
+
+/// Global trace handler callback for libssh2 debug output
+/// This is called from C code, so it must be a global function
+private func libssh2TraceHandler(
+    _ session: OpaquePointer?,
+    _ context: UnsafeMutableRawPointer?,
+    _ data: UnsafePointer<CChar>?,
+    _ length: Int
+) {
+    guard let data = data else { return }
+    let message = String(cString: data).trimmingCharacters(in: .whitespacesAndNewlines)
+    if !message.isEmpty {
+        sshTraceLogger.debug("\(message)")
+    }
+}
 
 /// Delegate protocol for SSH connection events
 @MainActor
@@ -30,6 +48,7 @@ public enum SSHError: LocalizedError {
     case channelError(String)
     case sessionError(String)
     case timeout
+    case notInTmux
     
     public var errorDescription: String? {
         switch self {
@@ -40,6 +59,7 @@ public enum SSHError: LocalizedError {
         case .channelError(let r): return "Channel error: \(r)"
         case .sessionError(let r): return "Session error: \(r)"
         case .timeout: return "Operation timed out"
+        case .notInTmux: return "Not in a tmux session"
         }
     }
 }
@@ -85,6 +105,14 @@ public class SSHConnection: ObservableObject {
     
     // libssh2 global init (do once)
     nonisolated(unsafe) private static var libssh2Initialized = false
+    
+    /// Enable libssh2 protocol-level tracing (logged to os.Logger category "libssh2")
+    /// Set this before calling connect() to capture handshake/auth tracing
+    public var enableTracing: Bool = false
+    
+    /// Trace categories to enable (default: all). Only used when enableTracing is true.
+    /// See LIBSSH2_TRACE_* constants for individual categories.
+    public var traceCategories: Int32 = ~0  // All categories by default
     
     public init(host: String, port: Int = 22, username: String) {
         self.host = host
@@ -151,6 +179,8 @@ public class SSHConnection: ObservableObject {
         
         // Create and setup session
         logger.info("🔗 Creating libssh2 session...")
+        let tracing = self.enableTracing
+        let traceCategories = self.traceCategories
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sshQueue.async { [self] in
                 // Create libssh2 session
@@ -161,6 +191,13 @@ public class SSHConnection: ObservableObject {
                 }
                 self.session = sess
                 logger.info("🔗 libssh2 session created")
+                
+                // Enable tracing if requested (must be before handshake to capture it)
+                if tracing {
+                    logger.info("🔗 Enabling libssh2 tracing with categories=\(traceCategories)")
+                    libssh2_trace(sess, traceCategories)
+                    libssh2_trace_sethandler(sess, nil, libssh2TraceHandler)
+                }
                 
                 // Set blocking mode for simplicity
                 libssh2_session_set_blocking(sess, 1)
