@@ -62,7 +62,7 @@ struct BodakApp: App {
             }
             
             // MARK: - Edit Menu
-            // Add Select All to the edit menu
+            // Add Copy, Paste, Select All, and Find commands
             // Note: System provides "Show Keyboard" / "Hide Keyboard" automatically
             CommandGroup(replacing: .pasteboard) {
                 Button("Copy") {
@@ -81,6 +81,32 @@ struct BodakApp: App {
                     NotificationCenter.default.post(name: .terminalSelectAll, object: nil)
                 }
                 .keyboardShortcut("a", modifiers: .command)
+                
+                Divider()
+                
+                Menu("Find") {
+                    Button("Find…") {
+                        NotificationCenter.default.post(name: .terminalFind, object: nil)
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
+                    
+                    Button("Find Next") {
+                        NotificationCenter.default.post(name: .terminalFindNext, object: nil)
+                    }
+                    .keyboardShortcut("g", modifiers: .command)
+                    
+                    Button("Find Previous") {
+                        NotificationCenter.default.post(name: .terminalFindPrevious, object: nil)
+                    }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    
+                    Divider()
+                    
+                    Button("Hide Find Bar") {
+                        NotificationCenter.default.post(name: .terminalHideFindBar, object: nil)
+                    }
+                    .keyboardShortcut(.escape, modifiers: [])
+                }
             }
             
             // MARK: - View Menu
@@ -187,6 +213,13 @@ extension Notification.Name {
     static let terminalToggleSecureKeyboard = Notification.Name("terminalToggleSecureKeyboard")
     static let terminalReconnect = Notification.Name("terminalReconnect")
     static let reloadConfiguration = Notification.Name("reloadConfiguration")
+    
+    // Search actions
+    static let terminalFind = Notification.Name("terminalFind")
+    static let terminalFindNext = Notification.Name("terminalFindNext")
+    static let terminalFindPrevious = Notification.Name("terminalFindPrevious")
+    static let terminalHideFindBar = Notification.Name("terminalHideFindBar")
+    static let ghosttySearchFocus = Notification.Name("ghosttySearchFocus")
     
     // Navigation/UI
     static let showNewConnection = Notification.Name("showNewConnection")

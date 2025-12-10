@@ -12,6 +12,7 @@ import QuartzCore
 import GhosttyKit
 import ObjectiveC
 import UserNotifications
+import Combine
 
 /// Ghostty namespace containing all Ghostty-related types
 enum Ghostty {
@@ -591,11 +592,21 @@ extension Ghostty {
                 if let userdata = ghostty_surface_userdata(surface) {
                     let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
                     DispatchQueue.main.async {
-                        surfaceView.isSearching = true
+                        // Initialize search state with the initial needle from the action
+                        let initialNeedle: String
                         if let needlePtr = searchData.needle {
-                            surfaceView.searchQuery = String(cString: needlePtr)
+                            initialNeedle = String(cString: needlePtr)
+                        } else {
+                            initialNeedle = ""
                         }
-                        logger.debug("🔍 Search started with query: \(surfaceView.searchQuery)")
+                        
+                        if surfaceView.searchState != nil {
+                            // Search already active, just focus it
+                            NotificationCenter.default.post(name: .ghosttySearchFocus, object: surfaceView)
+                        } else {
+                            surfaceView.searchState = SearchState(needle: initialNeedle)
+                        }
+                        logger.debug("🔍 Search started with query: \(initialNeedle)")
                     }
                 }
                 return true
@@ -610,10 +621,7 @@ extension Ghostty {
                 if let userdata = ghostty_surface_userdata(surface) {
                     let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
                     DispatchQueue.main.async {
-                        surfaceView.isSearching = false
-                        surfaceView.searchQuery = ""
-                        surfaceView.searchTotal = 0
-                        surfaceView.searchSelected = 0
+                        surfaceView.searchState = nil
                         logger.debug("🔍 Search ended")
                     }
                 }
@@ -630,9 +638,10 @@ extension Ghostty {
                 
                 if let userdata = ghostty_surface_userdata(surface) {
                     let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    let total: UInt? = totalData.total >= 0 ? UInt(totalData.total) : nil
                     DispatchQueue.main.async {
-                        surfaceView.searchTotal = Int(totalData.total)
-                        logger.debug("🔍 Search total: \(totalData.total)")
+                        surfaceView.searchState?.total = total
+                        logger.debug("🔍 Search total: \(total ?? 0)")
                     }
                 }
                 return true
@@ -648,9 +657,10 @@ extension Ghostty {
                 
                 if let userdata = ghostty_surface_userdata(surface) {
                     let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    let selected: UInt? = selectedData.selected >= 0 ? UInt(selectedData.selected) : nil
                     DispatchQueue.main.async {
-                        surfaceView.searchSelected = Int(selectedData.selected)
-                        logger.debug("🔍 Search selected: \(selectedData.selected)")
+                        surfaceView.searchState?.selected = selected
+                        logger.debug("🔍 Search selected: \(selected ?? 0)")
                     }
                 }
                 return true
@@ -814,11 +824,99 @@ extension Ghostty {
         /// Current mouse cursor shape (for trackpad/mouse users)
         var currentMouseShape: ghostty_action_mouse_shape_e = GHOSTTY_MOUSE_SHAPE_DEFAULT
         
-        /// Search state
-        @Published var isSearching: Bool = false
-        @Published var searchQuery: String = ""
-        @Published var searchTotal: Int = 0
-        @Published var searchSelected: Int = 0
+        /// Search state - when non-nil, search is active
+        @Published var searchState: SearchState? = nil {
+            didSet {
+                if let searchState {
+                    // Set up debounced search using new ScreenSearch-based sync API
+                    // Use 200ms debounce to avoid crashes from rapid typing
+                    searchNeedleCancellable = searchState.$needle
+                        .dropFirst() // Skip initial empty value when SearchState is created
+                        .removeDuplicates()
+                        .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+                        .sink { [weak self] needle in
+                            self?.performSyncSearch(needle: needle)
+                        }
+                } else if oldValue != nil {
+                    // Search ended - cancel pending search and end search in Ghostty
+                    searchNeedleCancellable = nil
+                    currentSearchTask?.cancel()
+                    currentSearchTask = nil
+                    // End search (clears highlights)
+                    if let surface = self.surface {
+                        Task.detached(priority: .userInitiated) {
+                            ghostty_surface_search_end(surface)
+                        }
+                    }
+                }
+            }
+        }
+        
+        /// Cancellable for search state needle changes (debounced search)
+        private var searchNeedleCancellable: AnyCancellable?
+        
+        /// Current async search task
+        private var currentSearchTask: Task<Void, Never>?
+        
+        /// Serial queue for search operations to prevent race conditions
+        private let searchQueue = DispatchQueue(label: "com.bodak.search", qos: .userInitiated)
+        
+        /// Perform synchronous search on background queue, update UI on main queue
+        /// This uses the new ScreenSearch-based sync API with autoscroll
+        private func performSyncSearch(needle: String) {
+            // Cancel any previous search
+            currentSearchTask?.cancel()
+            
+            guard let surface = self.surface else { return }
+            guard !needle.isEmpty else {
+                // Empty needle - end search on serial queue
+                searchQueue.async {
+                    ghostty_surface_search_end(surface)
+                }
+                Task { @MainActor in
+                    self.searchState?.total = nil
+                    self.searchState?.selected = nil
+                }
+                return
+            }
+            
+            // Capture needle for use in closure
+            let needleCopy = needle
+            
+            // Use Swift Task wrapping serial queue for proper cancellation + serialization
+            currentSearchTask = Task { [weak self] in
+                guard let self = self else { return }
+                
+                // Run search on serial queue to prevent overlapping operations
+                await withCheckedContinuation { continuation in
+                    self.searchQueue.async {
+                        // Check if cancelled before starting
+                        if Task.isCancelled {
+                            continuation.resume()
+                            return
+                        }
+                        
+                        // Call the search_start API (initializes search and scrolls to first match)
+                        let result = needleCopy.withCString { needlePtr in
+                            ghostty_surface_search_start(surface, needlePtr, UInt(needleCopy.utf8.count))
+                        }
+                        
+                        continuation.resume()
+                        
+                        // Check if cancelled after search
+                        if Task.isCancelled { return }
+                        
+                        // Update UI on main queue
+                        DispatchQueue.main.async { [weak self] in
+                            if result.success {
+                                self?.searchState?.total = result.total >= 0 ? UInt(result.total) : nil
+                                self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
+                            }
+                        }
+                    }
+                }
+            }
+        }
         
         /// Current font size (starts at config default)
         @Published var currentFontSize: Float = 14.0
@@ -912,7 +1010,7 @@ extension Ghostty {
                 return
             }
             
-            // Escape (in case it comes through insertText)
+            // Escape character (in case it comes through insertText from soft keyboard)
             if text == "\u{1B}" {
                 let keyEvent = Input.KeyEvent(key: .escape, action: .press)
                 keyEvent.withCValue { cEvent in
@@ -1944,23 +2042,13 @@ extension Ghostty {
                 guard let uiKey = press.key else { continue }
                 
                 // Check for Command (Cmd) modifier for app shortcuts
-                // These are handled locally, not sent to Ghostty
+                // Note: Cmd+C, Cmd+V, Cmd+A, Cmd+F, Cmd+G are handled by SwiftUI menu system
+                // (via BodakApp.swift .commands), so we don't intercept them here
+                // Only intercept shortcuts NOT in the menu system
                 let hasCmd = uiKey.modifierFlags.contains(.command)
                 if hasCmd {
                     let char = uiKey.charactersIgnoringModifiers.lowercased()
                     switch char {
-                    case "c":
-                        // Cmd+C - Copy
-                        self.copy(nil)
-                        return
-                    case "v":
-                        // Cmd+V - Paste
-                        self.paste(nil)
-                        return
-                    case "a":
-                        // Cmd+A - Select All
-                        self.selectAll()
-                        return
                     case "k":
                         // Cmd+K - Clear Screen (via Ghostty binding action)
                         if let surface = surface {
@@ -1968,22 +2056,23 @@ extension Ghostty {
                                 ghostty_surface_binding_action(surface, cstr, 12)
                             }
                         }
-                        return
+                        continue
                     case "0":
                         // Cmd+0 - Reset Font Size
                         resetFontSize()
-                        return
+                        continue
                     case "+", "=":
                         // Cmd++ - Increase Font Size
                         increaseFontSize()
-                        return
+                        continue
                     case "-":
                         // Cmd+- - Decrease Font Size
                         decreaseFontSize()
-                        return
-                    case "w":
-                        // Cmd+W - Disconnect (post notification)
-                        NotificationCenter.default.post(name: Notification.Name("terminalDisconnect"), object: nil)
+                        continue
+                    case "c", "v", "a", "f", "g", "w", "n", ",":
+                        // These are handled by SwiftUI menu system - let them pass through
+                        // Copy, Paste, Select All, Find, Find Next, Disconnect, New Connection, Preferences
+                        super.pressesBegan(presses, with: event)
                         return
                     default:
                         break
@@ -2026,11 +2115,11 @@ extension Ghostty {
                     
                     // Start key repeat timer
                     startKeyRepeat(for: finalEvent)
-                    
                     return
                 }
             }
             
+            // Pass unhandled keys to super (system shortcuts, etc.)
             super.pressesBegan(presses, with: event)
         }
         
@@ -2312,18 +2401,45 @@ extension Ghostty {
             ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
         }
         
-        /// Navigate to next search result
-        func searchNext() {
+        /// Start a search (opens UI, Ghostty will callback with START_SEARCH action)
+        func startSearch() {
             guard let surface = surface else { return }
-            let action = "search_next"
+            let action = "start_search"
             ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
         }
         
-        /// Navigate to previous search result
+        /// Navigate to next search result (iOS ScreenSearch-based sync API with autoscroll)
+        func searchNext() {
+            guard let surface = surface else { return }
+            guard searchState != nil else { return }
+            
+            // Use new sync API on background thread - handles autoscroll internally
+            Task.detached(priority: .userInitiated) {
+                let result = ghostty_surface_search_next(surface)
+                
+                if result.success {
+                    await MainActor.run { [weak self] in
+                        self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
+                    }
+                }
+            }
+        }
+        
+        /// Navigate to previous search result (iOS ScreenSearch-based sync API with autoscroll)
         func searchPrevious() {
             guard let surface = surface else { return }
-            let action = "search_previous"
-            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+            guard searchState != nil else { return }
+            
+            // Use new sync API on background thread - handles autoscroll internally
+            Task.detached(priority: .userInitiated) {
+                let result = ghostty_surface_search_prev(surface)
+                
+                if result.success {
+                    await MainActor.run { [weak self] in
+                        self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
+                    }
+                }
+            }
         }
         
         /// End the current search
@@ -2682,6 +2798,32 @@ extension Ghostty {
             case .notReady:
                 return "Ghostty app is not ready"
             }
+        }
+    }
+    
+    // MARK: - Search State
+    
+    /// Observable search state for the terminal, matching macOS Ghostty implementation
+    class SearchState: ObservableObject {
+        /// The current search query (needle)
+        @Published var needle: String = ""
+        
+        /// Total number of search matches (nil if unknown/not searched yet)
+        @Published var total: UInt? = nil
+        
+        /// Currently selected match index (nil if no selection)
+        @Published var selected: UInt? = nil
+        
+        /// Initialize with optional starting query
+        init(needle: String = "") {
+            self.needle = needle
+        }
+        
+        /// Reset search state
+        func reset() {
+            needle = ""
+            total = nil
+            selected = nil
         }
     }
 }
