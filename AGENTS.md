@@ -216,15 +216,15 @@ await connection.connect()
 ```
 
 Trace output goes to os.Logger category `libssh2`. Available categories:
-- `LIBSSH2_TRACE_TRANS` (1<<1) - Transport layer
-- `LIBSSH2_TRACE_KEX` (1<<2) - Key exchange
-- `LIBSSH2_TRACE_AUTH` (1<<3) - Authentication  
-- `LIBSSH2_TRACE_CONN` (1<<4) - Connection layer
+- `LIBSSH2_TRACE_TRANS` (1<<1) - Transport layer (noisy)
+- `LIBSSH2_TRACE_KEX` (1<<2) - Key exchange ✅ default
+- `LIBSSH2_TRACE_AUTH` (1<<3) - Authentication ✅ default
+- `LIBSSH2_TRACE_CONN` (1<<4) - Connection layer (very noisy)
 - `LIBSSH2_TRACE_SCP` (1<<5) - SCP operations
-- `LIBSSH2_TRACE_SFTP` (1<<6) - SFTP operations
-- `LIBSSH2_TRACE_ERROR` (1<<7) - Errors
-- `LIBSSH2_TRACE_PUBLICKEY` (1<<8) - Public key auth
-- `LIBSSH2_TRACE_SOCKET` (1<<9) - Socket layer
+- `LIBSSH2_TRACE_SFTP` (1<<6) - SFTP operations ✅ default
+- `LIBSSH2_TRACE_ERROR` (1<<7) - Errors ✅ default
+- `LIBSSH2_TRACE_PUBLICKEY` (1<<8) - Public key auth ✅ default
+- `LIBSSH2_TRACE_SOCKET` (1<<9) - Socket layer (noisy)
 
 **Note:** This requires the debug-enabled libssh2 build from `daiimus/Libssh2Prebuild`.
 

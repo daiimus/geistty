@@ -1059,6 +1059,8 @@ typedef struct {
     intptr_t total;    // Total matches found (-1 on error)
     intptr_t selected; // Selected match index (-1 if none)
     bool success;      // True if operation succeeded
+    intptr_t screen_type;   // 0 = primary screen, 1 = alternate screen
+    bool has_scrollback;    // True if current screen has scrollback content
 } ghostty_search_result_s;
 
 ghostty_search_result_s ghostty_surface_search_start(ghostty_surface_t,

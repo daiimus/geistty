@@ -6,6 +6,35 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 
 ---
 
+## 🔥 Immediate Priorities
+
+These are the current focus areas before continuing with other roadmap items:
+
+### 1. Fix Search (tmux capture-pane)
+- [ ] Debug tmux capture-pane implementation - not returning results
+- [ ] Verify capture markers are being sent/received correctly
+- [ ] Test data flow: SSH → SSHSession → capture buffer → search
+- [ ] Ensure terminal data is blocked during capture (not forwarded to Ghostty)
+- [ ] Add comprehensive logging for capture state machine
+
+### 2. Streamline Debugging Across Repos
+- [ ] Update `../ghostty/AGENTS.md` with `--console` debugging pattern
+- [ ] Update `../libxev-ios/AGENTS.md` with `--console` debugging pattern
+- [ ] Ensure consistent Logger pattern across all Swift code
+- [ ] Document how to trace issues across repo boundaries
+
+### 3. Code Cleanup (Spaghetti Reduction)
+- [ ] **SSHSession.swift** - Refactor tmux capture state machine (currently complex)
+- [ ] **Ghostty.swift** - Review and simplify Surface class
+- [ ] **TerminalContainerView.swift** - Extract search UI into separate view
+- [ ] **SSHConnection.swift** - Review error handling consistency
+- [ ] Remove unused code and commented-out experiments
+- [ ] Consolidate duplicate logic
+- [ ] Add missing documentation comments
+- [ ] Review and standardize naming conventions
+
+---
+
 ## ✅ Phase 0: Environment Setup — COMPLETE
 
 - [x] Install Xcode 15+
@@ -437,9 +466,34 @@ Features that would make Bodak essential for developers using AI terminals:
 - [ ] **Quick switch** - Fast switching between multiple SSH connections
 
 ### Search & Navigation
-- [ ] **Search in scrollback** - Find text in terminal history (Cmd+F)
+- [x] **Search in scrollback** - Find text in terminal history (Cmd+F) ✅
+  - [x] Basic search UI with search bar
+  - [x] Ghostty sync search API integration (ghostty_surface_search_start/next/prev/end)
+  - [x] Match count display and navigation
+  - [x] Search bar scroll/drag/dismiss gestures
+  - [x] Works on primary screen (non-tmux sessions)
+  - [x] **Alt Screen indicator** - Shows when on alternate screen (tmux/vim) ✅
+  - [x] **tmux scrollback search** - Search tmux's internal scrollback ✅
+    - Analysis complete: See `TMUX_SEARCH_ANALYSIS.md` for architecture details
+    - Root cause: tmux has its own scrollback buffer separate from terminal's
+    - Solution: Use `tmux capture-pane -p -S -` to query tmux's scrollback
+    - [x] Add `captureTmuxPane()` to SSHSession
+    - [x] Add tmux search mode to SearchState
+    - [x] Search captured pane text locally in Swift
+    - [x] Navigate results via tmux copy-mode commands
+    - [x] "tmux" badge in search bar when in tmux mode
+  - [ ] Connection option: "Use terminal scrollback (disable tmux alternate screen)"
+  - [ ] Auto-scroll to match position (tmux mode)
 - [ ] **Jump to prompt** - Quick navigation between command prompts
 - [ ] **Semantic search** - Find by description ("that curl command")
+
+### Debug Cleanup
+- [ ] **Remove debug logging from Ghostty** - Clean up SCREEN_INIT, SCREEN_SWITCH logs
+  - [ ] src/terminal/Terminal.zig - Remove std.log.err calls in switchScreen/switchScreenMode
+  - [ ] src/terminal/ScreenSet.zig - Remove std.log.err call in init
+  - [ ] src/apprt/embedded.zig - Remove verbose search debug logging
+  - [ ] src/global.zig - Review debug logging settings for lib mode
+  - [ ] Rebuild GhosttyKit xcframework after cleanup
 
 ### Developer Quality of Life
 - [ ] **Syntax highlighting in output** - Detect and highlight code blocks
