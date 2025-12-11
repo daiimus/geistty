@@ -2095,6 +2095,13 @@ extension Ghostty {
                 // This properly handles all modifiers including Alt/Option
                 guard let surface = surface else { continue }
                 
+                // Debug: Log all key presses with modifiers
+                let hasCtrl = uiKey.modifierFlags.contains(.control)
+                let char = uiKey.charactersIgnoringModifiers
+                if hasCtrl {
+                    NSLog("🎹 Hardware key with Ctrl: char='\(char)' keyCode=\(uiKey.keyCode)")
+                }
+                
                 // Add Ctrl toggle state to modifiers if active
                 var modFlags = uiKey.modifierFlags
                 if ctrlToggleActive {
@@ -2212,6 +2219,9 @@ extension Ghostty {
             // Convert to Data and call the onWrite callback
             if let data = data, len > 0 {
                 let swiftData = Data(bytes: data, count: Int(len))
+                // Debug: log what Ghostty is sending
+                let hexStr = swiftData.map { String(format: "%02x", $0) }.joined(separator: " ")
+                NSLog("📤 externalWriteCallback: \(len) bytes: \(hexStr)")
                 DispatchQueue.main.async {
                     surfaceView.onWrite?(swiftData)
                 }

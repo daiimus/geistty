@@ -50,7 +50,7 @@ Bodak/
 │   ├── Auth/             # SSH authentication, credentials, keychain
 │   ├── Ghostty/          # Ghostty integration, terminal surface
 │   ├── SFTP/             # SFTP file browser
-│   ├── SSH/              # SSH connection management
+│   ├── SSH/              # SSH connection management, tmux control mode
 │   ├── Terminal/         # Terminal session, view models
 │   └── UI/               # Settings, reusable UI components
 ├── Frameworks/
@@ -66,6 +66,7 @@ Bodak/
 - `Sources/Terminal/TerminalContainerView.swift` - Terminal session UI
 - `Sources/SSH/SSHConnection.swift` - Low-level SSH connection using libssh2
 - `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux integration, data flow
+- `Sources/SSH/TmuxControlClient.swift` - tmux Control Mode (-CC) protocol client
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
 - `Sources/UI/SettingsView.swift` - App settings UI
 
@@ -125,11 +126,28 @@ Live font updates use `ghostty_surface_update_config()` with a new config.
 
 ## tmux Integration
 
-Bodak has special tmux support:
+Bodak has special tmux support with two modes:
 
-- **Auto-attach**: Automatically runs `tmux new-session -A -s main` on connect
-- **Scrollback search**: Uses `capture-pane -p -S - -E -` to capture full tmux history for searching (since alternate screen has no scrollback)
-- **Session detection**: `SSHSession` manages tmux state and capture operations
+### Control Mode (Recommended)
+
+Uses tmux's native Control Mode protocol (`tmux -CC`) for proper integration:
+
+```swift
+// TmuxControlClient.swift handles:
+// - %output %pane-id <octal-escaped-data> → pane output to Ghostty
+// - %begin/%end/%error blocks → command responses
+// - capture-pane via proper protocol commands
+```
+
+Benefits:
+- Bodak owns the scrollback buffer (receives all `%output`)
+- Search works on buffered content without visible commands
+- No marker pollution in terminal output
+- Proper handling of escape sequences
+
+### Legacy Mode (Fallback)
+
+Uses marker-based `capture-pane` approach:
 
 ```swift
 // tmux capture-pane flow (in SSHSession.swift)
@@ -138,6 +156,33 @@ Bodak has special tmux support:
 // 3. Extract captured content, search within it
 // 4. Resume normal terminal data flow
 ```
+
+### Enabling Control Mode
+
+Control mode is currently opt-in during development:
+
+```swift
+// In SSHSession connect methods:
+try await session.connect(
+    host: "...",
+    useTmux: true,
+    useControlMode: true  // Enable control mode (default: false)
+)
+```
+
+### Control Mode Protocol Reference
+
+From tmux wiki: https://github.com/tmux/tmux/wiki/Control-Mode
+
+| Message | Format | Description |
+|---------|--------|-------------|
+| `%output` | `%output %pane-id data` | Pane output (octal escaped) |
+| `%begin` | `%begin timestamp flags` | Command response start |
+| `%end` | `%end timestamp flags` | Command response end |
+| `%error` | `%error timestamp flags` | Command error |
+| `%exit` | `%exit [reason]` | Control client exited |
+
+Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ESC, `\134` for `\`)
 
 ## Development Notes
 
@@ -158,14 +203,29 @@ Bodak has special tmux support:
 | Decision | Why |
 |----------|-----|
 | External Backend | iOS sandboxing prevents fork/exec/PTY |
+| tmux Control Mode | Proper protocol integration; Bodak owns scrollback buffer |
 | capture-pane for search | Alternate screen mode (tmux, vim) has 0 scrollback by design in terminal emulators |
 | libxev fork | iOS uses `kevent`, not `kevent64` |
 | Custom module.modulemap name | Avoids conflicts with CSSH's module.modulemap |
 
 ## Data Flow
 
+### Regular Mode
 ```
 SSH Server → SSHConnection (libssh2) → SSHSession → Ghostty.Surface.writeOutput()
+                                                  ↓
+                                           Terminal UI (Metal)
+                                                  ↓
+User Input → Ghostty write callback → SSHSession → SSHConnection.write()
+```
+
+### Control Mode (tmux -CC)
+```
+SSH Server → SSHConnection → SSHSession → TmuxControlClient.parse()
+                                                  ↓
+                                         Parse %output messages
+                                                  ↓
+                               Decode octal escapes → Ghostty.Surface.writeOutput()
                                                   ↓
                                            Terminal UI (Metal)
                                                   ↓

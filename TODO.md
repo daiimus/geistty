@@ -10,28 +10,59 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 
 These are the current focus areas before continuing with other roadmap items:
 
-### 1. Fix Search (tmux capture-pane)
-- [ ] Debug tmux capture-pane implementation - not returning results
-- [ ] Verify capture markers are being sent/received correctly
-- [ ] Test data flow: SSH → SSHSession → capture buffer → search
-- [ ] Ensure terminal data is blocked during capture (not forwarded to Ghostty)
-- [ ] Add comprehensive logging for capture state machine
+### 1. tmux Control Mode Integration ✅ COMPLETE
+- [x] Create TmuxControlClient.swift for tmux -CC protocol
+- [x] Implement control message parser (%output, %begin/%end, etc.)
+- [x] Add octal escape decoding for pane output
+- [x] Integrate with SSHSession (two modes: legacy & control)
+- [x] Control mode attachment (tmux -CC new-session)
+- [x] Pane output routing to Ghostty terminal
+- [x] Search via capture-pane command in control mode
+- [x] Handle tmux control mode exit/reconnection
+- [x] Input queueing until tmux ready (prevents dropped keystrokes)
+- [x] Session restore (capture-pane on activation)
+- [x] Pause mode for iOS app lifecycle
+- [x] Resize handling (refresh-client -C)
+- Note: Legacy mode still available but control mode is now default
 
 ### 2. Streamline Debugging Across Repos
-- [ ] Update `../ghostty/AGENTS.md` with `--console` debugging pattern
-- [ ] Update `../libxev-ios/AGENTS.md` with `--console` debugging pattern
-- [ ] Ensure consistent Logger pattern across all Swift code
+- [x] Update `../ghostty/AGENTS.md` with `--console` debugging pattern
+- [x] Update `../libxev-ios/AGENTS.md` with `--console` debugging pattern
+- [x] Ensure consistent Logger pattern across all Swift code
 - [ ] Document how to trace issues across repo boundaries
 
 ### 3. Code Cleanup (Spaghetti Reduction)
-- [ ] **SSHSession.swift** - Refactor tmux capture state machine (currently complex)
+- [x] **SSHSession.swift** - Refactored with TmuxMode enum and TmuxControlClient
 - [ ] **Ghostty.swift** - Review and simplify Surface class
 - [ ] **TerminalContainerView.swift** - Extract search UI into separate view
 - [ ] **SSHConnection.swift** - Review error handling consistency
-- [ ] Remove unused code and commented-out experiments
-- [ ] Consolidate duplicate logic
+- [x] Remove unused code and commented-out experiments (Dec 2025 cleanup)
+- [ ] Consolidate duplicate logic (font mapping in 3 places)
 - [ ] Add missing documentation comments
 - [ ] Review and standardize naming conventions
+
+### 4. Code Analysis Findings (Dec 2025)
+
+#### High Priority - DONE
+- [x] Remove legacy tmux capture code (~100 lines) - superseded by TmuxControlClient
+- [x] Remove unused `GhosttyTerminalView.swift` (121 lines) - superseded by RawTerminalViewController
+- [x] Remove unused `BodakTerminalView` struct - never instantiated
+- [x] Remove `TmuxMode.legacy` case - control mode is now default
+
+#### Medium Priority - TODO
+- [ ] Consolidate font mapping (currently defined in 3 places):
+  - `Ghostty.swift` mapFontFamily()
+  - `Ghostty.swift` reverseMapFontFamily()  
+  - `SettingsView.swift` fontFamilies array
+- [ ] Extract common connection logic in SSHSession (3 similar connect methods)
+- [ ] Split `TerminalContainerView.swift` (1560 lines) into multiple files
+- [ ] Remove `TmuxControlClient.parsePaneState()` - never called, PaneState always nil
+- [ ] Replace print() with Logger in ConfigSyncManager.swift and Theme.swift
+
+#### Low Priority - Nice to Have
+- [ ] Extract magic numbers to constants (timeouts, marker strings)
+- [ ] Implement or remove TODO comments in production code
+- [ ] Clarify SFTP status - either implement or mark as future feature
 
 ---
 
