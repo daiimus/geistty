@@ -30,23 +30,32 @@ enum TmuxControlMessage {
     /// Pane output notification
     case output(paneId: String, data: Data)
     
-    /// Session changed notification
+    /// Session notifications
     case sessionChanged(sessionId: String, sessionName: String)
+    case sessionRenamed(sessionId: String, newName: String)
+    case sessionsChanged  // Session created or destroyed
+    case sessionWindowChanged(sessionId: String, windowId: String)
     
     /// Layout changed notification  
     case layoutChanged(windowId: String, windowIndex: Int, layout: String)
     
-    /// Window notification
+    /// Window notification (attached session)
     case windowAdd(windowId: String)
     case windowClose(windowId: String)
     case windowRenamed(windowId: String, name: String)
+    case windowPaneChanged(windowId: String, paneId: String)  // Active pane changed
+    
+    /// Window notification (other sessions - "unlinked")
+    case unlinkedWindowAdd(windowId: String)
+    case unlinkedWindowClose(windowId: String)
+    case unlinkedWindowRenamed(windowId: String, name: String)
     
     /// Client notification
     case clientSessionChanged(clientName: String, sessionId: String)
     case clientDetached(clientName: String)
     
     /// Pane notification
-    case paneChanged(paneId: String)
+    case paneModeChanged(paneId: String)
     case pausePaneChanged(paneId: String)
     
     /// Pause/continue notifications (tmux 3.2+)
@@ -55,6 +64,9 @@ enum TmuxControlMessage {
     
     /// Exit notification
     case exit(reason: String?)
+    
+    /// Subscription changed (format subscriptions)
+    case subscriptionChanged(name: String, sessionId: String?, windowId: String?, paneId: String?, value: String)
     
     /// Unknown message type
     case unknown(line: String)
@@ -846,7 +858,7 @@ class TmuxControlClient {
             return .unknown(line: line)
             
         case "%pane-mode-changed":
-            return .paneChanged(paneId: rest)
+            return .paneModeChanged(paneId: rest)
             
         case "%pause-pane-changed":
             return .pausePaneChanged(paneId: rest)
@@ -868,6 +880,60 @@ class TmuxControlClient {
             
         case "%client-detached":
             return .clientDetached(clientName: rest)
+            
+        case "%window-pane-changed":
+            // %window-pane-changed @window %pane
+            let parts = rest.split(separator: " ")
+            if parts.count >= 2 {
+                return .windowPaneChanged(windowId: String(parts[0]), paneId: String(parts[1]))
+            }
+            return .unknown(line: line)
+            
+        case "%unlinked-window-add":
+            return .unlinkedWindowAdd(windowId: rest)
+            
+        case "%unlinked-window-close":
+            return .unlinkedWindowClose(windowId: rest)
+            
+        case "%unlinked-window-renamed":
+            let parts = rest.split(separator: " ", maxSplits: 1)
+            if parts.count >= 2 {
+                return .unlinkedWindowRenamed(windowId: String(parts[0]), name: String(parts[1]))
+            }
+            return .unknown(line: line)
+            
+        case "%session-renamed":
+            // %session-renamed $session name
+            let parts = rest.split(separator: " ", maxSplits: 1)
+            if parts.count >= 2 {
+                return .sessionRenamed(sessionId: String(parts[0]), newName: String(parts[1]))
+            }
+            return .unknown(line: line)
+            
+        case "%sessions-changed":
+            return .sessionsChanged
+            
+        case "%session-window-changed":
+            // %session-window-changed $session @window
+            let parts = rest.split(separator: " ")
+            if parts.count >= 2 {
+                return .sessionWindowChanged(sessionId: String(parts[0]), windowId: String(parts[1]))
+            }
+            return .unknown(line: line)
+            
+        case "%subscription-changed":
+            // %subscription-changed name session-id window-id pane-id value
+            // IDs may be empty (-) if not applicable
+            let parts = rest.split(separator: " ", maxSplits: 4)
+            if parts.count >= 5 {
+                let name = String(parts[0])
+                let sessionId = parts[1] == "-" ? nil : String(parts[1])
+                let windowId = parts[2] == "-" ? nil : String(parts[2])
+                let paneId = parts[3] == "-" ? nil : String(parts[3])
+                let value = String(parts[4])
+                return .subscriptionChanged(name: name, sessionId: sessionId, windowId: windowId, paneId: paneId, value: value)
+            }
+            return .unknown(line: line)
             
         default:
             return .unknown(line: line)
@@ -928,11 +994,36 @@ class TmuxControlClient {
         case .clientDetached(let clientName):
             logger.info("Client detached: \(clientName)")
             
-        case .paneChanged(let paneId):
+        case .paneModeChanged(let paneId):
             logger.debug("Pane mode changed: \(paneId)")
             
         case .pausePaneChanged(let paneId):
             logger.debug("Pause pane changed: \(paneId)")
+            
+        case .windowPaneChanged(let windowId, let paneId):
+            logger.info("Window pane changed: \(windowId) -> \(paneId)")
+            activePaneId = paneId
+            
+        case .sessionRenamed(let sessionId, let newName):
+            logger.info("Session renamed: \(sessionId) -> \(newName)")
+            
+        case .sessionsChanged:
+            logger.info("Sessions changed (session created or destroyed)")
+            
+        case .sessionWindowChanged(let sessionId, let windowId):
+            logger.info("Session window changed: \(sessionId) -> \(windowId)")
+            
+        case .unlinkedWindowAdd(let windowId):
+            logger.debug("Unlinked window added: \(windowId)")
+            
+        case .unlinkedWindowClose(let windowId):
+            logger.debug("Unlinked window closed: \(windowId)")
+            
+        case .unlinkedWindowRenamed(let windowId, let name):
+            logger.debug("Unlinked window renamed: \(windowId) -> \(name)")
+            
+        case .subscriptionChanged(let name, let sessionId, let windowId, let paneId, let value):
+            logger.debug("Subscription '\(name)' changed: session=\(sessionId ?? "-") window=\(windowId ?? "-") pane=\(paneId ?? "-") value=\(value)")
             
         case .pause(let paneId):
             // Pane output is now paused (tmux 3.2+)
