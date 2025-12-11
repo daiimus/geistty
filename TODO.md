@@ -25,6 +25,32 @@ These are the current focus areas before continuing with other roadmap items:
 - [x] Resize handling (refresh-client -C)
 - Note: Legacy mode still available but control mode is now default
 
+### 1.5. tmux Multi-Pane Integration 🔄 IN PROGRESS
+Comprehensive tmux integration for Ghostty-native experience across SSH + tmux + iPadOS windows.
+See TMUX_INTEGRATION.md for full architecture.
+
+#### Phase 1: Foundation ✅ COMPLETE
+- [x] Data models: TmuxSession, TmuxWindow, TmuxPane (TmuxModels.swift)
+- [x] TmuxSessionManager - central coordinator for state
+- [x] TmuxControlClient - complete protocol coverage for all notifications:
+  - [x] %window-pane-changed, %session-renamed, %sessions-changed
+  - [x] %unlinked-window-add/close/renamed, %session-window-changed
+  - [x] %subscription-changed for format subscriptions
+- [x] Layout parsing (TmuxLayout struct)
+
+#### Phase 2: Multi-Pane Support 🔄 TODO
+- [ ] Connect TmuxSessionManager to SSHSession
+- [ ] Multiple Ghostty surfaces (one per pane)
+- [ ] Split pane navigation (Cmd+Option+arrows)
+- [ ] Pane selection via tap gesture
+- [ ] Multi-pane rendering in single view
+
+#### Phase 3: iPadOS Window Integration 🔲 TODO
+- [ ] Each pane as native iPadOS Scene
+- [ ] Window management via UISceneSession
+- [ ] Window title from tmux pane/window name
+- [ ] Create/close windows maps to tmux split/kill-pane
+
 ### 2. Streamline Debugging Across Repos
 - [x] Update `../ghostty/AGENTS.md` with `--console` debugging pattern
 - [x] Update `../libxev-ios/AGENTS.md` with `--console` debugging pattern
