@@ -50,6 +50,10 @@ class SSHSession: ObservableObject, Identifiable {
     // tmux Control Mode client (for .controlMode)
     private var tmuxControlClient: TmuxControlClient?
     
+    /// tmux Session Manager for multi-pane state management
+    /// Access this to get session/window/pane info and route output to surfaces
+    private(set) var tmuxSessionManager: TmuxSessionManager?
+    
     // Whether control mode is actually active (tmux -CC has started)
     private var controlModeActive: Bool = false
     
@@ -189,6 +193,16 @@ class SSHSession: ObservableObject, Identifiable {
         logger.info("Setting up tmux control mode client")
         tmuxControlClient = TmuxControlClient()
         tmuxControlClient?.delegate = self
+        
+        // Set up session manager for multi-pane state tracking
+        tmuxSessionManager = TmuxSessionManager()
+        if let client = tmuxControlClient, let manager = tmuxSessionManager {
+            // Connect session manager to control client
+            client.sessionManager = manager
+            manager.setup(controlClient: client) { [weak self] command in
+                self?.connection?.write(command)
+            }
+        }
     }
     
     /// Inject commands to set up the terminal environment
@@ -360,6 +374,8 @@ class SSHSession: ObservableObject, Identifiable {
         pendingInputQueue.removeAll()
         tmuxControlClient?.reset()
         tmuxControlClient = nil
+        tmuxSessionManager?.cleanup()
+        tmuxSessionManager = nil
         connection?.disconnect()
         connection = nil
         state = .disconnected
@@ -460,8 +476,14 @@ extension SSHSession: SSHConnectionDelegate {
 
 extension SSHSession: TmuxControlClientDelegate {
     func tmuxClient(_ client: TmuxControlClient, didReceivePaneOutput data: Data, paneId: String) {
-        // Forward pane output to terminal
-        // This is the decoded terminal data from %output messages
+        // Route pane output through session manager if available
+        // This enables multi-pane support - each pane routes to its own surface
+        if let manager = tmuxSessionManager {
+            manager.routeOutput(data, to: paneId)
+        }
+        
+        // Also forward to delegate for backward compatibility (single-pane mode)
+        // TODO: When multi-pane UI is ready, remove this and let manager handle routing
         delegate?.sshSession(self, didReceiveData: data)
     }
     
@@ -469,6 +491,9 @@ extension SSHSession: TmuxControlClientDelegate {
         // Control mode is now fully active - the first %begin/%end block has completed
         // This means tmux has finished its initial response and is ready for commands
         logger.info("Control mode fully activated")
+        
+        // Notify session manager
+        tmuxSessionManager?.controlModeActivated()
         
         // Flush any queued input that came in before control mode was ready
         if !pendingInputQueue.isEmpty {
@@ -532,6 +557,9 @@ extension SSHSession: TmuxControlClientDelegate {
         // Reset control mode state
         controlModeActive = false
         tmuxControlClient?.reset()
+        
+        // Notify session manager
+        tmuxSessionManager?.controlModeExited()
         
         // Notify delegate - this will typically trigger disconnect handling
         // The SSH connection is still open, but tmux has terminated

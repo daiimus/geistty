@@ -253,8 +253,13 @@ class TmuxSessionManager: ObservableObject {
     
     /// Route pane output to the appropriate Ghostty surface
     func routeOutput(_ data: Data, to paneId: String) {
-        // Get or create surface for this pane
-        let surface = getOrCreateSurface(for: paneId)
+        // Get existing surface or create one if factory is available
+        guard let surface = getSurfaceOrCreate(for: paneId) else {
+            // No surface available - this can happen before surface factory is set
+            // or for panes we're not rendering yet
+            logger.debug("No surface available for pane \(paneId), output dropped")
+            return
+        }
         
         // Feed data to the surface
         surface.feedData(data)
@@ -269,7 +274,27 @@ class TmuxSessionManager: ObservableObject {
     
     // MARK: - Surface Management
     
+    /// Get or create a Ghostty surface for a pane (returns nil if not possible)
+    private func getSurfaceOrCreate(for paneId: String) -> Ghostty.SurfaceView? {
+        if let existing = paneSurfaces[paneId] {
+            return existing
+        }
+        
+        // Try to create new surface if factory is available
+        guard let factory = surfaceFactory else {
+            return nil
+        }
+        
+        let surface = factory(paneId)
+        paneSurfaces[paneId] = surface
+        
+        logger.info("Created Ghostty surface for pane \(paneId)")
+        
+        return surface
+    }
+    
     /// Get or create a Ghostty surface for a pane
+    /// - Warning: Crashes if factory is not set and surface doesn't exist
     func getOrCreateSurface(for paneId: String) -> Ghostty.SurfaceView {
         if let existing = paneSurfaces[paneId] {
             return existing
@@ -286,6 +311,12 @@ class TmuxSessionManager: ObservableObject {
         logger.info("Created Ghostty surface for pane \(paneId)")
         
         return surface
+    }
+    
+    /// Register an existing surface for a pane (e.g., the initial surface for %0)
+    func registerExistingSurface(_ surface: Ghostty.SurfaceView, for paneId: String) {
+        paneSurfaces[paneId] = surface
+        logger.info("Registered existing surface for pane \(paneId)")
     }
     
     /// Get surface for a pane (returns nil if not created)
