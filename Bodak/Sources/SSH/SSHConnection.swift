@@ -49,6 +49,7 @@ public enum SSHError: LocalizedError {
     case sessionError(String)
     case timeout
     case notInTmux
+    case tmuxExited(reason: String?)
     
     public var errorDescription: String? {
         switch self {
@@ -60,6 +61,7 @@ public enum SSHError: LocalizedError {
         case .sessionError(let r): return "Session error: \(r)"
         case .timeout: return "Operation timed out"
         case .notInTmux: return "Not in a tmux session"
+        case .tmuxExited(let reason): return "tmux session ended\(reason.map { ": \($0)" } ?? "")"
         }
     }
 }
