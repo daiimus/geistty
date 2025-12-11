@@ -150,7 +150,7 @@ These are the current focus areas before continuing with other roadmap items:
   - [x] Ctrl toggle button (sticky modifier)
   - [x] Arrow key buttons
 - [ ] **Additional keyboard improvements**
-  - [ ] Alt/Option modifier support (for vim, emacs) ⭐ HIGH PRIORITY - Should work now with proper Ghostty API!
+  - [x] Alt/Option modifier support (for vim, emacs) ✅ macos-option-as-alt = true
   - [ ] Tab key button in accessory bar
   - [ ] Common symbols bar (~, |, `, etc.)
   - [x] Cmd+C/V for copy/paste (intercept and handle) ✅
