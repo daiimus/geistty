@@ -130,6 +130,49 @@ class TerminalViewModel: ObservableObject {
     private var cols: Int = 80
     private var rows: Int = 24
     
+    /// Observers for app lifecycle events
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    
+    // MARK: - Lifecycle
+    
+    init() {
+        setupLifecycleObservers()
+    }
+    
+    deinit {
+        // Remove lifecycle observers
+        for observer in lifecycleObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+    
+    /// Set up observers for app lifecycle events
+    private func setupLifecycleObservers() {
+        // When app goes to background, tmux pause mode handles buffering
+        let resignObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.sshSession?.appWillResignActive()
+            }
+        }
+        lifecycleObservers.append(resignObserver)
+        
+        // When app comes back, resume paused panes
+        let activeObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.sshSession?.appDidBecomeActive()
+            }
+        }
+        lifecycleObservers.append(activeObserver)
+    }
+    
     /// Start tracking connection duration
     func startDurationTimer() {
         connectionStartTime = Date()
@@ -218,6 +261,11 @@ class TerminalViewModel: ObservableObject {
     
     /// Called when user types - send to SSH
     func sendInput(_ data: Data) {
+        if let str = String(data: data, encoding: .utf8) {
+            logger.debug("⌨️ sendInput: \(data.count) bytes: \(str.prefix(20))")
+        } else {
+            logger.debug("⌨️ sendInput: \(data.count) bytes (binary)")
+        }
         sshSession?.write(data)
     }
     
@@ -449,79 +497,6 @@ extension TerminalViewModel: SSHSessionDelegate {
             isConnected = true
             disconnectedByRemote = false
             disconnectError = nil
-        }
-    }
-}
-
-/// UIViewRepresentable wrapper for Ghostty.SurfaceView with SSH integration
-struct BodakTerminalView: UIViewRepresentable {
-    @EnvironmentObject var ghosttyApp: Ghostty.App
-    @ObservedObject var viewModel: TerminalViewModel
-    
-    func makeUIView(context: Context) -> UIView {
-        // Get theme background color
-        let themeBgColor = UIColor(ThemeManager.shared.selectedTheme.background)
-        
-        // Check if Ghostty is ready
-        guard ghosttyApp.readiness == .ready, let app = ghosttyApp.app else {
-            logger.warning("⚠️ Ghostty not ready, showing placeholder")
-            let placeholder = UIView()
-            placeholder.backgroundColor = themeBgColor
-            return placeholder
-        }
-        
-        // Create surface configuration with external backend for SSH
-        // The external backend doesn't spawn a subprocess - instead:
-        // - SSH data → ghostty_surface_write_output() → terminal display
-        // - User input → write callback → SSH connection
-        var config = Ghostty.SurfaceConfiguration()
-        config.backendType = .external  // Use external backend for SSH
-        
-        // Create Ghostty surface with the config
-        let surfaceView = Ghostty.SurfaceView(app, baseConfig: config)
-        
-        // Background color is set in SurfaceView.init() from theme
-        // No need to override here
-        
-        // Wire up the write callback - when terminal wants to send data, send to SSH
-        surfaceView.onWrite = { [weak viewModel] data in
-            Task { @MainActor in
-                logger.debug("⌨️ Terminal sending \(data.count) bytes to SSH")
-                viewModel?.sendInput(data)
-            }
-        }
-        
-        // Wire up the resize callback - when terminal grid size changes, resize SSH PTY
-        surfaceView.onResize = { [weak viewModel] cols, rows in
-            Task { @MainActor in
-                logger.info("📐 Terminal grid resized to \(cols)x\(rows)")
-                viewModel?.resize(cols: cols, rows: rows)
-            }
-        }
-        
-        // Store reference in view model IMMEDIATELY (not async)
-        // This is crucial - we need surfaceView to be available before SSH data arrives
-        viewModel.surfaceView = surfaceView
-        logger.info("✅ Ghostty surface view created with external backend and assigned to viewModel")
-        
-        // Set initial focus
-        surfaceView.focusDidChange(true)
-        
-        return surfaceView
-    }
-    
-    func updateUIView(_ uiView: UIView, context: Context) {
-        guard let surfaceView = uiView as? Ghostty.SurfaceView else { return }
-        
-        // Update size if needed
-        surfaceView.sizeDidChange(uiView.bounds.size)
-    }
-    
-    static func dismantleUIView(_ uiView: UIView, coordinator: ()) {
-        // Properly close the Ghostty surface when the view is being destroyed
-        if let surfaceView = uiView as? Ghostty.SurfaceView {
-            logger.info("🔒 dismantleUIView - closing Ghostty surface")
-            surfaceView.close()
         }
     }
 }
