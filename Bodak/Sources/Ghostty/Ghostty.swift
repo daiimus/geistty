@@ -134,6 +134,11 @@ extension Ghostty {
             background-opacity = 1.0
             bold-color = bright
             
+            # === Input ===
+            # Treat Option key as Alt for vim/emacs/tmux keybindings
+            # (Alt+b/f for word nav, Alt+. for last arg, etc.)
+            macos-option-as-alt = true
+            
             # === Terminal Behavior ===
             window-padding-x = 4
             window-padding-y = 4
