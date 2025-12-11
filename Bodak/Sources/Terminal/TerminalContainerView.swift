@@ -417,6 +417,11 @@ class TerminalViewModel: ObservableObject {
         sshSession?.isTmuxSession ?? false
     }
     
+    /// Access the tmux session manager for multi-pane support
+    var tmuxManager: TmuxSessionManager? {
+        sshSession?.tmuxSessionManager
+    }
+    
     /// Capture tmux pane content for search
     /// - Parameter completion: Called with the captured content or error
     func captureTmuxPane(completion: @escaping (Result<String, Error>) -> Void) {
@@ -774,6 +779,9 @@ class RawTerminalUIViewController: UIViewController {
         
         // Create and add the surface view
         createSurfaceView()
+        
+        // Set up surface factory for tmux multi-pane support
+        setupTmuxSurfaceFactory()
         
         // Observe settings changes
         settingsObserver = NotificationCenter.default.addObserver(
@@ -1418,6 +1426,62 @@ class RawTerminalUIViewController: UIViewController {
         surface.becomeFirstResponder()
         
         logger.info("✅ RawTerminalUIViewController created surface view")
+    }
+    
+    /// Set up surface factory for tmux multi-pane support
+    /// This allows TmuxSessionManager to create surfaces for additional panes
+    private func setupTmuxSurfaceFactory() {
+        guard let ghosttyApp = ghosttyApp,
+              let app = ghosttyApp.app else {
+            logger.warning("⚠️ Cannot set up tmux surface factory - Ghostty not ready")
+            return
+        }
+        
+        // Capture the Ghostty.App wrapper (which is a class) not the raw pointer
+        // Provide a factory closure to the session manager
+        // This will be called when a new pane is created
+        viewModel?.tmuxManager?.surfaceFactory = { [weak self, weak ghosttyApp] paneId in
+            guard let ghosttyApp = ghosttyApp, let app = ghosttyApp.app else {
+                fatalError("Ghostty app deallocated before surface factory called")
+            }
+            
+            logger.info("Creating Ghostty surface for pane \(paneId)")
+            
+            // Create surface configuration with external backend
+            var config = Ghostty.SurfaceConfiguration()
+            config.backendType = .external
+            
+            // Create Ghostty surface
+            let surface = Ghostty.SurfaceView(app, baseConfig: config)
+            
+            // Set background color to match theme
+            let themeBg = ThemeManager.shared.selectedTheme.background
+            surface.backgroundColor = UIColor(themeBg)
+            
+            // Wire up callbacks - for multi-pane, input goes to the specific pane
+            surface.onWrite = { [weak self] data in
+                Task { @MainActor in
+                    // In multi-pane mode, input goes to the specific pane
+                    self?.viewModel?.tmuxManager?.sendInput(data, to: paneId)
+                }
+            }
+            
+            surface.onResize = { [weak self] cols, rows in
+                Task { @MainActor in
+                    // Resize goes to the whole tmux client
+                    self?.viewModel?.resize(cols: cols, rows: rows)
+                }
+            }
+            
+            return surface
+        }
+        
+        // Also register the existing surface as the surface for pane %0
+        if let existingSurface = surfaceView {
+            viewModel?.tmuxManager?.registerExistingSurface(existingSurface, for: "%0")
+        }
+        
+        logger.info("✅ tmux surface factory configured")
     }
     
     override func viewWillDisappear(_ animated: Bool) {
