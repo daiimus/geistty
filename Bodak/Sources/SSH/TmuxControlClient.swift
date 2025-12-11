@@ -132,6 +132,9 @@ class TmuxControlClient {
     
     weak var delegate: TmuxControlClientDelegate?
     
+    /// Session manager for multi-pane state tracking (optional)
+    weak var sessionManager: TmuxSessionManager?
+    
     /// Whether control mode is currently active
     private(set) var isActive: Bool = false
     
@@ -975,18 +978,23 @@ class TmuxControlClient {
             logger.info("Session changed: \(sessionId) (\(sessionName))")
             // %session-changed means tmux session is ready - trigger activation
             notifyActivationIfNeeded()
+            sessionManager?.handleSessionChanged(sessionId: sessionId, sessionName: sessionName)
             
-        case .layoutChanged(let windowId, let windowIndex, _):
+        case .layoutChanged(let windowId, let windowIndex, let layout):
             logger.debug("Layout changed: window \(windowId) index \(windowIndex)")
+            sessionManager?.handleLayoutChanged(windowId: windowId, windowIndex: windowIndex, layout: layout)
             
         case .windowAdd(let windowId):
             logger.debug("Window added: \(windowId)")
+            sessionManager?.handleWindowAdd(windowId: windowId)
             
         case .windowClose(let windowId):
             logger.debug("Window closed: \(windowId)")
+            sessionManager?.handleWindowClose(windowId: windowId)
             
         case .windowRenamed(let windowId, let name):
             logger.debug("Window renamed: \(windowId) -> \(name)")
+            sessionManager?.handleWindowRenamed(windowId: windowId, name: name)
             
         case .clientSessionChanged(let clientName, let sessionId):
             logger.debug("Client session changed: \(clientName) -> \(sessionId)")
@@ -996,6 +1004,7 @@ class TmuxControlClient {
             
         case .paneModeChanged(let paneId):
             logger.debug("Pane mode changed: \(paneId)")
+            sessionManager?.handlePaneModeChanged(paneId: paneId)
             
         case .pausePaneChanged(let paneId):
             logger.debug("Pause pane changed: \(paneId)")
@@ -1003,12 +1012,14 @@ class TmuxControlClient {
         case .windowPaneChanged(let windowId, let paneId):
             logger.info("Window pane changed: \(windowId) -> \(paneId)")
             activePaneId = paneId
+            sessionManager?.handleWindowPaneChanged(windowId: windowId, paneId: paneId)
             
         case .sessionRenamed(let sessionId, let newName):
             logger.info("Session renamed: \(sessionId) -> \(newName)")
             
         case .sessionsChanged:
             logger.info("Sessions changed (session created or destroyed)")
+            sessionManager?.handleSessionsChanged()
             
         case .sessionWindowChanged(let sessionId, let windowId):
             logger.info("Session window changed: \(sessionId) -> \(windowId)")
