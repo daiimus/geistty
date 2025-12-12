@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+import os.log
+
+private let logger = Logger(subsystem: "com.bodak", category: "Theme")
 
 /// Represents a terminal color theme parsed from Ghostty theme files
 struct TerminalTheme: Identifiable, Equatable {
@@ -198,7 +201,7 @@ class ThemeManager: ObservableObject {
                 }
             }
         } catch {
-            print("Error loading themes: \(error)")
+            logger.error("Error loading themes: \(error.localizedDescription)")
         }
         
         themes = loadedThemes
