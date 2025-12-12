@@ -7,6 +7,9 @@
 
 import Foundation
 import SwiftUI
+import os.log
+
+private let logger = Logger(subsystem: "com.bodak", category: "ConfigSync")
 
 /// Manages the Ghostty config file (source of truth)
 class ConfigSyncManager: ObservableObject {
@@ -72,9 +75,9 @@ class ConfigSyncManager: ObservableObject {
         content = updatedLines.joined(separator: "\n")
         do {
             try content.write(to: configFilePath, atomically: true, encoding: .utf8)
-            print("[ConfigSync] Updated \(key) = \(value) in config file")
+            logger.info("Updated \(key) = \(value) in config file")
         } catch {
-            print("[ConfigSync] Failed to update config: \(error)")
+            logger.error("Failed to update config: \(error.localizedDescription)")
         }
     }
     
@@ -153,9 +156,9 @@ class ConfigSyncManager: ObservableObject {
         content = updatedLines.joined(separator: "\n")
         do {
             try content.write(to: configFilePath, atomically: true, encoding: .utf8)
-            print("[ConfigSync] Updated theme to: \(theme.name)")
+            logger.info("Updated theme to: \(theme.name)")
         } catch {
-            print("[ConfigSync] Failed to update theme: \(error)")
+            logger.error("Failed to update theme: \(error.localizedDescription)")
         }
     }
     
@@ -165,7 +168,7 @@ class ConfigSyncManager: ObservableObject {
     func loadConfigToGUI() {
         guard FileManager.default.fileExists(atPath: configFilePath.path),
               let content = try? String(contentsOf: configFilePath, encoding: .utf8) else {
-            print("[ConfigSync] No config file found, using defaults")
+            logger.info("No config file found, using defaults")
             return
         }
         
@@ -200,43 +203,43 @@ class ConfigSyncManager: ObservableObject {
                 let guiFont = reverseMapFontFamily(value)
                 defaults.set(guiFont, forKey: "terminal.fontFamily")
                 defaults.synchronize()
-                print("[ConfigSync] Set font-family: \(guiFont)")
+                logger.debug("Set font-family: \(guiFont)")
                 
             case "cursor-style":
                 // block, bar, underline
                 if ["block", "bar", "underline"].contains(value) {
                     defaults.set(value, forKey: "terminal.cursorStyle")
                     defaults.synchronize()
-                    print("[ConfigSync] Set cursor-style: \(value)")
+                    logger.debug("Set cursor-style: \(value)")
                 }
                 
             case "font-thicken":
                 let boolValue = value == "true"
                 defaults.set(boolValue, forKey: "terminal.fontThicken")
                 defaults.synchronize()
-                print("[ConfigSync] Set font-thicken: \(boolValue)")
+                logger.debug("Set font-thicken: \(boolValue)")
                 
             case "theme":
                 // Theme name from config - save to UserDefaults first
                 defaults.set(value, forKey: "terminal.colorTheme")
                 defaults.synchronize()
-                print("[ConfigSync] Searching for theme: '\(value)'")
+                logger.debug("Searching for theme: '\\(value)'")
                 
                 // Find matching theme
                 let availableThemes = ThemeManager.shared.themes
-                print("[ConfigSync] Available themes: \(availableThemes.map { $0.name })")
+                logger.debug("Available themes: \\(availableThemes.map { $0.name })")
                 
                 if let theme = availableThemes.first(where: { 
                     $0.name.lowercased() == value.lowercased() ||
                     $0.id.lowercased() == value.lowercased()
                 }) {
-                    print("[ConfigSync] Found matching theme: \(theme.name)")
+                    logger.info("Found matching theme: \\(theme.name)")
                     DispatchQueue.main.async {
                         ThemeManager.shared.selectedTheme = theme
-                        print("[ConfigSync] Set ThemeManager.selectedTheme to: \(theme.name)")
+                        logger.debug("Set ThemeManager.selectedTheme to: \\(theme.name)")
                     }
                 } else {
-                    print("[ConfigSync] ⚠️ No matching theme found for: '\(value)'")
+                    logger.warning("⚠️ No matching theme found for: '\\(value)'")
                 }
                 
             default:
@@ -245,7 +248,7 @@ class ConfigSyncManager: ObservableObject {
             }
         }
         
-        print("[ConfigSync] Loaded config file into GUI settings")
+        logger.info("Loaded config file into GUI settings")
     }
     
     /// Reverse map Ghostty font family to GUI display name
