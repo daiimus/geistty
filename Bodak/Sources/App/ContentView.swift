@@ -151,7 +151,8 @@ struct ContentView: View {
             password: connectionInfo.password
         )
         
-        // Set status to connected - the actual SSH connection happens in TerminalContainerView
+        // Set status to connected - shows terminal view which handles SSH connection internally
+        // The terminal view shows its own connecting indicator while SSH handshake happens
         appState.connectionStatus = .connected
         showConnectionSheet = false
     }
