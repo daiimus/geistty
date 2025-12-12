@@ -765,6 +765,13 @@ class RawTerminalUIViewController: UIViewController {
     private var connectionObserver: AnyCancellable?
     private var isMultiPaneMode = false
     
+    // Window picker support (shown when multiple tmux windows exist)
+    private var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
+    private var windowPickerHeightConstraint: NSLayoutConstraint?
+    private var windowsObserver: AnyCancellable?
+    private var isShowingWindowPicker = false
+    private let windowPickerHeight: CGFloat = 36
+    
     // Status bar preference (read from UserDefaults)
     private var showStatusBar: Bool {
         UserDefaults.standard.bool(forKey: "ui.showStatusBar")
@@ -793,6 +800,9 @@ class RawTerminalUIViewController: UIViewController {
         
         // Observe split tree changes for multi-pane mode
         setupSplitTreeObserver()
+        
+        // Observe windows changes for window picker
+        setupWindowsObserver()
         
         // Also observe connection state - tmux manager may not exist yet at viewDidLoad
         setupConnectionObserver()
@@ -1532,11 +1542,22 @@ class RawTerminalUIViewController: UIViewController {
         // Configure surface management if not already done
         configureSurfaceManagement()
         
-        // Create primary surface if it doesn't exist yet
-        if surfaceView == nil, let tmuxManager = viewModel?.tmuxManager {
-            if let surface = tmuxManager.createPrimarySurface() {
-                displaySurface(surface)
-                logger.info("✅ Created and displayed primary surface from TmuxSessionManager")
+        // Create/replace primary surface with TmuxSessionManager-owned one
+        // This handles the case where a direct surface was created before tmux activated
+        if let tmuxManager = viewModel?.tmuxManager {
+            if let existingSurface = surfaceView, tmuxManager.getSurface(for: "%0") == nil {
+                // There's a direct surface but tmux doesn't have a surface for %0 yet
+                // Remove the direct surface and create a tmux-owned one
+                logger.info("🔄 Replacing direct surface with tmux-owned surface for %0")
+                existingSurface.removeFromSuperview()
+                surfaceView = nil
+            }
+            
+            if surfaceView == nil {
+                if let surface = tmuxManager.createPrimarySurface() {
+                    displaySurface(surface)
+                    logger.info("✅ Created and displayed primary surface from TmuxSessionManager")
+                }
             }
         }
         
@@ -1562,6 +1583,99 @@ class RawTerminalUIViewController: UIViewController {
         logger.info("✅ Split tree observer configured")
     }
     
+    /// Observe windows changes to show/hide the window picker
+    private func setupWindowsObserver() {
+        guard let tmuxManager = viewModel?.tmuxManager else {
+            logger.debug("No tmux manager available for windows observation")
+            return
+        }
+        
+        // Cancel any existing observer
+        windowsObserver?.cancel()
+        
+        windowsObserver = tmuxManager.$windows
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] windows in
+                self?.handleWindowsChange(windowCount: windows.count)
+            }
+        
+        logger.info("✅ Windows observer configured")
+    }
+    
+    /// Handle windows count change - show/hide window picker
+    private func handleWindowsChange(windowCount: Int) {
+        let shouldShowPicker = windowCount > 1
+        
+        if shouldShowPicker && !isShowingWindowPicker {
+            showWindowPicker()
+        } else if !shouldShowPicker && isShowingWindowPicker {
+            hideWindowPicker()
+        }
+    }
+    
+    /// Show the window picker at the top of the view
+    private func showWindowPicker() {
+        guard let tmuxManager = viewModel?.tmuxManager else { return }
+        guard windowPickerHostingController == nil else { return }
+        
+        logger.info("📑 Showing window picker")
+        
+        let pickerView = TmuxWindowPickerView(sessionManager: tmuxManager)
+        let hostingController = UIHostingController(rootView: pickerView)
+        hostingController.view.backgroundColor = .clear
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        
+        addChild(hostingController)
+        view.addSubview(hostingController.view)
+        hostingController.didMove(toParent: self)
+        
+        // Position at the top, below status bar if shown
+        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
+        
+        NSLayoutConstraint.activate([
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor, constant: topInset),
+            hostingController.view.heightAnchor.constraint(equalToConstant: windowPickerHeight)
+        ])
+        
+        windowPickerHostingController = hostingController
+        isShowingWindowPicker = true
+        
+        // Adjust terminal view's top constraint to make room for the picker
+        updateTerminalTopConstraint()
+    }
+    
+    /// Hide the window picker
+    private func hideWindowPicker() {
+        guard let hostingController = windowPickerHostingController else { return }
+        
+        logger.info("📑 Hiding window picker")
+        
+        hostingController.willMove(toParent: nil)
+        hostingController.view.removeFromSuperview()
+        hostingController.removeFromParent()
+        
+        windowPickerHostingController = nil
+        isShowingWindowPicker = false
+        
+        // Restore terminal view's top constraint
+        updateTerminalTopConstraint()
+    }
+    
+    /// Update the terminal view's top constraint based on window picker visibility
+    private func updateTerminalTopConstraint() {
+        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
+        let pickerOffset: CGFloat = isShowingWindowPicker ? windowPickerHeight : 0
+        
+        surfaceTopConstraint?.constant = topInset + pickerOffset
+        multiPaneTopConstraint?.constant = topInset + pickerOffset
+        
+        UIView.animate(withDuration: 0.2) {
+            self.view.layoutIfNeeded()
+        }
+    }
+    
     /// Observe connection state to set up tmux observers when connected
     /// This is needed because tmux manager doesn't exist until after SSH connects
     private func setupConnectionObserver() {
@@ -1576,6 +1690,7 @@ class RawTerminalUIViewController: UIViewController {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         self?.setupTmuxSurfaceFactory()
                         self?.setupSplitTreeObserver()
+                        self?.setupWindowsObserver()
                     }
                 }
             }

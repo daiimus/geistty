@@ -1,0 +1,169 @@
+//
+//  TmuxWindowPickerView.swift
+//  Bodak
+//
+//  A horizontal tab bar showing tmux windows, allowing switching between them.
+//
+
+import SwiftUI
+import os
+
+private let logger = Logger(subsystem: "com.bodak", category: "TmuxWindowPicker")
+
+/// A horizontal tab bar showing tmux windows
+struct TmuxWindowPickerView: View {
+    @ObservedObject var sessionManager: TmuxSessionManager
+    
+    /// Height of the window picker bar
+    private let barHeight: CGFloat = 36
+    
+    /// Background color
+    private let backgroundColor = Color(white: 0.12)
+    
+    /// Get windows sorted by index
+    private var sortedWindows: [TmuxWindow] {
+        sessionManager.windows.values.sorted { $0.index < $1.index }
+    }
+    
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(sortedWindows) { window in
+                        WindowTab(
+                            window: window,
+                            isSelected: window.id == sessionManager.focusedWindowId,
+                            onSelect: {
+                                selectWindow(window)
+                            },
+                            onClose: {
+                                closeWindow(window)
+                            }
+                        )
+                        .id(window.id)
+                    }
+                    
+                    // New window button
+                    Button(action: {
+                        sessionManager.newWindow()
+                    }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 8)
+            }
+            .frame(height: barHeight)
+            .background(backgroundColor)
+            .onChange(of: sessionManager.focusedWindowId) { _, newWindowId in
+                // Scroll to focused window when it changes
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(newWindowId, anchor: .center)
+                }
+            }
+        }
+    }
+    
+    private func selectWindow(_ window: TmuxWindow) {
+        logger.info("Selecting window: \(window.id) '\(window.name)'")
+        sessionManager.selectWindow(window.id)
+    }
+    
+    private func closeWindow(_ window: TmuxWindow) {
+        logger.info("Closing window: \(window.id) '\(window.name)'")
+        sessionManager.closeWindow(windowId: window.id)
+    }
+}
+
+/// A single window tab in the picker
+private struct WindowTab: View {
+    let window: TmuxWindow
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    
+    /// Tab background colors
+    private var backgroundColor: Color {
+        isSelected ? Color(white: 0.2) : Color.clear
+    }
+    
+    /// Tab text color
+    private var textColor: Color {
+        isSelected ? .white : .secondary
+    }
+    
+    /// Whether to show close button (always for selected, on hover for others)
+    @State private var isHovering = false
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            // Window index badge
+            Text("\(window.index)")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(isSelected ? .accentColor : .secondary)
+                .frame(minWidth: 14)
+            
+            // Window name
+            Text(window.name)
+                .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                .foregroundColor(textColor)
+                .lineLimit(1)
+            
+            // Window flags (*, -, etc.)
+            if !window.flags.isEmpty {
+                Text(window.flags)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            
+            // Close button (show when selected or hovering)
+            if isSelected || isHovering {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+        )
+        .onTapGesture {
+            onSelect()
+        }
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovering = hovering
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    // Create mock session manager for preview
+    let manager = TmuxSessionManager()
+    
+    return VStack {
+        TmuxWindowPickerView(sessionManager: manager)
+        Spacer()
+    }
+    .background(Color.black)
+}
