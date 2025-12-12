@@ -112,11 +112,14 @@ class TmuxSessionManager: ObservableObject {
     
     /// Called when control mode exits
     func controlModeExited() {
+        logger.info("🔌 Control mode exited, cleaning up state")
         isConnected = false
         currentSession = nil
         sessions.removeAll()
         windows.removeAll()
         panes.removeAll()
+        windowSplitTrees.removeAll()
+        currentSplitTree = TmuxSplitTree()
     }
     
     // MARK: - State Queries
@@ -272,9 +275,9 @@ class TmuxSessionManager: ObservableObject {
     
     /// Handle window closed notification
     func handleWindowClose(windowId: String) {
-        logger.info("Window closed: \(windowId)")
+        logger.info("🗑️ Window closed: \(windowId)")
         
-        // Clean up associated panes
+        // Clean up associated panes and their surfaces
         if let window = windows[windowId] {
             for paneId in window.paneIds {
                 panes.removeValue(forKey: paneId)
@@ -282,13 +285,36 @@ class TmuxSessionManager: ObservableObject {
             }
         }
         
+        // Remove window and its split tree
         windows.removeValue(forKey: windowId)
+        windowSplitTrees.removeValue(forKey: windowId)
         
         // Update session's window list
         if var session = currentSession {
             session.windowIds.removeAll { $0 == windowId }
             sessions[session.id] = session
             currentSession = session
+            
+            // If this was the focused window, switch to another window
+            if focusedWindowId == windowId {
+                if let nextWindowId = session.windowIds.first {
+                    logger.info("🗑️ Focused window closed, switching to \(nextWindowId)")
+                    focusedWindowId = nextWindowId
+                    
+                    // Update current split tree to the new window
+                    if let tree = windowSplitTrees[nextWindowId] {
+                        currentSplitTree = tree
+                        if let firstPaneId = tree.paneIds.first {
+                            focusedPaneId = "%\(firstPaneId)"
+                        }
+                    }
+                } else {
+                    // No windows left - this shouldn't normally happen,
+                    // tmux should send %exit when last window closes
+                    logger.warning("🗑️ All windows closed but no %exit received")
+                    currentSplitTree = TmuxSplitTree()
+                }
+            }
         }
     }
     
@@ -372,6 +398,16 @@ class TmuxSessionManager: ObservableObject {
                 logger.info("📐 🗑️ Pane \(paneId) was closed, cleaning up surface")
                 removeSurface(for: paneId)
                 panes.removeValue(forKey: paneId)
+                
+                // If the removed pane was our primary surface, reassign it
+                if paneId == "%0" {
+                    // Find the first remaining pane's surface
+                    if let firstRemainingPaneId = newPaneIds.sorted().first,
+                       let remainingSurface = paneSurfaces[firstRemainingPaneId] {
+                        logger.info("📐 🔄 Primary pane %0 closed, reassigning primarySurface to \(firstRemainingPaneId)")
+                        primarySurface = remainingSurface
+                    }
+                }
             }
             
             if !removedPaneIds.isEmpty {
@@ -386,12 +422,17 @@ class TmuxSessionManager: ObservableObject {
             currentSplitTree = newTree
             logger.info("📐 ✅ Updated currentSplitTree: \(newTree.paneIds.count) panes, isSplit=\(newTree.isSplit)")
             
-            // If we're down to a single pane, update focused pane ID
+            // If we're down to a single pane, update focused pane ID and ensure primarySurface is set
             if newTree.paneIds.count == 1 {
                 let remainingPaneId = "%\(newTree.paneIds[0])"
                 if focusedPaneId != remainingPaneId {
                     logger.info("📐 Single pane remaining, updating focus to \(remainingPaneId)")
                     focusedPaneId = remainingPaneId
+                }
+                // Ensure primarySurface points to the remaining surface
+                if let remainingSurface = paneSurfaces[remainingPaneId], primarySurface !== remainingSurface {
+                    logger.info("📐 🔄 Reassigning primarySurface to remaining pane \(remainingPaneId)")
+                    primarySurface = remainingSurface
                 }
             }
         } else {

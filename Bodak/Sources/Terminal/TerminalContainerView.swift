@@ -1710,8 +1710,19 @@ class RawTerminalUIViewController: UIViewController {
     /// Handle split tree changes - switch between single and multi-pane mode
     private func handleSplitTreeChange(_ tree: TmuxSplitTree) {
         let hasSplits = tree.isSplit
+        let hasPanes = !tree.paneIds.isEmpty
         
-        logger.info("🔄 handleSplitTreeChange: panes=\(tree.paneIds), isSplit=\(hasSplits), isMultiPaneMode=\(isMultiPaneMode)")
+        logger.info("🔄 handleSplitTreeChange: panes=\(tree.paneIds), isSplit=\(hasSplits), hasPanes=\(hasPanes), isMultiPaneMode=\(isMultiPaneMode)")
+        
+        // Handle empty tree (all panes closed) - just clean up multi-pane mode
+        // The disconnect handler will navigate away when tmux sends %exit
+        if !hasPanes {
+            if isMultiPaneMode {
+                logger.info("🔄 No panes remaining, cleaning up multi-pane mode")
+                cleanupMultiPaneMode()
+            }
+            return
+        }
         
         if hasSplits && !isMultiPaneMode {
             // Transition to multi-pane mode
@@ -1722,6 +1733,20 @@ class RawTerminalUIViewController: UIViewController {
             logger.info("🔄 Transitioning to single surface mode")
             transitionToSingleSurfaceMode()
         }
+    }
+    
+    /// Clean up multi-pane mode without requiring a primary surface
+    private func cleanupMultiPaneMode() {
+        if let hostingController = multiPaneHostingController {
+            hostingController.willMove(toParent: nil)
+            hostingController.view.removeFromSuperview()
+            hostingController.removeFromParent()
+            multiPaneHostingController = nil
+            multiPaneTopConstraint = nil
+            multiPaneBottomConstraint = nil
+        }
+        isMultiPaneMode = false
+        logger.info("🔄 ✅ Cleaned up multi-pane mode")
     }
     
     /// Transition from single surface mode to multi-pane mode
@@ -1770,11 +1795,11 @@ class RawTerminalUIViewController: UIViewController {
         logger.info("🔄 Transitioning to single surface mode")
         
         // Get the primary surface from TmuxSessionManager
-        // TmuxSessionManager owns all surfaces, so it's guaranteed to exist
         guard let tmuxManager = viewModel?.tmuxManager,
               let primarySurface = tmuxManager.primarySurface else {
             logger.warning("🔄 ⚠️ No primary surface available from TmuxSessionManager!")
-            isMultiPaneMode = false
+            // Still clean up multi-pane mode even without a surface
+            cleanupMultiPaneMode()
             return
         }
         
@@ -1782,15 +1807,8 @@ class RawTerminalUIViewController: UIViewController {
         // destroying the hosting controller
         primarySurface.removeFromSuperview()
         
-        // Now safe to remove the multi-pane hosting controller
-        if let hostingController = multiPaneHostingController {
-            hostingController.willMove(toParent: nil)
-            hostingController.view.removeFromSuperview()
-            hostingController.removeFromParent()
-            multiPaneHostingController = nil
-            multiPaneTopConstraint = nil
-            multiPaneBottomConstraint = nil
-        }
+        // Clean up the multi-pane hosting controller
+        cleanupMultiPaneMode()
         
         // Re-add primary surface to our view hierarchy
         primarySurface.translatesAutoresizingMaskIntoConstraints = false
@@ -1815,7 +1833,7 @@ class RawTerminalUIViewController: UIViewController {
         primarySurface.focusDidChange(true)
         let becameFirstResponder = primarySurface.becomeFirstResponder()
         
-        isMultiPaneMode = false
+        // isMultiPaneMode already set to false by cleanupMultiPaneMode()
         logger.info("🔄 ✅ Transitioned to single surface mode (becameFirstResponder=\(becameFirstResponder))")
     }
     
