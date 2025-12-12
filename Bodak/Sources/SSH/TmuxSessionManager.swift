@@ -638,6 +638,49 @@ class TmuxSessionManager: ObservableObject {
         }
     }
     
+    /// Navigate to next window (tab)
+    func nextWindow() {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("next-window", via: write)
+    }
+    
+    /// Navigate to previous window (tab)
+    func previousWindow() {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("previous-window", via: write)
+    }
+    
+    /// Navigate to last window (most recently used)
+    func lastWindow() {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("last-window", via: write)
+    }
+    
+    /// Navigate to window by index (1-based like Ghostty Cmd+1-8)
+    func selectWindowByIndex(_ index: Int) {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        // tmux uses 0-based indexing by default, but we accept 1-based from Ghostty shortcuts
+        client.sendCommandFireAndForget("select-window -t :\(index - 1)", via: write)
+    }
+    
+    /// Navigate to next pane
+    func nextPane() {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("select-pane -t :.+", via: write)
+    }
+    
+    /// Navigate to previous pane
+    func previousPane() {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("select-pane -t :.-", via: write)
+    }
+    
+    /// Toggle pane zoom (tmux zoom)
+    func toggleTmuxZoom() {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("resize-pane -Z", via: write)
+    }
+    
     /// Split pane horizontally (side by side)
     func splitHorizontal() {
         guard let client = controlClient, let write = writeToSSH else { return }
