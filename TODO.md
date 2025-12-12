@@ -79,6 +79,63 @@ See TMUX_INTEGRATION.md for full architecture.
 - [ ] Window title from tmux pane/window name
 - [ ] Create/close windows maps to tmux split/kill-pane
 
+#### Phase 5: Unified Tab Bar & Multiple SSH Connections 🔲 FUTURE
+Safari-style pull-down tab bar unifying all sessions, connections, and windows.
+
+**Architecture:**
+- [ ] ConnectionManager - Track multiple SSHSession instances
+- [ ] UnifiedTab model - Flatten tmux windows across all SSH connections
+- [ ] Each tab = one tmux window (or non-tmux SSH connection)
+- [ ] Visual grouping by SSH connection (color dot or icon)
+
+**UI/UX:**
+- [ ] Safari-style pull-down gesture to reveal tab bar
+- [ ] Tab bar hidden by default (minimal UI, maximum terminal)
+- [ ] Auto-peek on navigation (Cmd+T, Cmd+Shift+], window switch)
+- [ ] Tab shows: connection name, window name, pane count badge
+- [ ] Swipe between tabs
+- [ ] Long-press for tab options (close, rename, move)
+
+**Multi-Connection Support:**
+- [ ] Background SSH connections (keep alive while inactive)
+- [ ] Connection status indicator per tab
+- [ ] Quick-switch between connections
+- [ ] New connection via Cmd+N or "+" button
+
+**Keyboard Shortcuts:**
+- [ ] Cmd+T - New tab (tmux window in current connection)
+- [ ] Cmd+N - New connection
+- [ ] Cmd+1-9 - Switch to tab N (across all connections)
+- [ ] Cmd+Shift+[/] - Previous/next tab
+
+#### Phase 6: Seamless Reconnection & State Persistence 🔲 FUTURE
+iOS aggressively suspends apps and drops network connections. tmux handles persistence on the server side; we need to handle it gracefully on the client.
+
+**Connection Resilience:**
+- [ ] Detect SSH connection drop (socket error, timeout)
+- [ ] Auto-reconnect in background when app becomes active
+- [ ] Re-attach to existing tmux session seamlessly
+- [ ] Queue user input during reconnection (don't lose keystrokes)
+- [ ] Visual indicator during reconnect (subtle, non-blocking)
+
+**State Capture & Restore:**
+- [ ] On app suspend: Note current tmux session, window, pane, scroll position
+- [ ] On app resume: Reconnect SSH, re-attach tmux, restore view state
+- [ ] capture-pane to restore visible content immediately
+- [ ] Scrollback restoration via capture-pane -p -S -
+
+**iOS Lifecycle Handling:**
+- [ ] Background task for graceful disconnect
+- [ ] Save connection state to UserDefaults/Keychain
+- [ ] Handle network transitions (WiFi ↔ cellular)
+- [ ] Mosh-like experience: "just works" after sleep/wake
+
+**User Experience Goal:**
+- User closes iPad, opens hours later
+- App reconnects automatically
+- Terminal looks exactly as they left it
+- No manual reconnection needed
+
 ### 2. Streamline Debugging Across Repos
 - [x] Update `../ghostty/AGENTS.md` with `--console` debugging pattern
 - [x] Update `../libxev-ios/AGENTS.md` with `--console` debugging pattern
