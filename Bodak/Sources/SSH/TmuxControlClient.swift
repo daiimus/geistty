@@ -88,6 +88,7 @@ private struct PendingCommand {
 }
 
 /// Delegate protocol for TmuxControlClient
+@MainActor
 protocol TmuxControlClientDelegate: AnyObject {
     /// Called when pane output is received
     func tmuxClient(_ client: TmuxControlClient, didReceivePaneOutput data: Data, paneId: String)
