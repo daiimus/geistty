@@ -69,6 +69,13 @@ class TmuxSessionManager: ObservableObject {
     /// Callback for resize events
     private var surfaceResizeHandler: ((Int, Int) -> Void)?
     
+    /// Debounce task for resize events to prevent thrashing
+    private var resizeDebounceTask: Task<Void, Never>?
+    
+    /// Last resize dimensions (to avoid duplicate resize commands)
+    private var lastResizeCols: Int = 0
+    private var lastResizeRows: Int = 0
+    
     /// Buffer for output received before surfaces are created
     /// This is essential for session restore which arrives before surface factory is configured
     private var pendingOutput: [String: [Data]] = [:]
@@ -562,6 +569,20 @@ class TmuxSessionManager: ObservableObject {
             inputHandler(surface, paneId)
         }
         
+        // Wire up resize handler for this surface
+        // Only the focused pane triggers resize to avoid thrashing with multiple windows
+        // Also uses debouncing to coalesce rapid resize events
+        if surfaceResizeHandler != nil {
+            surface.onResize = { [weak self] cols, rows in
+                guard let self = self else { return }
+                // Only trigger resize from the focused pane to avoid multiple surfaces
+                // all sending resize commands simultaneously
+                if self.focusedPaneId == paneId {
+                    self.debouncedResize(cols: cols, rows: rows)
+                }
+            }
+        }
+        
         paneSurfaces[paneId] = surface
         
         // If this is %0, also set as primary surface
@@ -824,6 +845,36 @@ class TmuxSessionManager: ObservableObject {
     func equalizeSplits() {
         guard let client = controlClient, let write = writeToSSH else { return }
         client.sendCommandFireAndForget("select-layout even-horizontal", via: write)
+    }
+    
+    /// Debounced resize to prevent thrashing with rapid resize events
+    /// Waits 50ms to coalesce multiple resize calls into one
+    private func debouncedResize(cols: Int, rows: Int) {
+        // Skip if dimensions haven't changed
+        guard cols != lastResizeCols || rows != lastResizeRows else {
+            return
+        }
+        
+        // Cancel any pending resize
+        resizeDebounceTask?.cancel()
+        
+        // Store dimensions for the debounced call
+        let pendingCols = cols
+        let pendingRows = rows
+        
+        resizeDebounceTask = Task { [weak self] in
+            // Wait 50ms for resize events to settle
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            
+            guard !Task.isCancelled, let self = self else { return }
+            
+            // Only send if dimensions still different from last sent
+            if pendingCols != self.lastResizeCols || pendingRows != self.lastResizeRows {
+                self.lastResizeCols = pendingCols
+                self.lastResizeRows = pendingRows
+                self.surfaceResizeHandler?(pendingCols, pendingRows)
+            }
+        }
     }
     
     /// Resize terminal (all panes)
