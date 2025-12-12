@@ -1265,14 +1265,23 @@ class TmuxControlClient {
         }
         
         hasRestoredSession = true
-        
+        restorePaneHistory(paneId: paneId, via: write)
+    }
+    
+    /// Restore scrollback history for a specific pane
+    /// Unlike restoreSession(), this can be called multiple times for different panes
+    ///
+    /// - Parameters:
+    ///   - paneId: The pane ID (e.g., "%0", "%1")
+    ///   - write: Function to send data to SSH
+    func restorePaneHistory(paneId: String, via write: @escaping (String) -> Void) {
         // Capture pane content (plain text, preserving line structure)
         // -p: output to stdout (control mode captures in %begin/%end)
         // -t: target pane
         // -S -N: start from N lines before current position
         // Note: We don't use -J (join) as it destroys line breaks
         let captureCommand = "capture-pane -p -t \(paneId) -S -\(sessionRestoreScrollback)"
-        logger.info("Capturing session content: \(captureCommand)")
+        logger.info("Capturing pane history: \(captureCommand)")
         
         // Use proper command routing - the response will come back via callback
         sendCommand(captureCommand, via: write) { [weak self] result in
@@ -1280,11 +1289,11 @@ class TmuxControlClient {
             
             switch result {
             case .success(let content):
-                logger.info("Session restore received: \(content.count) chars")
+                logger.info("Pane history received for \(paneId): \(content.count) chars")
                 self.delegate?.tmuxClient(self, didRestoreSession: content, paneId: paneId, paneState: nil)
                 
             case .failure(let error):
-                logger.error("Session restore failed: \(error.localizedDescription)")
+                logger.error("Pane history restore failed for \(paneId): \(error.localizedDescription)")
                 // Still notify delegate with empty content so UI can proceed
                 self.delegate?.tmuxClient(self, didRestoreSession: "", paneId: paneId, paneState: nil)
             }
