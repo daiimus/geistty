@@ -476,15 +476,14 @@ extension SSHSession: SSHConnectionDelegate {
 
 extension SSHSession: TmuxControlClientDelegate {
     func tmuxClient(_ client: TmuxControlClient, didReceivePaneOutput data: Data, paneId: String) {
-        // Route pane output through session manager if available
-        // This enables multi-pane support - each pane routes to its own surface
+        // Route pane output through session manager
+        // The session manager handles routing to the appropriate Ghostty surface
         if let manager = tmuxSessionManager {
             manager.routeOutput(data, to: paneId)
+        } else {
+            // Fallback: if no session manager, forward directly to delegate
+            delegate?.sshSession(self, didReceiveData: data)
         }
-        
-        // Also forward to delegate for backward compatibility (single-pane mode)
-        // TODO: When multi-pane UI is ready, remove this and let manager handle routing
-        delegate?.sshSession(self, didReceiveData: data)
     }
     
     func tmuxClientDidActivate(_ client: TmuxControlClient) {

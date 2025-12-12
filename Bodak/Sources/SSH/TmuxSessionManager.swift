@@ -39,14 +39,32 @@ class TmuxSessionManager: ObservableObject {
     /// Connection state
     @Published private(set) var isConnected: Bool = false
     
+    /// Current split tree for the focused window (for UI rendering)
+    @Published private(set) var currentSplitTree: TmuxSplitTree = TmuxSplitTree()
+    
+    /// Split trees for each window (windowId -> tree)
+    private var windowSplitTrees: [String: TmuxSplitTree] = [:]
+    
     // MARK: - Surface Management
     
     /// Ghostty surfaces for each pane (paneId -> surface)
-    /// Surfaces are created on-demand when output is received
+    /// TmuxSessionManager owns ALL surfaces - views just display them
     private var paneSurfaces: [String: Ghostty.SurfaceView] = [:]
     
-    /// Surface creation factory (injected from terminal view)
-    var surfaceFactory: ((String) -> Ghostty.SurfaceView)?
+    /// The primary surface for the initial pane (%0)
+    /// This is always kept alive even when in multi-pane mode
+    @Published private(set) var primarySurface: Ghostty.SurfaceView?
+    
+    /// Surface creation factory (injected before activation)
+    /// This creates Ghostty surfaces with proper configuration
+    private var surfaceFactory: ((String) -> Ghostty.SurfaceView)?
+    
+    /// Callback to wire up surface input to SSH
+    /// Called after surface is created to connect onWrite
+    private var surfaceInputHandler: ((Ghostty.SurfaceView, String) -> Void)?
+    
+    /// Callback for resize events
+    private var surfaceResizeHandler: ((Int, Int) -> Void)?
     
     // MARK: - Control Client
     
@@ -83,7 +101,8 @@ class TmuxSessionManager: ObservableObject {
     func controlModeActivated() {
         isConnected = true
         
-        // Query the current state
+        // Now that we have proper command routing, we can safely query state
+        // The responses will be routed to our callbacks, not mixed with session restore
         refreshState()
     }
     
@@ -99,38 +118,107 @@ class TmuxSessionManager: ObservableObject {
     // MARK: - State Queries
     
     /// Refresh all state from tmux server
+    /// Uses proper command routing so responses don't interfere with session restore
     func refreshState() {
-        guard let write = writeToSSH else { return }
+        guard let client = controlClient, let write = writeToSSH else {
+            logger.warning("Cannot refresh state: control client or write not available")
+            return
+        }
         
         logger.info("Refreshing tmux state")
         
-        // Query sessions
-        let sessionsCmd = "list-sessions -F '\(TmuxQueryFormat.sessions)'\n"
-        write(sessionsCmd)
+        // Query sessions with proper callback
+        client.sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'", via: write) { [weak self] result in
+            switch result {
+            case .success(let response):
+                self?.parseSessionsResponse(response)
+            case .failure(let error):
+                logger.error("Failed to list sessions: \(error.localizedDescription)")
+            }
+        }
         
         // Query windows in current session
-        let windowsCmd = "list-windows -F '\(TmuxQueryFormat.windows)'\n"
-        write(windowsCmd)
+        client.sendCommand("list-windows -F '\(TmuxQueryFormat.windows)'", via: write) { [weak self] result in
+            switch result {
+            case .success(let response):
+                self?.parseWindowsResponse(response)
+            case .failure(let error):
+                logger.error("Failed to list windows: \(error.localizedDescription)")
+            }
+        }
         
-        // Query panes in current window
-        let panesCmd = "list-panes -a -F '\(TmuxQueryFormat.panes)'\n"
-        write(panesCmd)
+        // Query all panes
+        client.sendCommand("list-panes -a -F '\(TmuxQueryFormat.panes)'", via: write) { [weak self] result in
+            switch result {
+            case .success(let response):
+                self?.parsePanesResponse(response)
+            case .failure(let error):
+                logger.error("Failed to list panes: \(error.localizedDescription)")
+            }
+        }
     }
     
     /// Query windows for a specific session
     func queryWindows(for sessionId: String) {
-        guard let write = writeToSSH else { return }
+        guard let client = controlClient, let write = writeToSSH else { return }
         
-        let cmd = "list-windows -t '\(sessionId)' -F '\(TmuxQueryFormat.windows)'\n"
-        write(cmd)
+        client.sendCommand("list-windows -t '\(sessionId)' -F '\(TmuxQueryFormat.windows)'", via: write) { [weak self] result in
+            if case .success(let response) = result {
+                self?.parseWindowsResponse(response)
+            }
+        }
     }
     
     /// Query panes for a specific window
     func queryPanes(for windowId: String) {
-        guard let write = writeToSSH else { return }
+        guard let client = controlClient, let write = writeToSSH else { return }
         
-        let cmd = "list-panes -t '\(windowId)' -F '\(TmuxQueryFormat.panes)'\n"
-        write(cmd)
+        client.sendCommand("list-panes -t '\(windowId)' -F '\(TmuxQueryFormat.panes)'", via: write) { [weak self] result in
+            if case .success(let response) = result {
+                self?.parsePanesResponse(response)
+            }
+        }
+    }
+    
+    // MARK: - Response Parsing
+    
+    /// Parse list-sessions response
+    private func parseSessionsResponse(_ response: String) {
+        let lines = response.split(separator: "\n", omittingEmptySubsequences: true)
+        logger.info("Parsing \(lines.count) sessions")
+        
+        for line in lines {
+            if let session = TmuxSession.parse(String(line)) {
+                sessions[session.id] = session
+                logger.debug("Parsed session: \(session.id) '\(session.name)'")
+            }
+        }
+    }
+    
+    /// Parse list-windows response
+    private func parseWindowsResponse(_ response: String) {
+        let lines = response.split(separator: "\n", omittingEmptySubsequences: true)
+        logger.info("Parsing \(lines.count) windows")
+        
+        for line in lines {
+            if let window = TmuxWindow.parse(String(line)) {
+                windows[window.id] = window
+                logger.debug("Parsed window: \(window.id) '\(window.name)'")
+            }
+        }
+    }
+    
+    /// Parse list-panes response
+    private func parsePanesResponse(_ response: String) {
+        let lines = response.split(separator: "\n", omittingEmptySubsequences: true)
+        logger.info("Parsing \(lines.count) panes")
+        
+        for line in lines {
+            if let pane = TmuxPane.parse(String(line)) {
+                panes[pane.id] = pane
+                logger.debug("Parsed pane: \(pane.id) \(pane.width)x\(pane.height)")
+            }
+        }
     }
     
     // MARK: - Notification Handling
@@ -161,9 +249,21 @@ class TmuxSessionManager: ObservableObject {
         let window = TmuxWindow(id: windowId, index: windows.count, name: "new", sessionId: sessionId)
         windows[windowId] = window
         
-        // Query window details
-        let cmd = "display-message -t '\(windowId)' -p '#{window_index} #{window_name}'\n"
-        writeToSSH?(cmd)
+        // Query window details using proper command routing
+        guard let client = controlClient, let write = writeToSSH else { return }
+        
+        client.sendCommand("display-message -t '\(windowId)' -p '#{window_index} #{window_name}'", via: write) { [weak self] result in
+            if case .success(let response) = result {
+                let parts = response.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1)
+                if parts.count >= 2, let index = Int(parts[0]) {
+                    if var window = self?.windows[windowId] {
+                        window.index = index
+                        window.name = String(parts[1])
+                        self?.windows[windowId] = window
+                    }
+                }
+            }
+        }
     }
     
     /// Handle window closed notification
@@ -200,17 +300,82 @@ class TmuxSessionManager: ObservableObject {
     
     /// Handle layout changed notification
     func handleLayoutChanged(windowId: String, windowIndex: Int, layout: String) {
-        logger.debug("Layout changed: \(windowId) [\(windowIndex)] \(layout.prefix(50))...")
+        // Strip trailing markers like " *" (active window) or " -" (last window)
+        var cleanLayout = layout
+        if cleanLayout.hasSuffix(" *") || cleanLayout.hasSuffix(" -") {
+            cleanLayout = String(cleanLayout.dropLast(2))
+        }
         
+        logger.info("📐 Layout changed: \(windowId) [\(windowIndex)] layout=\(cleanLayout.prefix(80))...")
+        
+        // Update window info if we have it
         if var window = windows[windowId] {
-            window.layout = layout
+            window.layout = cleanLayout
             window.index = windowIndex
             windows[windowId] = window
+        } else {
+            // Create window entry if it doesn't exist yet
+            var window = TmuxWindow(id: windowId, index: windowIndex, name: "window-\(windowIndex)", sessionId: currentSession?.id ?? "$0")
+            window.layout = cleanLayout
+            windows[windowId] = window
+            logger.info("📐 Created window entry for \(windowId)")
+        }
+        
+        // Parse layout and update split tree
+        if let parsedLayout = try? TmuxLayout.parseWithChecksum(cleanLayout) {
+            logger.info("📐 Parsed layout with checksum: \(parsedLayout.content)")
+            updatePanePositions(from: parsedLayout, in: windowId)
+            updateSplitTree(from: parsedLayout, for: windowId)
+        } else if let parsedLayout = try? TmuxLayout.parse(String(cleanLayout.dropFirst(5))) {
+            // Try parsing without checksum (skip "XXXX," prefix)
+            logger.info("📐 Parsed layout without checksum: \(parsedLayout.content)")
+            updatePanePositions(from: parsedLayout, in: windowId)
+            updateSplitTree(from: parsedLayout, for: windowId)
+        } else {
+            logger.error("📐 Failed to parse layout: \(cleanLayout)")
+        }
+    }
+    
+    /// Update the split tree for a window from a parsed layout
+    private func updateSplitTree(from layout: TmuxLayout, for windowId: String) {
+        let newTree = TmuxSplitTree.from(layout: layout)
+        let oldTree = windowSplitTrees[windowId]
+        windowSplitTrees[windowId] = newTree
+        
+        // Detect removed panes and clean up their surfaces
+        if let oldTree = oldTree {
+            let oldPaneIds = Set(oldTree.paneIds.map { "%\($0)" })
+            let newPaneIds = Set(newTree.paneIds.map { "%\($0)" })
+            let removedPaneIds = oldPaneIds.subtracting(newPaneIds)
             
-            // Parse layout to update pane positions
-            if let parsedLayout = TmuxLayout.parse(layout) {
-                updatePanePositions(from: parsedLayout, in: windowId)
+            for paneId in removedPaneIds {
+                logger.info("📐 🗑️ Pane \(paneId) was closed, cleaning up surface")
+                removeSurface(for: paneId)
+                panes.removeValue(forKey: paneId)
             }
+            
+            if !removedPaneIds.isEmpty {
+                logger.info("📐 Cleaned up \(removedPaneIds.count) closed pane(s): \(removedPaneIds.sorted())")
+            }
+        }
+        
+        logger.info("📐 Split tree for \(windowId): panes=\(newTree.paneIds), isSplit=\(newTree.isSplit), focusedWindow=\(focusedWindowId)")
+        
+        // Update current split tree if this is the focused window
+        if windowId == focusedWindowId {
+            currentSplitTree = newTree
+            logger.info("📐 ✅ Updated currentSplitTree: \(newTree.paneIds.count) panes, isSplit=\(newTree.isSplit)")
+            
+            // If we're down to a single pane, update focused pane ID
+            if newTree.paneIds.count == 1 {
+                let remainingPaneId = "%\(newTree.paneIds[0])"
+                if focusedPaneId != remainingPaneId {
+                    logger.info("📐 Single pane remaining, updating focus to \(remainingPaneId)")
+                    focusedPaneId = remainingPaneId
+                }
+            }
+        } else {
+            logger.info("📐 ⏭️ Not updating currentSplitTree - windowId \(windowId) != focusedWindowId \(focusedWindowId)")
         }
     }
     
@@ -236,17 +401,31 @@ class TmuxSessionManager: ObservableObject {
     func handlePaneModeChanged(paneId: String) {
         logger.debug("Pane mode changed: \(paneId)")
         
-        // Query pane mode
-        let cmd = "display-message -t '\(paneId)' -p '#{pane_in_mode}'\n"
-        writeToSSH?(cmd)
+        // Query pane mode using proper command routing
+        guard let client = controlClient, let write = writeToSSH else { return }
+        
+        client.sendCommand("display-message -t '\(paneId)' -p '#{pane_in_mode}'", via: write) { [weak self] result in
+            if case .success(let response) = result {
+                let inMode = response.trimmingCharacters(in: .whitespacesAndNewlines) != "0"
+                if var pane = self?.panes[paneId] {
+                    pane.mode = inMode ? .copy : .normal
+                    self?.panes[paneId] = pane
+                }
+            }
+        }
     }
     
     /// Handle sessions changed notification
     func handleSessionsChanged() {
         logger.info("Sessions changed - refreshing session list")
         
-        let cmd = "list-sessions -F '\(TmuxQueryFormat.sessions)'\n"
-        writeToSSH?(cmd)
+        guard let client = controlClient, let write = writeToSSH else { return }
+        
+        client.sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'", via: write) { [weak self] result in
+            if case .success(let response) = result {
+                self?.parseSessionsResponse(response)
+            }
+        }
     }
     
     // MARK: - Pane Output Routing
@@ -285,6 +464,15 @@ class TmuxSessionManager: ObservableObject {
             return nil
         }
         
+        // Don't create surfaces for panes that no longer exist in the split tree
+        // This prevents race conditions during pane close transitions
+        if let numericId = Int(paneId.dropFirst()) {  // "%0" -> 0
+            if !currentSplitTree.paneIds.contains(numericId) {
+                logger.debug("Not creating surface for closed pane \(paneId)")
+                return nil
+            }
+        }
+        
         let surface = factory(paneId)
         paneSurfaces[paneId] = surface
         
@@ -305,18 +493,64 @@ class TmuxSessionManager: ObservableObject {
             fatalError("Surface factory not set - call setSurfaceFactory before routing output")
         }
         
+        // Don't create surfaces for panes that no longer exist in the split tree
+        // This prevents race conditions during pane close transitions
+        if let numericId = Int(paneId.dropFirst()) {  // "%0" -> 0
+            if !currentSplitTree.paneIds.contains(numericId) {
+                fatalError("Attempted to create surface for closed pane \(paneId)")
+            }
+        }
+        
         let surface = factory(paneId)
+        
+        // Wire up input handler for this surface
+        if let inputHandler = surfaceInputHandler {
+            inputHandler(surface, paneId)
+        }
+        
         paneSurfaces[paneId] = surface
+        
+        // If this is %0, also set as primary surface
+        if paneId == "%0" {
+            primarySurface = surface
+        }
         
         logger.info("Created Ghostty surface for pane \(paneId)")
         
         return surface
     }
     
-    /// Register an existing surface for a pane (e.g., the initial surface for %0)
-    func registerExistingSurface(_ surface: Ghostty.SurfaceView, for paneId: String) {
-        paneSurfaces[paneId] = surface
-        logger.info("Registered existing surface for pane \(paneId)")
+    /// Configure surface management with factory and handlers
+    /// Call this before any surfaces are created
+    func configureSurfaceManagement(
+        factory: @escaping (String) -> Ghostty.SurfaceView,
+        inputHandler: @escaping (Ghostty.SurfaceView, String) -> Void,
+        resizeHandler: @escaping (Int, Int) -> Void
+    ) {
+        self.surfaceFactory = factory
+        self.surfaceInputHandler = inputHandler
+        self.surfaceResizeHandler = resizeHandler
+        logger.info("✅ Surface management configured")
+    }
+    
+    /// Create the primary surface for pane %0
+    /// This should be called early in the connection lifecycle
+    func createPrimarySurface() -> Ghostty.SurfaceView? {
+        guard surfaceFactory != nil else {
+            logger.warning("⚠️ Cannot create primary surface - factory not configured")
+            return nil
+        }
+        
+        // Create surface for %0 if it doesn't exist
+        if let existing = paneSurfaces["%0"] {
+            logger.info("Primary surface already exists")
+            return existing
+        }
+        
+        let surface = getSurfaceOrCreate(for: "%0")
+        primarySurface = surface
+        logger.info("✅ Created primary surface for %0")
+        return surface
     }
     
     /// Get surface for a pane (returns nil if not created)
@@ -324,8 +558,20 @@ class TmuxSessionManager: ObservableObject {
         return paneSurfaces[paneId]
     }
     
-    /// Remove surface for a pane
+    /// Get surface for a numeric pane ID (e.g., 0 -> "%0")
+    /// This is used by the split tree view which stores numeric IDs
+    func getSurface(forNumericId paneId: Int) -> Ghostty.SurfaceView? {
+        return getSurfaceOrCreate(for: "%\(paneId)")
+    }
+    
+    /// Remove surface for a pane (but never remove primary surface)
     func removeSurface(for paneId: String) {
+        // Never remove the primary surface - it's always kept alive
+        if paneId == "%0" {
+            logger.info("Keeping primary surface %0 alive")
+            return
+        }
+        
         if let surface = paneSurfaces.removeValue(forKey: paneId) {
             // Clean up surface
             logger.info("Removed Ghostty surface for pane \(paneId)")
@@ -343,53 +589,77 @@ class TmuxSessionManager: ObservableObject {
     
     /// Create a new window
     func newWindow(name: String? = nil) {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        
         var cmd = "new-window"
         if let name = name {
             cmd += " -n '\(name)'"
         }
-        cmd += "\n"
-        writeToSSH?(cmd)
+        client.sendCommandFireAndForget(cmd, via: write)
     }
     
     /// Close current window
     func closeWindow() {
-        writeToSSH?("kill-window\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("kill-window", via: write)
     }
     
     /// Rename current window
     func renameWindow(_ name: String) {
-        writeToSSH?("rename-window '\(name)'\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("rename-window '\(name)'", via: write)
     }
     
     /// Select a window by ID
     func selectWindow(_ windowId: String) {
-        writeToSSH?("select-window -t '\(windowId)'\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("select-window -t '\(windowId)'", via: write)
         focusedWindowId = windowId
+        
+        // Update current split tree for the newly focused window
+        if let tree = windowSplitTrees[windowId] {
+            currentSplitTree = tree
+        }
     }
     
     /// Split pane horizontally (side by side)
     func splitHorizontal() {
-        writeToSSH?("split-window -h\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("split-window -h", via: write)
     }
     
     /// Split pane vertically (stacked)
     func splitVertical() {
-        writeToSSH?("split-window -v\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("split-window -v", via: write)
     }
     
     /// Close current pane
     func closePane() {
-        writeToSSH?("kill-pane\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("kill-pane", via: write)
     }
     
     /// Select a pane by ID
     func selectPane(_ paneId: String) {
-        writeToSSH?("select-pane -t '\(paneId)'\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("select-pane -t '\(paneId)'", via: write)
         focusedPaneId = paneId
+    }
+    
+    /// Update focused pane locally without sending a tmux command.
+    /// Used for input-based focus tracking (when user types in a pane).
+    func setFocusedPane(_ paneId: String) {
+        if focusedPaneId != paneId {
+            logger.info("🎯 Focus changed to pane \(paneId)")
+            focusedPaneId = paneId
+        }
     }
     
     /// Navigate to pane in direction
     func navigatePane(_ direction: PaneDirection) {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        
         let dirFlag: String
         switch direction {
         case .up: dirFlag = "-U"
@@ -397,11 +667,31 @@ class TmuxSessionManager: ObservableObject {
         case .left: dirFlag = "-L"
         case .right: dirFlag = "-R"
         }
-        writeToSSH?("select-pane \(dirFlag)\n")
+        client.sendCommandFireAndForget("select-pane \(dirFlag)", via: write)
     }
     
     enum PaneDirection {
         case up, down, left, right
+    }
+    
+    /// Toggle zoom state for a pane (local UI zoom, not tmux zoom)
+    func toggleZoom(paneId: Int) {
+        currentSplitTree = currentSplitTree.toggleZoom(paneId: paneId)
+        
+        // Store updated tree
+        windowSplitTrees[focusedWindowId] = currentSplitTree
+    }
+    
+    /// Clear zoom state
+    func clearZoom() {
+        currentSplitTree = currentSplitTree.clearZoom()
+        windowSplitTrees[focusedWindowId] = currentSplitTree
+    }
+    
+    /// Equalize all splits in the current window
+    func equalizeSplits() {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("select-layout even-horizontal", via: write)
     }
     
     /// Resize terminal (all panes)
@@ -431,17 +721,20 @@ class TmuxSessionManager: ObservableObject {
     
     /// Create a new session
     func newSession(name: String) {
-        writeToSSH?("new-session -d -s '\(name)'\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("new-session -d -s '\(name)'", via: write)
     }
     
     /// Switch to a session
     func switchSession(_ sessionId: String) {
-        writeToSSH?("switch-client -t '\(sessionId)'\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("switch-client -t '\(sessionId)'", via: write)
     }
     
     /// Detach from current session
     func detach() {
-        writeToSSH?("detach-client\n")
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("detach-client", via: write)
     }
     
     // MARK: - Layout Helpers
@@ -449,24 +742,35 @@ class TmuxSessionManager: ObservableObject {
     /// Update pane positions from parsed layout
     private func updatePanePositions(from layout: TmuxLayout, in windowId: String) {
         // Extract pane positions from layout tree
-        let positions = extractPanePositions(from: layout.root)
+        let positions = extractPanePositions(from: layout)
         
         for position in positions {
-            if var pane = panes[position.paneId] {
+            // tmux pane IDs in format strings are numeric, but we store them as "%0", "%1" etc.
+            let paneId = "%\(position.paneId)"
+            if var pane = panes[paneId] {
                 pane.positionX = position.x
                 pane.positionY = position.y
                 pane.width = position.width
                 pane.height = position.height
-                panes[position.paneId] = pane
+                panes[paneId] = pane
             }
         }
     }
     
+    /// Pane position extracted from layout
+    private struct PanePosition {
+        let paneId: Int
+        let x: Int
+        let y: Int
+        let width: Int
+        let height: Int
+    }
+    
     /// Recursively extract pane positions from layout tree
-    private func extractPanePositions(from node: TmuxLayout.LayoutNode) -> [TmuxLayout.PaneLayout] {
-        switch node {
-        case .pane(let layout):
-            return [layout]
+    private func extractPanePositions(from layout: TmuxLayout) -> [PanePosition] {
+        switch layout.content {
+        case .pane(let id):
+            return [PanePosition(paneId: id, x: layout.x, y: layout.y, width: layout.width, height: layout.height)]
         case .horizontal(let children), .vertical(let children):
             return children.flatMap { extractPanePositions(from: $0) }
         }
@@ -489,55 +793,14 @@ class TmuxSessionManager: ObservableObject {
         logger.info("Updated sessions: \(sessions.count) sessions")
     }
     
-    /// Handle list-windows response
+    /// Handle list-windows response (legacy - delegates to parseWindowsResponse)
     func handleWindowsResponse(_ content: String, sessionId: String) {
-        let lines = content.split(separator: "\n").map(String.init)
-        
-        var newWindows: [String: TmuxWindow] = [:]
-        for line in lines {
-            if let window = TmuxWindow.parse(line, sessionId: sessionId) {
-                newWindows[window.id] = window
-            }
-        }
-        
-        // Merge with existing windows (preserve pane info)
-        for (id, window) in newWindows {
-            if var existing = windows[id] {
-                existing.name = window.name
-                existing.index = window.index
-                existing.layout = window.layout
-                existing.flags = window.flags
-                windows[id] = existing
-            } else {
-                windows[id] = window
-            }
-        }
-        
-        logger.info("Updated windows: \(windows.count) windows")
+        parseWindowsResponse(content)
     }
     
-    /// Handle list-panes response
+    /// Handle list-panes response (legacy - delegates to parsePanesResponse)
     func handlePanesResponse(_ content: String, windowId: String) {
-        let lines = content.split(separator: "\n").map(String.init)
-        
-        for line in lines {
-            if let pane = TmuxPane.parse(line, windowId: windowId) {
-                panes[pane.id] = pane
-                
-                // Update window's pane list
-                if var window = windows[windowId] {
-                    if !window.paneIds.contains(pane.id) {
-                        window.paneIds.append(pane.id)
-                    }
-                    if pane.isActive {
-                        window.activePaneId = pane.id
-                    }
-                    windows[windowId] = window
-                }
-            }
-        }
-        
-        logger.info("Updated panes for window \(windowId): \(panes.count) total panes")
+        parsePanesResponse(content)
     }
     
     // MARK: - Cleanup

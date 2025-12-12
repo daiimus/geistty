@@ -4,6 +4,8 @@
 
 This document tracks the development progress for the Ghostty iOS SSH Terminal project.
 
+**Current Goal**: SSH + SSH with tmux using Ghostty as the terminal emulator.
+
 ---
 
 ## 🔥 Immediate Priorities
@@ -25,7 +27,7 @@ These are the current focus areas before continuing with other roadmap items:
 - [x] Resize handling (refresh-client -C)
 - Note: Legacy mode still available but control mode is now default
 
-### 1.5. tmux Multi-Pane Integration 🔄 IN PROGRESS
+### 1.5. tmux Multi-Pane Integration ✅ PHASE 1-2 COMPLETE
 Comprehensive tmux integration for Ghostty-native experience across SSH + tmux + iPadOS windows.
 See TMUX_INTEGRATION.md for full architecture.
 
@@ -36,16 +38,33 @@ See TMUX_INTEGRATION.md for full architecture.
   - [x] %window-pane-changed, %session-renamed, %sessions-changed
   - [x] %unlinked-window-add/close/renamed, %session-window-changed
   - [x] %subscription-changed for format subscriptions
-- [x] Layout parsing (TmuxLayout struct)
+- [x] Layout parsing (TmuxLayout struct with checksum validation)
 
-#### Phase 2: Multi-Pane Support 🔄 TODO
-- [ ] Connect TmuxSessionManager to SSHSession
-- [ ] Multiple Ghostty surfaces (one per pane)
-- [ ] Split pane navigation (Cmd+Option+arrows)
-- [ ] Pane selection via tap gesture
-- [ ] Multi-pane rendering in single view
+#### Phase 2: Multi-Pane Support ✅ COMPLETE
+- [x] Connect TmuxSessionManager to SSHSession
+- [x] Multiple Ghostty surfaces (one per pane)
+- [x] Split pane rendering (TmuxMultiPaneView, TmuxSplitTreeView)
+- [x] Layout parsing from %layout-change messages
+- [x] Per-pane output routing via %extended-output
+- [x] Per-pane input via send-keys -H -t %N
+- [x] Pane selection via tap gesture (hitTest-based focus)
+- [x] Focus indicator (border highlight on active pane)
+- [x] Input-based focus tracking (typing in pane updates focus)
 
-#### Phase 3: iPadOS Window Integration 🔲 TODO
+#### Phase 2.5: Multi-Pane Polish ✅ COMPLETE
+- [x] **Pane close handling** - Detects closed panes via layout diff, cleans up surfaces
+- [x] **Pane creation handling** - Creates surfaces on-demand when new panes appear
+- [x] **Transition back to single-pane** - TmuxSessionManager owns surfaces; seamless transition
+- [x] **Surface ownership model** - Option A architecture: TmuxSessionManager owns ALL surfaces
+
+#### Phase 3: Multiple tmux Windows 🔲 TODO
+- [ ] Window list UI (sidebar or tab bar)
+- [ ] Handle %window-add/%window-close notifications
+- [ ] Window switching via select-window command
+- [ ] Per-window split tree tracking (already stored in windowSplitTrees)
+- [ ] Window rename support
+
+#### Phase 4: iPadOS Window Integration 🔲 FUTURE
 - [ ] Each pane as native iPadOS Scene
 - [ ] Window management via UISceneSession
 - [ ] Window title from tmux pane/window name
@@ -81,7 +100,7 @@ See TMUX_INTEGRATION.md for full architecture.
   - `Ghostty.swift` reverseMapFontFamily()  
   - `SettingsView.swift` fontFamilies array
 - [ ] Extract common connection logic in SSHSession (3 similar connect methods)
-- [ ] Split `TerminalContainerView.swift` (1560 lines) into multiple files
+- [ ] Split `TerminalContainerView.swift` (1700+ lines) into multiple files
 - [ ] Remove `TmuxControlClient.parsePaneState()` - never called, PaneState always nil
 - [ ] Replace print() with Logger in ConfigSyncManager.swift and Theme.swift
 
@@ -89,6 +108,40 @@ See TMUX_INTEGRATION.md for full architecture.
 - [ ] Extract magic numbers to constants (timeouts, marker strings)
 - [ ] Implement or remove TODO comments in production code
 - [ ] Clarify SFTP status - either implement or mark as future feature
+
+---
+
+## 🎯 V1 Completion Checklist
+
+For a solid v1 release targeting **SSH + SSH with tmux**:
+
+### Core Functionality ✅
+- [x] SSH connection via libssh2
+- [x] Ghostty External backend for PTY-less terminal emulation
+- [x] Full terminal emulation (vim, htop, less, etc. all work)
+- [x] Hardware keyboard support with modifiers
+- [x] Copy/paste support
+- [x] Scrollback buffer
+
+### tmux Integration ✅
+- [x] tmux Control Mode (-CC) protocol parsing
+- [x] Multi-pane layout from `%layout-change`
+- [x] Per-pane output routing via `%extended-output`
+- [x] Per-pane input via `send-keys -H -t %N`
+- [x] Focus tracking (tap + input)
+- [x] Independent Ghostty surfaces per pane
+
+### V1 Completion ✅ COMPLETE
+- [x] **Pane close handling** - Cleanup surfaces when panes are killed (detects via layout diff)
+- [x] **Transition to single-pane** - Returns to single surface mode when splits closed
+- [x] **Connection status** - ConnectionStatus enum with .connecting/.connected/.disconnected/.error states
+
+### V2 Features (Post-V1) 🔲
+- [ ] Multiple tmux windows - Window list UI and switching
+- [ ] iPadOS Scene integration - Each pane as native window
+- [ ] SFTP file browser
+- [ ] Secure Enclave key storage
+- [ ] Enhanced connecting indicator in terminal view
 
 ---
 

@@ -757,6 +757,14 @@ class RawTerminalUIViewController: UIViewController {
     // Secure keyboard entry state
     private var secureKeyboardEntry = false
     
+    // Multi-pane support
+    private var multiPaneHostingController: UIHostingController<TmuxMultiPaneView>?
+    private var multiPaneTopConstraint: NSLayoutConstraint?
+    private var multiPaneBottomConstraint: NSLayoutConstraint?
+    private var splitTreeObserver: AnyCancellable?
+    private var connectionObserver: AnyCancellable?
+    private var isMultiPaneMode = false
+    
     // Status bar preference (read from UserDefaults)
     private var showStatusBar: Bool {
         UserDefaults.standard.bool(forKey: "ui.showStatusBar")
@@ -782,6 +790,12 @@ class RawTerminalUIViewController: UIViewController {
         
         // Set up surface factory for tmux multi-pane support
         setupTmuxSurfaceFactory()
+        
+        // Observe split tree changes for multi-pane mode
+        setupSplitTreeObserver()
+        
+        // Also observe connection state - tmux manager may not exist yet at viewDidLoad
+        setupConnectionObserver()
         
         // Observe settings changes
         settingsObserver = NotificationCenter.default.addObserver(
@@ -836,7 +850,7 @@ class RawTerminalUIViewController: UIViewController {
         
         // Notify Ghostty of size change BEFORE animation to pre-render
         // This prevents the white flash during resize
-        if let surface = self.surfaceView {
+        if let surface = self.surfaceView, !isMultiPaneMode {
             surface.sizeDidChange(newSize)
         }
         
@@ -851,6 +865,7 @@ class RawTerminalUIViewController: UIViewController {
             options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
             animations: {
                 self.surfaceBottomConstraint?.constant = -keyboardHeight
+                self.multiPaneBottomConstraint?.constant = -keyboardHeight
                 self.view.layoutIfNeeded()
             },
             completion: { _ in
@@ -874,7 +889,7 @@ class RawTerminalUIViewController: UIViewController {
         let newSize = CGSize(width: view.bounds.width, height: view.bounds.height)
         
         // Notify Ghostty of size change BEFORE animation to pre-render
-        if let surface = self.surfaceView {
+        if let surface = self.surfaceView, !isMultiPaneMode {
             surface.sizeDidChange(newSize)
         }
         
@@ -889,6 +904,7 @@ class RawTerminalUIViewController: UIViewController {
             options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
             animations: {
                 self.surfaceBottomConstraint?.constant = 0
+                self.multiPaneBottomConstraint?.constant = 0
                 self.view.layoutIfNeeded()
             },
             completion: { _ in
@@ -1366,43 +1382,105 @@ class RawTerminalUIViewController: UIViewController {
         updateTopConstraint()
     }
     
+    /// Create surface view - for non-tmux mode, creates directly.
+    /// For tmux mode, this sets up the factory and waits for TmuxSessionManager to create.
     private func createSurfaceView() {
         guard let ghosttyApp = ghosttyApp,
               ghosttyApp.readiness == .ready,
-              let app = ghosttyApp.app else {
+              let _ = ghosttyApp.app else {
             logger.warning("⚠️ Ghostty not ready in RawTerminalUIViewController")
             return
         }
         
-        // Create surface configuration with external backend
+        // Always configure the surface management first
+        // This allows TmuxSessionManager to create surfaces when ready
+        configureSurfaceManagement()
+        
+        // Check if we're in tmux mode with an existing manager
+        if let tmuxManager = viewModel?.tmuxManager {
+            // Ask TmuxSessionManager to create the primary surface
+            if let surface = tmuxManager.createPrimarySurface() {
+                displaySurface(surface)
+                logger.info("✅ Using TmuxSessionManager-owned primary surface")
+            } else {
+                // Factory might not be ready yet - will be created on connection
+                logger.info("Primary surface not ready yet, will create on connection")
+            }
+        } else {
+            // Non-tmux mode - create surface directly (legacy path)
+            createDirectSurface()
+        }
+    }
+    
+    /// Configure surface management for TmuxSessionManager
+    /// This provides the factory and handlers for creating surfaces
+    private func configureSurfaceManagement() {
+        guard let ghosttyApp = ghosttyApp,
+              let app = ghosttyApp.app,
+              let tmuxManager = viewModel?.tmuxManager else {
+            return
+        }
+        
+        // Factory creates Ghostty surfaces
+        let factory: (String) -> Ghostty.SurfaceView = { [weak ghosttyApp] paneId in
+            guard let ghosttyApp = ghosttyApp, let app = ghosttyApp.app else {
+                fatalError("Ghostty app deallocated before surface factory called")
+            }
+            
+            logger.info("Creating Ghostty surface for pane \(paneId)")
+            
+            var config = Ghostty.SurfaceConfiguration()
+            config.backendType = .external
+            
+            let surface = Ghostty.SurfaceView(app, baseConfig: config)
+            let themeBg = ThemeManager.shared.selectedTheme.background
+            surface.backgroundColor = UIColor(themeBg)
+            
+            return surface
+        }
+        
+        // Input handler wires surface.onWrite to tmux
+        let inputHandler: (Ghostty.SurfaceView, String) -> Void = { [weak self] surface, paneId in
+            surface.onWrite = { [weak self] data in
+                Task { @MainActor in
+                    self?.viewModel?.tmuxManager?.setFocusedPane(paneId)
+                    self?.viewModel?.tmuxManager?.sendInput(data, to: paneId)
+                }
+            }
+        }
+        
+        // Resize handler
+        let resizeHandler: (Int, Int) -> Void = { [weak self] cols, rows in
+            Task { @MainActor in
+                self?.viewModel?.resize(cols: cols, rows: rows)
+            }
+        }
+        
+        tmuxManager.configureSurfaceManagement(
+            factory: factory,
+            inputHandler: inputHandler,
+            resizeHandler: resizeHandler
+        )
+        
+        logger.info("✅ Surface management configured for TmuxSessionManager")
+    }
+    
+    /// Create a surface directly (non-tmux legacy path)
+    private func createDirectSurface() {
+        guard let ghosttyApp = ghosttyApp,
+              let app = ghosttyApp.app else {
+            return
+        }
+        
         var config = Ghostty.SurfaceConfiguration()
         config.backendType = .external
         
-        // Create Ghostty surface
         let surface = Ghostty.SurfaceView(app, baseConfig: config)
-        self.surfaceView = surface
         
-        // Set background color to match theme
         let themeBg = ThemeManager.shared.selectedTheme.background
         surface.backgroundColor = UIColor(themeBg)
         
-        // Add to view hierarchy
-        surface.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(surface)
-        
-        // Create constraints - top constraint is variable based on status bar
-        // Bottom constraint is variable based on keyboard
-        surfaceTopConstraint = surface.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
-        surfaceBottomConstraint = surface.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 0)
-        
-        NSLayoutConstraint.activate([
-            surfaceTopConstraint!,
-            surfaceBottomConstraint!,
-            surface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-        
-        // Wire up callbacks
+        // Wire up callbacks directly to SSH (non-tmux mode)
         surface.onWrite = { [weak self] data in
             Task { @MainActor in
                 self?.viewModel?.sendInput(data)
@@ -1415,73 +1493,200 @@ class RawTerminalUIViewController: UIViewController {
             }
         }
         
-        // Store in view model
+        displaySurface(surface)
+        logger.info("✅ Created direct surface (non-tmux mode)")
+    }
+    
+    /// Display a surface in the view hierarchy
+    private func displaySurface(_ surface: Ghostty.SurfaceView) {
+        self.surfaceView = surface
+        
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(surface)
+        
+        surfaceTopConstraint = surface.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
+        surfaceBottomConstraint = surface.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 0)
+        
+        NSLayoutConstraint.activate([
+            surfaceTopConstraint!,
+            surfaceBottomConstraint!,
+            surface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
         viewModel?.surfaceView = surface
         
-        // Set up search state observer
         setupSearchStateObserver()
         
-        // Set focus
         surface.focusDidChange(true)
         surface.becomeFirstResponder()
-        
-        logger.info("✅ RawTerminalUIViewController created surface view")
     }
     
     /// Set up surface factory for tmux multi-pane support
-    /// This allows TmuxSessionManager to create surfaces for additional panes
+    /// This ensures TmuxSessionManager has what it needs to create surfaces
     private func setupTmuxSurfaceFactory() {
-        guard let ghosttyApp = ghosttyApp,
-              let app = ghosttyApp.app else {
-            logger.warning("⚠️ Cannot set up tmux surface factory - Ghostty not ready")
-            return
-        }
+        // Configure surface management if not already done
+        configureSurfaceManagement()
         
-        // Capture the Ghostty.App wrapper (which is a class) not the raw pointer
-        // Provide a factory closure to the session manager
-        // This will be called when a new pane is created
-        viewModel?.tmuxManager?.surfaceFactory = { [weak self, weak ghosttyApp] paneId in
-            guard let ghosttyApp = ghosttyApp, let app = ghosttyApp.app else {
-                fatalError("Ghostty app deallocated before surface factory called")
+        // Create primary surface if it doesn't exist yet
+        if surfaceView == nil, let tmuxManager = viewModel?.tmuxManager {
+            if let surface = tmuxManager.createPrimarySurface() {
+                displaySurface(surface)
+                logger.info("✅ Created and displayed primary surface from TmuxSessionManager")
             }
-            
-            logger.info("Creating Ghostty surface for pane \(paneId)")
-            
-            // Create surface configuration with external backend
-            var config = Ghostty.SurfaceConfiguration()
-            config.backendType = .external
-            
-            // Create Ghostty surface
-            let surface = Ghostty.SurfaceView(app, baseConfig: config)
-            
-            // Set background color to match theme
-            let themeBg = ThemeManager.shared.selectedTheme.background
-            surface.backgroundColor = UIColor(themeBg)
-            
-            // Wire up callbacks - for multi-pane, input goes to the specific pane
-            surface.onWrite = { [weak self] data in
-                Task { @MainActor in
-                    // In multi-pane mode, input goes to the specific pane
-                    self?.viewModel?.tmuxManager?.sendInput(data, to: paneId)
-                }
-            }
-            
-            surface.onResize = { [weak self] cols, rows in
-                Task { @MainActor in
-                    // Resize goes to the whole tmux client
-                    self?.viewModel?.resize(cols: cols, rows: rows)
-                }
-            }
-            
-            return surface
-        }
-        
-        // Also register the existing surface as the surface for pane %0
-        if let existingSurface = surfaceView {
-            viewModel?.tmuxManager?.registerExistingSurface(existingSurface, for: "%0")
         }
         
         logger.info("✅ tmux surface factory configured")
+    }
+    
+    /// Observe split tree changes to switch between single surface and multi-pane mode
+    private func setupSplitTreeObserver() {
+        guard let tmuxManager = viewModel?.tmuxManager else {
+            logger.debug("No tmux manager available for split tree observation")
+            return
+        }
+        
+        // Cancel any existing observer
+        splitTreeObserver?.cancel()
+        
+        splitTreeObserver = tmuxManager.$currentSplitTree
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] tree in
+                self?.handleSplitTreeChange(tree)
+            }
+        
+        logger.info("✅ Split tree observer configured")
+    }
+    
+    /// Observe connection state to set up tmux observers when connected
+    /// This is needed because tmux manager doesn't exist until after SSH connects
+    private func setupConnectionObserver() {
+        guard let viewModel = viewModel else { return }
+        
+        connectionObserver = viewModel.$isConnected
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isConnected in
+                if isConnected {
+                    // Connection established - try to set up tmux support
+                    // Delay slightly to ensure tmux manager is fully initialized
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self?.setupTmuxSurfaceFactory()
+                        self?.setupSplitTreeObserver()
+                    }
+                }
+            }
+    }
+    
+    /// Handle split tree changes - switch between single and multi-pane mode
+    private func handleSplitTreeChange(_ tree: TmuxSplitTree) {
+        let hasSplits = tree.isSplit
+        
+        logger.info("🔄 handleSplitTreeChange: panes=\(tree.paneIds), isSplit=\(hasSplits), isMultiPaneMode=\(isMultiPaneMode)")
+        
+        if hasSplits && !isMultiPaneMode {
+            // Transition to multi-pane mode
+            logger.info("🔄 Transitioning to multi-pane mode")
+            transitionToMultiPaneMode()
+        } else if !hasSplits && isMultiPaneMode {
+            // Transition back to single surface mode
+            logger.info("🔄 Transitioning to single surface mode")
+            transitionToSingleSurfaceMode()
+        }
+    }
+    
+    /// Transition from single surface mode to multi-pane mode
+    private func transitionToMultiPaneMode() {
+        guard let tmuxManager = viewModel?.tmuxManager else { return }
+        
+        // Hide the single surface view
+        surfaceView?.isHidden = true
+        
+        // Create and add the multi-pane hosting controller
+        let multiPaneView = TmuxMultiPaneView(sessionManager: tmuxManager)
+        let hostingController = UIHostingController(rootView: multiPaneView)
+        multiPaneHostingController = hostingController
+        
+        // Add as child view controller
+        addChild(hostingController)
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(hostingController.view)
+        
+        // Create constraints that match the surface view constraints
+        let topConstraint = hostingController.view.topAnchor.constraint(equalTo: view.topAnchor, constant: surfaceTopConstraint?.constant ?? 0)
+        let bottomConstraint = hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: surfaceBottomConstraint?.constant ?? 0)
+        
+        multiPaneTopConstraint = topConstraint
+        multiPaneBottomConstraint = bottomConstraint
+        
+        NSLayoutConstraint.activate([
+            topConstraint,
+            bottomConstraint,
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        hostingController.didMove(toParent: self)
+        
+        // Set transparent background to show through to our view background
+        hostingController.view.backgroundColor = .clear
+        
+        isMultiPaneMode = true
+    }
+    
+    /// Transition from multi-pane mode back to single surface mode
+    private func transitionToSingleSurfaceMode() {
+        guard isMultiPaneMode else { return }
+        
+        logger.info("🔄 Transitioning to single surface mode")
+        
+        // Get the primary surface from TmuxSessionManager
+        // TmuxSessionManager owns all surfaces, so it's guaranteed to exist
+        guard let tmuxManager = viewModel?.tmuxManager,
+              let primarySurface = tmuxManager.primarySurface else {
+            logger.warning("🔄 ⚠️ No primary surface available from TmuxSessionManager!")
+            isMultiPaneMode = false
+            return
+        }
+        
+        // Remove the primary surface from multi-pane view hierarchy BEFORE
+        // destroying the hosting controller
+        primarySurface.removeFromSuperview()
+        
+        // Now safe to remove the multi-pane hosting controller
+        if let hostingController = multiPaneHostingController {
+            hostingController.willMove(toParent: nil)
+            hostingController.view.removeFromSuperview()
+            hostingController.removeFromParent()
+            multiPaneHostingController = nil
+            multiPaneTopConstraint = nil
+            multiPaneBottomConstraint = nil
+        }
+        
+        // Re-add primary surface to our view hierarchy
+        primarySurface.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(primarySurface)
+        
+        surfaceTopConstraint = primarySurface.topAnchor.constraint(equalTo: view.topAnchor)
+        surfaceBottomConstraint = primarySurface.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        
+        NSLayoutConstraint.activate([
+            surfaceTopConstraint!,
+            surfaceBottomConstraint!,
+            primarySurface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            primarySurface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        // Update our reference and viewModel
+        self.surfaceView = primarySurface
+        viewModel?.surfaceView = primarySurface
+        
+        // Restore focus
+        primarySurface.isHidden = false
+        primarySurface.focusDidChange(true)
+        let becameFirstResponder = primarySurface.becomeFirstResponder()
+        
+        isMultiPaneMode = false
+        logger.info("🔄 ✅ Transitioned to single surface mode (becameFirstResponder=\(becameFirstResponder))")
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -1508,6 +1713,13 @@ class RawTerminalUIViewController: UIViewController {
         searchStateObserver = nil
         removeSearchOverlay()
         
+        // Cancel split tree and connection observers, cleanup multi-pane view
+        splitTreeObserver?.cancel()
+        splitTreeObserver = nil
+        connectionObserver?.cancel()
+        connectionObserver = nil
+        transitionToSingleSurfaceMode()
+        
         viewModel?.disconnect()
         viewModel?.surfaceView = nil
     }
@@ -1523,6 +1735,8 @@ class RawTerminalUIViewController: UIViewController {
             NotificationCenter.default.removeObserver(observer)
         }
         searchStateObserver?.cancel()
+        splitTreeObserver?.cancel()
+        connectionObserver?.cancel()
     }
 }
 
