@@ -302,6 +302,22 @@ class TmuxSessionManager: ObservableObject {
         }
     }
     
+    /// Handle session window changed notification (window focus changed on server)
+    func handleSessionWindowChanged(sessionId: String, windowId: String) {
+        logger.info("📑 Session window changed: \(sessionId) -> \(windowId)")
+        
+        // Update focused window if it's our current session
+        if currentSession?.id == sessionId {
+            focusedWindowId = windowId
+            
+            // Switch to the split tree for the new window
+            if let tree = windowSplitTrees[windowId] {
+                currentSplitTree = tree
+                logger.info("📑 Switched to split tree for window \(windowId)")
+            }
+        }
+    }
+    
     /// Handle layout changed notification
     func handleLayoutChanged(windowId: String, windowIndex: Int, layout: String) {
         // Strip trailing markers like " *" (active window) or " -" (last window)
@@ -596,6 +612,12 @@ class TmuxSessionManager: ObservableObject {
     func closeWindow() {
         guard let client = controlClient, let write = writeToSSH else { return }
         client.sendCommandFireAndForget("kill-window", via: write)
+    }
+    
+    /// Close a specific window by ID
+    func closeWindow(windowId: String) {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        client.sendCommandFireAndForget("kill-window -t '\(windowId)'", via: write)
     }
     
     /// Rename current window

@@ -1067,6 +1067,7 @@ class TmuxControlClient {
             
         case .sessionWindowChanged(let sessionId, let windowId):
             logger.info("Session window changed: \(sessionId) -> \(windowId)")
+            sessionManager?.handleSessionWindowChanged(sessionId: sessionId, windowId: windowId)
             
         case .unlinkedWindowAdd(let windowId):
             logger.debug("Unlinked window added: \(windowId)")
