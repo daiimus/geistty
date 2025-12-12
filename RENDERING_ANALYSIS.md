@@ -557,6 +557,81 @@ The proposed architecture aligns with these by making tmux the explicit owner of
 
 ---
 
+## Appendix: Code Audit - What Exists vs What's Missing
+
+### ✅ Already Implemented
+
+1. **`TmuxControlClient.resize(cols:rows:via:)`** - Sends `refresh-client -C`
+2. **`SSHSession.resize(cols:rows:)`** - Calls both SSH PTY resize AND tmux resize
+3. **`TmuxSessionManager.resize(cols:rows:)`** - Forwards to control client
+4. **Debounced resize in TmuxSessionManager** - 50ms debounce
+5. **`setExactGridSize(cols:rows:)`** - Forces Ghostty to exact character grid
+6. **PaneInfo struct** - Encapsulates (paneId, cols, rows) together
+
+### ❌ Missing or Broken
+
+1. **Initial PTY size is hardcoded**:
+   ```swift
+   // SSHSession.swift - always 80x24 regardless of surface!
+   private var terminalCols: Int = 80
+   private var terminalRows: Int = 24
+   ```
+
+2. **Layout change doesn't update all surfaces**:
+   The `%layout-change` parsing updates the tree, but doesn't call `setExactGridSize` on each surface.
+
+3. **Cell size not available at connect time**:
+   The Ghostty surface may not have cell dimensions computed when SSH connects.
+
+4. **No bidirectional sync from tmux → SwiftUI**:
+   When tmux resizes a pane (user drag or select-layout), SwiftUI constraints don't update.
+
+5. **Split pane creation race**:
+   When Ctrl+D creates a split, the new surface is created before tmux reports final dimensions.
+
+### 🔧 Quick Fixes to Try
+
+**Fix 1: Use actual surface size for SSH connect**
+```swift
+// In SSHSession connect methods, add:
+func connect(...) async throws {
+    // Get initial size from the first surface that will be created
+    // This is a chicken-egg problem - solve by:
+    // 1. Using a reasonable default (120x40 for iPad)
+    // 2. Immediately resizing once surface is ready
+    terminalCols = 120  // Better default for iPad
+    terminalRows = 40
+    // ... rest of connect
+}
+```
+
+**Fix 2: Call setExactGridSize when %layout-change received**
+```swift
+// In TmuxSessionManager.handleLayoutChange:
+for pane in parsedLayout {
+    if let surface = getSurface(forNumericId: pane.id) {
+        surface.setExactGridSize(cols: pane.cols, rows: pane.rows)
+    }
+    // Also update the tree
+    currentSplitTree.updatePaneDimensions(paneId: pane.id, cols: pane.cols, rows: pane.rows)
+}
+```
+
+**Fix 3: Trigger resize after surface creation**
+```swift
+// When a new surface is created for a pane, immediately tell it the size:
+func createSurface(forPaneId paneId: String, cols: Int, rows: Int) -> Ghostty.SurfaceView {
+    let surface = Ghostty.SurfaceView(...)
+    // Wait for cell size to be computed, then set exact grid
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        surface.setExactGridSize(cols: cols, rows: rows)
+    }
+    return surface
+}
+```
+
+---
+
 ## References
 
 - [tmux Control Mode Wiki](https://github.com/tmux/tmux/wiki/Control-Mode)
