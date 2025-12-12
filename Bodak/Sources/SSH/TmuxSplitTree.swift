@@ -21,12 +21,38 @@ struct TmuxSplitTree: Equatable {
     /// The node that is currently zoomed (taking full screen).
     let zoomed: Node?
     
+    // MARK: - PaneInfo
+    
+    /// Information about a terminal pane - its identity and dimensions
+    struct PaneInfo: Equatable, Codable {
+        /// Unique pane identifier (tmux %N format, stored as Int)
+        let paneId: Int
+        
+        /// Column count (character width)
+        var cols: Int
+        
+        /// Row count (character height)
+        var rows: Int
+        
+        /// Create pane info with default dimensions
+        init(paneId: Int, cols: Int = 80, rows: Int = 24) {
+            self.paneId = paneId
+            self.cols = cols
+            self.rows = rows
+        }
+        
+        /// Size as a tuple for convenience
+        var size: (cols: Int, rows: Int) {
+            (cols, rows)
+        }
+    }
+    
     // MARK: - Node
     
     /// A single node in the tree - either a leaf pane or a split container.
     indirect enum Node: Equatable, Codable {
-        /// A leaf node representing a single tmux pane
-        case leaf(paneId: Int)
+        /// A leaf node representing a single tmux pane with its dimensions
+        case leaf(PaneInfo)
         
         /// A split node containing two children
         case split(Split)
@@ -36,6 +62,11 @@ struct TmuxSplitTree: Equatable {
             let ratio: Double
             let left: Node
             let right: Node
+        }
+        
+        /// Convenience initializer for leaf nodes
+        static func leaf(paneId: Int, cols: Int, rows: Int) -> Node {
+            .leaf(PaneInfo(paneId: paneId, cols: cols, rows: rows))
         }
     }
     
@@ -85,8 +116,8 @@ struct TmuxSplitTree: Equatable {
         self.zoomed = nil
     }
     
-    init(paneId: Int) {
-        self.root = .leaf(paneId: paneId)
+    init(paneId: Int, cols: Int = 80, rows: Int = 24) {
+        self.root = .leaf(paneId: paneId, cols: cols, rows: rows)
         self.zoomed = nil
     }
     
@@ -102,7 +133,8 @@ struct TmuxSplitTree: Equatable {
         func convert(_ layout: TmuxLayout) -> Node {
             switch layout.content {
             case .pane(let id):
-                return .leaf(paneId: id)
+                // Include tmux's exact dimensions for the pane
+                return .leaf(paneId: id, cols: layout.width, rows: layout.height)
                 
             case .horizontal(let children):
                 return buildSplit(from: children, direction: .horizontal)
@@ -203,13 +235,26 @@ struct TmuxSplitTree: Equatable {
         return root.path(to: paneId)
     }
     
+    /// Get pane info for a specific pane
+    func paneInfo(for paneId: Int) -> PaneInfo? {
+        guard let root else { return nil }
+        return root.findPaneInfo(paneId: paneId)
+    }
+    
+    /// Get all pane infos in the tree
+    var allPaneInfos: [PaneInfo] {
+        guard let root else { return [] }
+        return root.allPaneInfos
+    }
+    
     // MARK: - Modifications
     
     /// Toggle zoom state for a pane
     func toggleZoom(paneId: Int) -> TmuxSplitTree {
         guard let root else { return self }
         
-        if let zoomed, case .leaf(let zoomedId) = zoomed, zoomedId == paneId {
+        // Check if already zoomed on this pane using the paneInfo accessor
+        if let zoomed, zoomed.paneId == paneId {
             // Already zoomed on this pane, unzoom
             return TmuxSplitTree(root: root, zoomed: nil)
         }
@@ -232,27 +277,79 @@ struct TmuxSplitTree: Equatable {
         guard let root else { return self }
         return TmuxSplitTree(root: root.equalize(), zoomed: zoomed)
     }
+    
+    /// Update dimensions for a specific pane (e.g., when Ghostty reports a resize)
+    /// Returns a new tree with updated dimensions
+    func updatingDimensions(paneId: Int, cols: Int, rows: Int) -> TmuxSplitTree {
+        guard let root else { return self }
+        let newRoot = root.updatingDimensions(paneId: paneId, cols: cols, rows: rows)
+        
+        // Also update zoomed node if it's the same pane
+        let newZoomed: Node?
+        if let zoomed, zoomed.paneId == paneId {
+            newZoomed = newRoot.find(paneId: paneId)
+        } else {
+            newZoomed = zoomed
+        }
+        
+        return TmuxSplitTree(root: newRoot, zoomed: newZoomed)
+    }
 }
 
 // MARK: - Node Extensions
 
 extension TmuxSplitTree.Node {
     
+    // MARK: - Leaf Accessors
+    
+    /// Get the pane info if this is a leaf node
+    var paneInfo: TmuxSplitTree.PaneInfo? {
+        if case .leaf(let info) = self { return info }
+        return nil
+    }
+    
+    /// Get the pane ID if this is a leaf node
+    var paneId: Int? {
+        paneInfo?.paneId
+    }
+    
+    /// Get the dimensions if this is a leaf node
+    var dimensions: (cols: Int, rows: Int)? {
+        paneInfo?.size
+    }
+    
+    /// Check if this node is a leaf with the given pane ID
+    func isPane(_ paneId: Int) -> Bool {
+        self.paneId == paneId
+    }
+    
+    // MARK: - Tree Queries
+    
     /// Get all pane IDs in this subtree
     var paneIds: [Int] {
         switch self {
-        case .leaf(let paneId):
-            return [paneId]
+        case .leaf(let info):
+            return [info.paneId]
         case .split(let split):
             return split.left.paneIds + split.right.paneIds
+        }
+    }
+    
+    /// Get all pane infos in this subtree
+    var allPaneInfos: [TmuxSplitTree.PaneInfo] {
+        switch self {
+        case .leaf(let info):
+            return [info]
+        case .split(let split):
+            return split.left.allPaneInfos + split.right.allPaneInfos
         }
     }
     
     /// Check if this subtree contains a pane with the given ID
     func contains(paneId: Int) -> Bool {
         switch self {
-        case .leaf(let id):
-            return id == paneId
+        case .leaf(let info):
+            return info.paneId == paneId
         case .split(let split):
             return split.left.contains(paneId: paneId) || split.right.contains(paneId: paneId)
         }
@@ -261,8 +358,8 @@ extension TmuxSplitTree.Node {
     /// Find the node containing a specific pane ID
     func find(paneId: Int) -> TmuxSplitTree.Node? {
         switch self {
-        case .leaf(let id):
-            return id == paneId ? self : nil
+        case .leaf(let info):
+            return info.paneId == paneId ? self : nil
         case .split(let split):
             if let found = split.left.find(paneId: paneId) {
                 return found
@@ -271,11 +368,16 @@ extension TmuxSplitTree.Node {
         }
     }
     
+    /// Find pane info for a specific pane ID
+    func findPaneInfo(paneId: Int) -> TmuxSplitTree.PaneInfo? {
+        find(paneId: paneId)?.paneInfo
+    }
+    
     /// Get the path to a pane
     func path(to paneId: Int) -> TmuxSplitTree.Path? {
         switch self {
-        case .leaf(let id):
-            return id == paneId ? TmuxSplitTree.Path() : nil
+        case .leaf(let info):
+            return info.paneId == paneId ? TmuxSplitTree.Path() : nil
             
         case .split(let split):
             if let leftPath = split.left.path(to: paneId) {
@@ -291,8 +393,8 @@ extension TmuxSplitTree.Node {
     /// Get the leftmost leaf pane ID
     var leftmostPaneId: Int {
         switch self {
-        case .leaf(let paneId):
-            return paneId
+        case .leaf(let info):
+            return info.paneId
         case .split(let split):
             return split.left.leftmostPaneId
         }
@@ -301,12 +403,14 @@ extension TmuxSplitTree.Node {
     /// Get the rightmost leaf pane ID
     var rightmostPaneId: Int {
         switch self {
-        case .leaf(let paneId):
-            return paneId
+        case .leaf(let info):
+            return info.paneId
         case .split(let split):
             return split.right.rightmostPaneId
         }
     }
+    
+    // MARK: - Tree Modifications
     
     /// Equalize all split ratios in this subtree
     func equalize() -> TmuxSplitTree.Node {
@@ -319,6 +423,24 @@ extension TmuxSplitTree.Node {
                 ratio: 0.5,
                 left: split.left.equalize(),
                 right: split.right.equalize()
+            ))
+        }
+    }
+    
+    /// Update dimensions for a specific pane, returning a new node tree
+    func updatingDimensions(paneId: Int, cols: Int, rows: Int) -> TmuxSplitTree.Node {
+        switch self {
+        case .leaf(let info):
+            if info.paneId == paneId {
+                return .leaf(TmuxSplitTree.PaneInfo(paneId: paneId, cols: cols, rows: rows))
+            }
+            return self
+        case .split(let split):
+            return .split(Split(
+                direction: split.direction,
+                ratio: split.ratio,
+                left: split.left.updatingDimensions(paneId: paneId, cols: cols, rows: rows),
+                right: split.right.updatingDimensions(paneId: paneId, cols: cols, rows: rows)
             ))
         }
     }
@@ -375,9 +497,9 @@ extension TmuxSplitTree: Codable {
         try container.encode(Self.currentVersion, forKey: .version)
         try container.encodeIfPresent(root, forKey: .root)
         
-        // Encode zoomed as pane ID
-        if let zoomed, case .leaf(let paneId) = zoomed {
-            try container.encode(paneId, forKey: .zoomedPaneId)
+        // Encode zoomed as pane ID (dimensions are stored in the tree)
+        if let zoomedPaneId = zoomed?.paneId {
+            try container.encode(zoomedPaneId, forKey: .zoomedPaneId)
         }
     }
 }
@@ -390,9 +512,9 @@ extension TmuxSplitTree: CustomDebugStringConvertible {
         
         func describe(_ node: Node, indent: String = "") -> String {
             switch node {
-            case .leaf(let paneId):
+            case .leaf(let info):
                 let zoomed = self.zoomed == node ? " [ZOOMED]" : ""
-                return "\(indent)Pane %\(paneId)\(zoomed)"
+                return "\(indent)Pane %\(info.paneId) (\(info.cols)x\(info.rows))\(zoomed)"
             case .split(let split):
                 let dir = split.direction == .horizontal ? "H" : "V"
                 let ratio = String(format: "%.0f%%", split.ratio * 100)
