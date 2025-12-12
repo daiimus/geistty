@@ -80,89 +80,83 @@ Bodak provides a **native Ghostty experience** for iOS/iPadOS that seamlessly in
 
 ## Implementation Plan
 
-### Phase 1: Multi-Pane Foundation ⬜
+### Phase 1: Multi-Pane Foundation ✅ COMPLETE
 
 **Goal**: Support multiple tmux panes, each with its own Ghostty surface.
 
-#### 1.1 TmuxSessionManager (NEW)
-```swift
-@MainActor
-class TmuxSessionManager: ObservableObject {
-    /// Current session info
-    @Published var currentSession: TmuxSession?
-    
-    /// All windows in the current session
-    @Published var windows: [TmuxWindow] = []
-    
-    /// All panes across all windows
-    @Published var panes: [String: TmuxPane] = [:]  // paneId -> pane
-    
-    /// Active pane ID
-    @Published var activePaneId: String = "%0"
-    
-    /// Ghostty surfaces for each pane
-    private var paneSurfaces: [String: Ghostty.SurfaceView] = [:]
-    
-    // Methods
-    func createSurface(for paneId: String) -> Ghostty.SurfaceView
-    func routeOutput(_ data: Data, to paneId: String)
-    func sendInput(_ data: Data, from paneId: String)
-}
-```
+#### 1.1 TmuxSessionManager ✅ IMPLEMENTED
+- Located in `Sources/SSH/TmuxSessionManager.swift`
+- Tracks session state, windows, panes
+- Maps pane IDs to Ghostty surfaces via `paneSurfaces` dictionary
+- Routes `%extended-output` to correct surface
+- Surface factory pattern for creating new pane surfaces
+- Focus tracking with `@Published focusedPaneId`
 
-#### 1.2 Data Models (NEW)
-```swift
-struct TmuxSession {
-    let id: String        // $0, $1, etc.
-    let name: String
-    var windows: [String] // window IDs
-}
+#### 1.2 Data Models ✅ IMPLEMENTED
+- Located in `Sources/SSH/TmuxModels.swift`
+- `TmuxSession`, `TmuxWindow`, `TmuxPane` structs
+- Layout parsing with checksum validation
 
-struct TmuxWindow {
-    let id: String        // @0, @1, etc.
-    let index: Int
-    var name: String
-    var panes: [String]   // pane IDs
-    var activePane: String
-    var layout: String
-}
-
-struct TmuxPane {
-    let id: String        // %0, %1, etc.
-    let windowId: String
-    var width: Int
-    var height: Int
-    var cursorX: Int
-    var cursorY: Int
-    var isActive: Bool
-    var title: String
-}
-```
-
-#### 1.3 Enhanced TmuxControlClient
-Add missing notifications:
+#### 1.3 Enhanced TmuxControlClient ✅ IMPLEMENTED
+All notifications handled:
 - `%window-pane-changed` - Track active pane per window
 - `%sessions-changed` - Session created/destroyed
 - `%session-renamed` - Session name changed  
 - `%session-window-changed` - Current window changed
-- `%unlinked-window-*` - Windows in other sessions
+- `%layout-change` - Pane layout updates
+- `%extended-output` - Per-pane output routing
 
-Add query commands:
-- `list-sessions -F '#{session_id} #{session_name}'`
-- `list-windows -F '#{window_id} #{window_index} #{window_name} #{window_layout}'`
-- `list-panes -F '#{pane_id} #{pane_width} #{pane_height} #{pane_active}'`
+### Phase 2: Multi-Pane Rendering ✅ COMPLETE
 
-### Phase 2: iPadOS Window Mapping ⬜
+**Goal**: Render tmux panes with proper split layouts.
+
+#### 2.1 Layout Parsing ✅ IMPLEMENTED
+- `TmuxLayout.swift` - Parses tmux layout strings with checksum
+- `TmuxSplitTree.swift` - Converts layouts to renderable tree structure
+- Supports horizontal and vertical splits, nested layouts
+
+#### 2.2 Split View Rendering ✅ IMPLEMENTED
+- `TmuxSplitTreeView.swift` - SwiftUI view for recursive split rendering
+- `TmuxMultiPaneView.swift` - Main container observing TmuxSessionManager
+- `GhosttyPaneSurfaceContainerView` - UIKit container for each Ghostty surface
+
+#### 2.3 Focus & Input ✅ IMPLEMENTED
+- Tap detection via `hitTest` override (works despite Ghostty touch handling)
+- Input-based focus tracking (typing in pane updates focus)
+- Visual focus indicator (border highlight)
+- Per-pane input routing via `send-keys -H -t %N`
+
+### Phase 2.5: Multi-Pane Polish 🔄 IN PROGRESS
+
+- [ ] **Pane close handling** - Cleanup surfaces when `kill-pane` executed
+- [ ] **Transition to single-pane** - Return to single surface when all splits closed
+- [ ] **Surface cleanup** - Remove orphaned surfaces from paneSurfaces dictionary
+
+### Phase 3: Multiple tmux Windows 🔲 TODO
+
+**Goal**: Support switching between tmux windows.
+
+#### 3.1 Window List UI
+- Sidebar or tab bar showing window list
+- Window names from tmux
+- Quick switching with tap/keyboard
+
+#### 3.2 Window Commands
+- Handle `%window-add`/`%window-close` notifications
+- `select-window -t @N` for switching
+- Window rename support
+
+### Phase 4: iPadOS Window Mapping 🔲 FUTURE
 
 **Goal**: Map tmux windows to iPadOS scenes/windows.
 
-#### 2.1 Scene Management
+#### 4.1 Scene Management
 - Each iPadOS scene can display one tmux window
 - Support for Stage Manager (multiple windows)
 - Support for Split View (two windows side by side)
 - External display support (dedicated window)
 
-#### 2.2 User Activities
+#### 4.2 User Activities
 ```swift
 // NSUserActivity for state restoration
 let activity = NSUserActivity(activityType: "com.bodak.tmux-window")
@@ -172,30 +166,25 @@ activity.userInfo = [
 ]
 ```
 
-#### 2.3 Window Commands (iPadOS Menu Bar)
+#### 4.3 Window Commands (iPadOS Menu Bar)
 - **Window → New Window** - `new-window` in tmux, opens new iPadOS scene
 - **Window → Close Window** - `kill-window`, closes iPadOS scene
 - **Window → Rename Window** - `rename-window`
 - **Window → Move to New iPad Window** - Spawn new scene for current tmux window
 
-### Phase 3: Pane Splitting ⬜
+### Phase 5: Pane Splitting Commands 🔲 FUTURE
 
-**Goal**: Support tmux pane splits within a single iPadOS window.
+**Goal**: Support creating splits from Bodak UI.
 
-#### 3.1 Split Commands
+#### 5.1 Split Commands
 - **View → Split Horizontally** - `split-window -h`
 - **View → Split Vertically** - `split-window -v`
 - **View → Close Pane** - `kill-pane`
 
-#### 3.2 Layout Engine
-- Parse tmux layout strings (e.g., `a]be,80x24,0,0{40x24,0,0,0,39x24,41,0,1}`)
-- Render multiple Ghostty surfaces in a container view
-- Handle layout changes from `%layout-change` notifications
-
-#### 3.3 Pane Navigation
-- Keyboard: `Ctrl+B arrow` (via tmux)
-- Touch: Tap to focus pane
-- Trackpad: Click to focus
+#### 5.2 Pane Navigation Shortcuts
+- Keyboard: `Ctrl+B arrow` (via tmux) - already works
+- Touch: Tap to focus pane - ✅ implemented
+- Cmd+Option+arrows for direct pane navigation
 - Swipe gestures for pane switching?
 
 ### Phase 4: Session Management ⬜

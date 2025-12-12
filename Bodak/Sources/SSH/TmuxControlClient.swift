@@ -74,9 +74,17 @@ enum TmuxControlMessage {
 
 /// State for parsing a multi-line %begin/%end block
 private struct PendingBlock {
-    let commandId: String
+    let commandNumber: String  // tmux-assigned command ID (sequential)
     let timestamp: String
     var lines: [String] = []
+}
+
+/// A pending command waiting for a response
+private struct PendingCommand {
+    let localId: String        // Our internal tracking ID
+    let commandText: String    // The command that was sent
+    let callback: (Result<String, Error>) -> Void
+    let timeoutTask: Task<Void, Never>?
 }
 
 /// Delegate protocol for TmuxControlClient
@@ -144,8 +152,13 @@ class TmuxControlClient {
     /// Command counter for generating unique IDs
     private var commandCounter: Int = 0
     
-    /// Pending command callbacks, keyed by command ID (timestamp)
-    private var pendingCommands: [String: (Result<String, Error>) -> Void] = [:]
+    /// Pending command queue - FIFO order matches tmux's response order
+    /// tmux processes commands sequentially, so responses come back in order
+    private var pendingCommandQueue: [PendingCommand] = []
+    
+    /// Mapping of tmux command numbers to our local command IDs
+    /// Populated when we see %begin with the command number
+    private var commandNumberToLocalId: [String: String] = [:]
     
     /// Current pane scrollback buffers (pane ID -> content)
     /// We maintain our own copy since we're the "terminal" for tmux
@@ -171,9 +184,6 @@ class TmuxControlClient {
     
     /// Whether session restoration has been performed
     private var hasRestoredSession: Bool = false
-    
-    /// Whether we're waiting for session restore response
-    private var isWaitingForSessionRestore: Bool = false
     
     /// Pane state captured from list-panes (currently unused but kept for future use)
     struct PaneState {
@@ -215,18 +225,43 @@ class TmuxControlClient {
     }
     
     /// Send a command and register a callback for the response
+    /// Commands are queued and matched to responses in FIFO order (tmux processes sequentially)
     func sendCommand(_ command: String, via write: (String) -> Void, completion: @escaping (Result<String, Error>) -> Void) {
-        let (cmdId, fullCommand) = makeCommand(command)
-        pendingCommands[cmdId] = completion
-        write(fullCommand)
+        commandCounter += 1
+        let localId = "cmd-\(commandCounter)"
         
-        // Timeout after 10 seconds
-        Task {
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
-            if let callback = self.pendingCommands.removeValue(forKey: cmdId) {
-                callback(.failure(TmuxControlError.timeout))
+        // Create timeout task
+        let timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)  // 10 seconds
+            await MainActor.run {
+                // Find and remove this command from queue
+                if let index = self.pendingCommandQueue.firstIndex(where: { $0.localId == localId }) {
+                    let cmd = self.pendingCommandQueue.remove(at: index)
+                    logger.warning("Command timed out: \(cmd.commandText.prefix(50))")
+                    cmd.callback(.failure(TmuxControlError.timeout))
+                }
             }
         }
+        
+        let pending = PendingCommand(
+            localId: localId,
+            commandText: command,
+            callback: completion,
+            timeoutTask: timeoutTask
+        )
+        
+        pendingCommandQueue.append(pending)
+        logger.debug("Queued command \(localId): \(command.prefix(50))")
+        
+        // Send the command (tmux control mode just needs newline-terminated commands)
+        write("\(command)\n")
+    }
+    
+    /// Send a command without waiting for response (fire and forget)
+    /// Use for commands where we don't care about the response
+    func sendCommandFireAndForget(_ command: String, via write: (String) -> Void) {
+        logger.debug("Fire-and-forget command: \(command.prefix(50))")
+        write("\(command)\n")
     }
     
     // MARK: - Input Handling
@@ -769,13 +804,21 @@ class TmuxControlClient {
         case "%begin":
             // %begin <timestamp> <command-number> <flags>
             // Start of command response block
-            // The command-number is unique and used to match %begin with %end
+            // The command-number is assigned by tmux sequentially (0, 1, 2, ...)
             let beginParts = rest.split(separator: " ")
             let timestamp = beginParts.count > 0 ? String(beginParts[0]) : ""
-            let commandNumber = beginParts.count > 1 ? String(beginParts[1]) : timestamp
+            let commandNumber = beginParts.count > 1 ? String(beginParts[1]) : "0"
             let flags = beginParts.count > 2 ? String(beginParts[2]) : "0"
             logger.info("%begin block: time=\(timestamp) cmd=\(commandNumber) flags=\(flags)")
-            pendingBlock = PendingBlock(commandId: commandNumber, timestamp: timestamp)
+            
+            // Map this tmux command number to our first pending command (FIFO)
+            if !pendingCommandQueue.isEmpty {
+                let pending = pendingCommandQueue[0]
+                commandNumberToLocalId[commandNumber] = pending.localId
+                logger.debug("Mapped tmux cmd \(commandNumber) -> \(pending.localId)")
+            }
+            
+            pendingBlock = PendingBlock(commandNumber: commandNumber, timestamp: timestamp)
             // Don't trigger activation here - wait until first block completes
             // This ensures tmux is ready to receive commands
             return .unknown(line: line) // Don't emit a separate message
@@ -1064,53 +1107,40 @@ class TmuxControlClient {
     private func finishBlock(_ block: PendingBlock, success: Bool) {
         let content = block.lines.joined(separator: "\n")
         
-        logger.info("Block finished: id=\(block.commandId) success=\(success) lines=\(block.lines.count) content='\(content.prefix(100))'")
+        logger.info("Block finished: cmd=\(block.commandNumber) success=\(success) lines=\(block.lines.count) content='\(content.prefix(100))'")
         
         // Notify activation after first block completes
         // This is the right time because tmux has finished its initial response
         // and is now ready to receive new commands
         notifyActivationIfNeeded()
         
-        // Find matching pending command by timestamp
-        // Note: tmux uses the timestamp from the command as the block ID
-        // We need to find a matching command within a small time window
-        var matchedId: String?
-        for (cmdId, _) in pendingCommands {
-            // Try exact match first
-            if cmdId == block.commandId {
-                matchedId = cmdId
-                break
-            }
-            // Or within 0.1 second
-            if let cmdTimestamp = Double(cmdId),
-               let blockTimestamp = Double(block.commandId),
-               abs(cmdTimestamp - blockTimestamp) < 0.1 {
-                matchedId = cmdId
-                break
-            }
-        }
+        // Clean up the command number mapping
+        _ = commandNumberToLocalId.removeValue(forKey: block.commandNumber)
         
-        if let id = matchedId, let callback = pendingCommands.removeValue(forKey: id) {
+        // Find and remove the matching pending command from the queue
+        // We use FIFO - the first pending command matches the first response
+        if !pendingCommandQueue.isEmpty {
+            let pending = pendingCommandQueue.removeFirst()
+            
+            // Cancel the timeout task
+            pending.timeoutTask?.cancel()
+            
+            logger.debug("Matched response to command \(pending.localId): \(pending.commandText.prefix(50))")
+            
             if success {
-                callback(.success(content))
-                delegate?.tmuxClient(self, commandDidComplete: id, response: content)
+                pending.callback(.success(content))
+                delegate?.tmuxClient(self, commandDidComplete: pending.localId, response: content)
             } else {
-                callback(.failure(TmuxControlError.commandFailed(content)))
-                delegate?.tmuxClient(self, commandDidFail: id, error: content)
+                pending.callback(.failure(TmuxControlError.commandFailed(content)))
+                delegate?.tmuxClient(self, commandDidFail: pending.localId, error: content)
             }
         } else {
-            // No pending command found - check for session restore response
-            
-            // Is this the capture-pane response for session restore?
-            if success && isWaitingForSessionRestore {
-                isWaitingForSessionRestore = false
-                
-                logger.info("Session restore received: \(content.count) chars")
-                delegate?.tmuxClient(self, didRestoreSession: content, paneId: activePaneId, paneState: nil)
-            } else if success {
-                logger.debug("Unmatched response block: \(block.commandId), content length=\(content.count)")
+            // No pending command - this is an unsolicited response
+            // This happens during initial tmux startup (first %begin/%end)
+            if success {
+                logger.debug("Unsolicited response block: cmd=\(block.commandNumber), content length=\(content.count)")
             } else {
-                logger.warning("Unmatched error block: \(block.commandId) - \(content)")
+                logger.warning("Unsolicited error block: cmd=\(block.commandNumber) - \(content)")
             }
         }
     }
@@ -1233,16 +1263,30 @@ class TmuxControlClient {
         }
         
         hasRestoredSession = true
-        isWaitingForSessionRestore = true
         
         // Capture pane content (plain text, preserving line structure)
         // -p: output to stdout (control mode captures in %begin/%end)
         // -t: target pane
         // -S -N: start from N lines before current position
         // Note: We don't use -J (join) as it destroys line breaks
-        let captureCommand = "capture-pane -p -t \(paneId) -S -\(sessionRestoreScrollback)\n"
-        logger.info("Capturing session content: \(captureCommand.trimmingCharacters(in: .newlines))")
-        write(captureCommand)
+        let captureCommand = "capture-pane -p -t \(paneId) -S -\(sessionRestoreScrollback)"
+        logger.info("Capturing session content: \(captureCommand)")
+        
+        // Use proper command routing - the response will come back via callback
+        sendCommand(captureCommand, via: write) { [weak self] result in
+            guard let self = self else { return }
+            
+            switch result {
+            case .success(let content):
+                logger.info("Session restore received: \(content.count) chars")
+                self.delegate?.tmuxClient(self, didRestoreSession: content, paneId: paneId, paneState: nil)
+                
+            case .failure(let error):
+                logger.error("Session restore failed: \(error.localizedDescription)")
+                // Still notify delegate with empty content so UI can proceed
+                self.delegate?.tmuxClient(self, didRestoreSession: "", paneId: paneId, paneState: nil)
+            }
+        }
     }
     
     /// Parse pane state from list-panes -F response
@@ -1364,12 +1408,18 @@ class TmuxControlClient {
         isActive = false
         hasNotifiedActivation = false
         hasRestoredSession = false
-        isWaitingForSessionRestore = false
         isPauseEnabled = false
         pausedPanes.removeAll()
         pendingBlock = nil
         parseBuffer = Data()
-        pendingCommands.removeAll()
+        
+        // Cancel all pending command timeouts
+        for pending in pendingCommandQueue {
+            pending.timeoutTask?.cancel()
+        }
+        pendingCommandQueue.removeAll()
+        commandNumberToLocalId.removeAll()
+        
         paneBuffers.removeAll()
     }
 }

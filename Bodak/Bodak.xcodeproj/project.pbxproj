@@ -12,6 +12,10 @@
 		A1000081 /* TmuxControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000081 /* TmuxControlClient.swift */; };
 		A1000082 /* TmuxModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000082 /* TmuxModels.swift */; };
 		A1000083 /* TmuxSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000083 /* TmuxSessionManager.swift */; };
+		A1000084 /* TmuxLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000084 /* TmuxLayout.swift */; };
+		A1000085 /* TmuxSplitTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000085 /* TmuxSplitTree.swift */; };
+		A1000086 /* TmuxSplitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000086 /* TmuxSplitView.swift */; };
+		A1000087 /* TmuxMultiPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000087 /* TmuxMultiPaneView.swift */; };
 		A1000001 /* BodakApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* BodakApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
@@ -102,6 +106,10 @@
 		A2000080 /* SurfaceSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceSearchOverlay.swift; sourceTree = "<group>"; };
 		A2000082 /* TmuxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModels.swift; sourceTree = "<group>"; };
 		A2000083 /* TmuxSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionManager.swift; sourceTree = "<group>"; };
+		A2000084 /* TmuxLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxLayout.swift; sourceTree = "<group>"; };
+		A2000085 /* TmuxSplitTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitTree.swift; sourceTree = "<group>"; };
+		A2000086 /* TmuxSplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitView.swift; sourceTree = "<group>"; };
+		A2000087 /* TmuxMultiPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiPaneView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -157,6 +165,8 @@
 			children = (
 				A2000003 /* TerminalContainerView.swift */,
 				A2000060 /* Theme.swift */,
+				A2000087 /* TmuxMultiPaneView.swift */,
+				A2000086 /* TmuxSplitView.swift */,
 			);
 			path = Terminal;
 			sourceTree = "<group>";
@@ -167,8 +177,10 @@
 				A2000004 /* SSHSession.swift */,
 				A2000005 /* SSHConnection.swift */,
 				A2000081 /* TmuxControlClient.swift */,
+				A2000084 /* TmuxLayout.swift */,
 				A2000082 /* TmuxModels.swift */,
 				A2000083 /* TmuxSessionManager.swift */,
+				A2000085 /* TmuxSplitTree.swift */,
 			);
 			path = SSH;
 			sourceTree = "<group>";
@@ -359,8 +371,12 @@
 				A1000004 /* SSHSession.swift in Sources */,
 				A1000005 /* SSHConnection.swift in Sources */,
 				A1000081 /* TmuxControlClient.swift in Sources */,
+				A1000084 /* TmuxLayout.swift in Sources */,
 				A1000082 /* TmuxModels.swift in Sources */,
 				A1000083 /* TmuxSessionManager.swift in Sources */,
+				A1000085 /* TmuxSplitTree.swift in Sources */,
+				A1000086 /* TmuxSplitView.swift in Sources */,
+				A1000087 /* TmuxMultiPaneView.swift in Sources */,
 				A1000020 /* KeychainManager.swift in Sources */,
 				A1000021 /* SSHKeyManager.swift in Sources */,
 				A1000022 /* ConnectionProfile.swift in Sources */,
