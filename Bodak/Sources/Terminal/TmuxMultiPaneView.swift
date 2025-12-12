@@ -116,10 +116,10 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
         // Update focus state
         if isFocused && !surface.isFirstResponder {
             surface.focusDidChange(true)
-            surface.becomeFirstResponder()
+            _ = surface.becomeFirstResponder()
         } else if !isFocused && surface.isFirstResponder {
             surface.focusDidChange(false)
-            surface.resignFirstResponder()
+            _ = surface.resignFirstResponder()
         }
     }
 }

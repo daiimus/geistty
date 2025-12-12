@@ -953,10 +953,14 @@ class RawTerminalUIViewController: UIViewController {
         
         // Copy/Paste
         NotificationCenter.default.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
-            self?.viewModel?.copy()
+            Task { @MainActor in
+                self?.viewModel?.copy()
+            }
         }
         NotificationCenter.default.addObserver(forName: .terminalPaste, object: nil, queue: .main) { [weak self] _ in
-            self?.viewModel?.paste()
+            Task { @MainActor in
+                self?.viewModel?.paste()
+            }
         }
         
         // Search/Find
@@ -1065,7 +1069,7 @@ class RawTerminalUIViewController: UIViewController {
         surface.searchState = nil
         
         // Return focus to terminal
-        surface.becomeFirstResponder()
+        _ = surface.becomeFirstResponder()
     }
     
     // MARK: - Search Overlay Management
@@ -1416,7 +1420,7 @@ class RawTerminalUIViewController: UIViewController {
     /// This provides the factory and handlers for creating surfaces
     private func configureSurfaceManagement() {
         guard let ghosttyApp = ghosttyApp,
-              let app = ghosttyApp.app,
+              let _ = ghosttyApp.app,
               let tmuxManager = viewModel?.tmuxManager else {
             return
         }
@@ -1519,7 +1523,7 @@ class RawTerminalUIViewController: UIViewController {
         setupSearchStateObserver()
         
         surface.focusDidChange(true)
-        surface.becomeFirstResponder()
+        _ = surface.becomeFirstResponder()
     }
     
     /// Set up surface factory for tmux multi-pane support
