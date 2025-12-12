@@ -474,34 +474,6 @@ class TmuxSessionManager: ObservableObject {
         }
         
         let surface = factory(paneId)
-        paneSurfaces[paneId] = surface
-        
-        logger.info("Created Ghostty surface for pane \(paneId)")
-        
-        return surface
-    }
-    
-    /// Get or create a Ghostty surface for a pane
-    /// - Warning: Crashes if factory is not set and surface doesn't exist
-    func getOrCreateSurface(for paneId: String) -> Ghostty.SurfaceView {
-        if let existing = paneSurfaces[paneId] {
-            return existing
-        }
-        
-        // Create new surface
-        guard let factory = surfaceFactory else {
-            fatalError("Surface factory not set - call setSurfaceFactory before routing output")
-        }
-        
-        // Don't create surfaces for panes that no longer exist in the split tree
-        // This prevents race conditions during pane close transitions
-        if let numericId = Int(paneId.dropFirst()) {  // "%0" -> 0
-            if !currentSplitTree.paneIds.contains(numericId) {
-                fatalError("Attempted to create surface for closed pane \(paneId)")
-            }
-        }
-        
-        let surface = factory(paneId)
         
         // Wire up input handler for this surface
         if let inputHandler = surfaceInputHandler {
@@ -541,14 +513,13 @@ class TmuxSessionManager: ObservableObject {
             return nil
         }
         
-        // Create surface for %0 if it doesn't exist
+        // Create surface for %0 if it doesn't exist (getSurfaceOrCreate handles primarySurface assignment)
         if let existing = paneSurfaces["%0"] {
             logger.info("Primary surface already exists")
             return existing
         }
         
         let surface = getSurfaceOrCreate(for: "%0")
-        primarySurface = surface
         logger.info("✅ Created primary surface for %0")
         return surface
     }
