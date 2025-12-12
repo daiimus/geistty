@@ -66,6 +66,10 @@ class TmuxSessionManager: ObservableObject {
     /// Callback for resize events
     private var surfaceResizeHandler: ((Int, Int) -> Void)?
     
+    /// Buffer for output received before surfaces are created
+    /// This is essential for session restore which arrives before surface factory is configured
+    private var pendingOutput: [String: [Data]] = [:]
+    
     // MARK: - Control Client
     
     /// The control client for parsing tmux protocol
@@ -434,9 +438,13 @@ class TmuxSessionManager: ObservableObject {
     func routeOutput(_ data: Data, to paneId: String) {
         // Get existing surface or create one if factory is available
         guard let surface = getSurfaceOrCreate(for: paneId) else {
-            // No surface available - this can happen before surface factory is set
-            // or for panes we're not rendering yet
-            logger.debug("No surface available for pane \(paneId), output dropped")
+            // No surface available - buffer the output for later
+            // This happens for session restore which arrives before surface factory is configured
+            if pendingOutput[paneId] == nil {
+                pendingOutput[paneId] = []
+            }
+            pendingOutput[paneId]?.append(data)
+            logger.debug("Buffered \(data.count) bytes for pane \(paneId) (total: \(self.pendingOutput[paneId]?.count ?? 0) chunks)")
             return
         }
         
@@ -466,8 +474,14 @@ class TmuxSessionManager: ObservableObject {
         
         // Don't create surfaces for panes that no longer exist in the split tree
         // This prevents race conditions during pane close transitions
+        // BUT: allow creation when split tree is empty (initial connection state)
+        // or for pane %0 which always exists initially
         if let numericId = Int(paneId.dropFirst()) {  // "%0" -> 0
-            if !currentSplitTree.paneIds.contains(numericId) {
+            let treeIsEmpty = currentSplitTree.paneIds.isEmpty
+            let paneExistsInTree = currentSplitTree.paneIds.contains(numericId)
+            let isPrimaryPane = numericId == 0
+            
+            if !treeIsEmpty && !paneExistsInTree && !isPrimaryPane {
                 logger.debug("Not creating surface for closed pane \(paneId)")
                 return nil
             }
@@ -488,6 +502,15 @@ class TmuxSessionManager: ObservableObject {
         }
         
         logger.info("Created Ghostty surface for pane \(paneId)")
+        
+        // Flush any pending output that was buffered before surface was available
+        // This is critical for session restore which arrives before factory is configured
+        if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+            logger.info("🔄 Flushing \(pending.count) buffered chunks to new surface for pane \(paneId)")
+            for data in pending {
+                surface.feedData(data)
+            }
+        }
         
         return surface
     }
