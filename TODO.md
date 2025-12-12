@@ -56,6 +56,7 @@ See TMUX_INTEGRATION.md for full architecture.
 - [x] **Pane creation handling** - Creates surfaces on-demand when new panes appear
 - [x] **Transition back to single-pane** - TmuxSessionManager owns surfaces; seamless transition
 - [x] **Surface ownership model** - Option A architecture: TmuxSessionManager owns ALL surfaces
+- [x] **Multi-pane scrollback restore** - Proactively restore scrollback for all panes on reconnect
 
 #### Phase 3: Multiple tmux Windows & Ghostty Keybindings 🔄 IN PROGRESS
 - [x] Window list UI (TmuxWindowPickerView - horizontal tab bar)
