@@ -2165,14 +2165,13 @@ extension Ghostty {
                     }
                     
                     // Window management (close)
+                    // Note: Cmd+Option+W conflicts with iPadOS system shortcut (quits app)
+                    // Note: Cmd+W (closeSurface) is handled by SwiftUI menu for disconnect
+                    // Using Cmd+Shift+W for close window/tab instead
                     else if char == "w" && hasShift && !hasOption {
-                        // Cmd+Shift+W - Close Window
+                        // Cmd+Shift+W - Close current tmux window
                         action = .closeWindow
-                    } else if char == "w" && hasOption && !hasShift {
-                        // Cmd+Option+W - Close Tab
-                        action = .closeTab
                     }
-                    // Note: Cmd+W (closeSurface) is handled by SwiftUI menu
                     
                     // If we have an action, try to handle it
                     if let action = action {
