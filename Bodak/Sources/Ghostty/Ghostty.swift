@@ -18,6 +18,46 @@ import Combine
 enum Ghostty {
     /// Logger for Ghostty-related operations
     static let logger = Logger(subsystem: "com.bodak", category: "Ghostty")
+    
+    // MARK: - Keyboard Shortcut Actions (matches Ghostty macOS keybindings)
+    
+    /// Actions that can be triggered by keyboard shortcuts
+    /// These mirror Ghostty's macOS keybinding actions
+    enum ShortcutAction {
+        // Window/Tab management
+        case newWindow
+        case newTab
+        case closeSurface
+        case closeTab
+        case closeWindow
+        
+        // Split management
+        case newSplitRight      // Cmd+D
+        case newSplitDown       // Cmd+Shift+D
+        case gotoSplitPrevious  // Cmd+[
+        case gotoSplitNext      // Cmd+]
+        case gotoSplitUp        // Cmd+Option+Up
+        case gotoSplitDown      // Cmd+Option+Down
+        case gotoSplitLeft      // Cmd+Option+Left
+        case gotoSplitRight     // Cmd+Option+Right
+        case toggleSplitZoom    // Cmd+Shift+Enter
+        case equalizeSplits     // Cmd+Ctrl+=
+        
+        // Tab navigation
+        case previousTab        // Cmd+Shift+[
+        case nextTab            // Cmd+Shift+]
+        case gotoTab(Int)       // Cmd+1-8
+        case lastTab            // Cmd+9
+    }
+    
+    /// Delegate protocol for handling app-level keyboard shortcuts
+    /// Implement this to receive Ghostty-style keyboard shortcuts
+    protocol ShortcutDelegate: AnyObject {
+        /// Called when a keyboard shortcut is triggered
+        /// - Parameter action: The shortcut action to perform
+        /// - Returns: true if the action was handled, false to pass through
+        func handleShortcut(_ action: ShortcutAction) -> Bool
+    }
 }
 
 // MARK: - Simple Logger (since os.Logger requires iOS 14+)
@@ -964,6 +1004,9 @@ extension Ghostty {
         
         /// Callback for when the terminal grid size changes (cols, rows)
         var onResize: ((Int, Int) -> Void)?
+        
+        /// Delegate for handling Ghostty-style keyboard shortcuts (Cmd+D, etc.)
+        weak var shortcutDelegate: ShortcutDelegate?
         
         /// Focus state tracking
         private var hasFocusState: Bool = false
@@ -2054,17 +2097,95 @@ extension Ghostty {
         
         /// Handle hardware keyboard key presses (Magic Keyboard, etc.)
         /// Uses proper Ghostty keyboard API for correct terminal encoding
+        /// Implements Ghostty macOS keybindings for splits/tabs/windows
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
             for press in presses {
                 guard let uiKey = press.key else { continue }
                 
-                // Check for Command (Cmd) modifier for app shortcuts
-                // Note: Cmd+C, Cmd+V, Cmd+A, Cmd+F, Cmd+G are handled by SwiftUI menu system
-                // (via BodakApp.swift .commands), so we don't intercept them here
-                // Only intercept shortcuts NOT in the menu system
                 let hasCmd = uiKey.modifierFlags.contains(.command)
+                let hasShift = uiKey.modifierFlags.contains(.shift)
+                let hasOption = uiKey.modifierFlags.contains(.alternate)
+                let hasCtrl = uiKey.modifierFlags.contains(.control)
+                let char = uiKey.charactersIgnoringModifiers.lowercased()
+                let keyCode = uiKey.keyCode
+                
+                // MARK: - Ghostty macOS Keybindings (via shortcutDelegate)
+                
+                if hasCmd, let delegate = shortcutDelegate {
+                    var action: ShortcutAction? = nil
+                    
+                    // Split management
+                    if char == "d" && !hasShift && !hasOption {
+                        // Cmd+D - Split Right
+                        action = .newSplitRight
+                    } else if char == "d" && hasShift && !hasOption {
+                        // Cmd+Shift+D - Split Down
+                        action = .newSplitDown
+                    } else if char == "[" && !hasShift && !hasOption {
+                        // Cmd+[ - Previous Split
+                        action = .gotoSplitPrevious
+                    } else if char == "]" && !hasShift && !hasOption {
+                        // Cmd+] - Next Split
+                        action = .gotoSplitNext
+                    } else if hasOption && !hasShift {
+                        // Cmd+Option+Arrow - Navigate splits
+                        if keyCode == .keyboardUpArrow {
+                            action = .gotoSplitUp
+                        } else if keyCode == .keyboardDownArrow {
+                            action = .gotoSplitDown
+                        } else if keyCode == .keyboardLeftArrow {
+                            action = .gotoSplitLeft
+                        } else if keyCode == .keyboardRightArrow {
+                            action = .gotoSplitRight
+                        }
+                    } else if hasCtrl && char == "=" {
+                        // Cmd+Ctrl+= - Equalize Splits
+                        action = .equalizeSplits
+                    } else if hasShift && keyCode == .keyboardReturnOrEnter {
+                        // Cmd+Shift+Enter - Toggle Split Zoom
+                        action = .toggleSplitZoom
+                    }
+                    
+                    // Tab management
+                    else if char == "[" && hasShift {
+                        // Cmd+Shift+[ - Previous Tab
+                        action = .previousTab
+                    } else if char == "]" && hasShift {
+                        // Cmd+Shift+] - Next Tab
+                        action = .nextTab
+                    } else if char == "t" && !hasShift {
+                        // Cmd+T - New Tab (tmux window)
+                        action = .newTab
+                    } else if char == "9" {
+                        // Cmd+9 - Last Tab
+                        action = .lastTab
+                    } else if let digit = Int(char), digit >= 1 && digit <= 8 {
+                        // Cmd+1-8 - Go to tab N
+                        action = .gotoTab(digit)
+                    }
+                    
+                    // Window management (close)
+                    else if char == "w" && hasShift && !hasOption {
+                        // Cmd+Shift+W - Close Window
+                        action = .closeWindow
+                    } else if char == "w" && hasOption && !hasShift {
+                        // Cmd+Option+W - Close Tab
+                        action = .closeTab
+                    }
+                    // Note: Cmd+W (closeSurface) is handled by SwiftUI menu
+                    
+                    // If we have an action, try to handle it
+                    if let action = action {
+                        if delegate.handleShortcut(action) {
+                            // Action was handled, don't process further
+                            return
+                        }
+                    }
+                }
+                
+                // MARK: - Local Ghostty Shortcuts (font size, clear screen)
+                
                 if hasCmd {
-                    let char = uiKey.charactersIgnoringModifiers.lowercased()
                     switch char {
                     case "k":
                         // Cmd+K - Clear Screen (via Ghostty binding action)
@@ -2073,19 +2194,21 @@ extension Ghostty {
                                 ghostty_surface_binding_action(surface, cstr, 12)
                             }
                         }
-                        continue
+                        return
                     case "0":
                         // Cmd+0 - Reset Font Size
                         resetFontSize()
-                        continue
+                        return
                     case "+", "=":
                         // Cmd++ - Increase Font Size
-                        increaseFontSize()
-                        continue
+                        if !hasShift {
+                            increaseFontSize()
+                            return
+                        }
                     case "-":
                         // Cmd+- - Decrease Font Size
                         decreaseFontSize()
-                        continue
+                        return
                     case "c", "v", "a", "f", "g", "w", "n", ",":
                         // These are handled by SwiftUI menu system - let them pass through
                         // Copy, Paste, Select All, Find, Find Next, Disconnect, New Connection, Preferences
@@ -2096,15 +2219,13 @@ extension Ghostty {
                     }
                 }
                 
-                // Build KeyEvent and send via Ghostty API
-                // This properly handles all modifiers including Alt/Option
+                // MARK: - Terminal Input (via Ghostty API)
+                
                 guard let surface = surface else { continue }
                 
-                // Debug: Log all key presses with modifiers
-                let hasCtrl = uiKey.modifierFlags.contains(.control)
-                let char = uiKey.charactersIgnoringModifiers
+                // Debug: Log Ctrl key presses
                 if hasCtrl {
-                    NSLog("🎹 Hardware key with Ctrl: char='\(char)' keyCode=\(uiKey.keyCode)")
+                    NSLog("🎹 Hardware key with Ctrl: char='\(char)' keyCode=\(keyCode)")
                 }
                 
                 // Add Ctrl toggle state to modifiers if active

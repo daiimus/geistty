@@ -57,11 +57,20 @@ See TMUX_INTEGRATION.md for full architecture.
 - [x] **Transition back to single-pane** - TmuxSessionManager owns surfaces; seamless transition
 - [x] **Surface ownership model** - Option A architecture: TmuxSessionManager owns ALL surfaces
 
-#### Phase 3: Multiple tmux Windows 🔲 TODO
-- [ ] Window list UI (sidebar or tab bar)
-- [ ] Handle %window-add/%window-close notifications
-- [ ] Window switching via select-window command
-- [ ] Per-window split tree tracking (already stored in windowSplitTrees)
+#### Phase 3: Multiple tmux Windows & Ghostty Keybindings 🔄 IN PROGRESS
+- [x] Window list UI (TmuxWindowPickerView - horizontal tab bar)
+- [x] Window switching via selectWindow command
+- [x] Per-window split tree tracking (windowSplitTrees dictionary)
+- [x] Window close support via swipe gesture
+- [x] **Ghostty macOS Keybindings** - Full hardware keyboard support:
+  - [x] ShortcutAction enum matching Ghostty actions
+  - [x] ShortcutDelegate protocol for routing
+  - [x] pressesBegan handler for Cmd+key shortcuts
+  - [x] Split management: Cmd+D (right), Cmd+Shift+D (down)
+  - [x] Split navigation: Cmd+[ / ], Cmd+Option+Arrows
+  - [x] Tab/Window: Cmd+T, Cmd+1-9, Cmd+Shift+[/], Cmd+W variants
+  - [x] Split zoom: Cmd+Shift+Enter, Cmd+Ctrl+= (equalize)
+- [ ] Handle %window-add/%window-close notifications (partial - have close)
 - [ ] Window rename support
 
 #### Phase 4: iPadOS Window Integration 🔲 FUTURE

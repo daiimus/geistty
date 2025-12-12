@@ -1436,7 +1436,7 @@ class RawTerminalUIViewController: UIViewController {
         }
         
         // Factory creates Ghostty surfaces
-        let factory: (String) -> Ghostty.SurfaceView = { [weak ghosttyApp] paneId in
+        let factory: (String) -> Ghostty.SurfaceView = { [weak ghosttyApp, weak self] paneId in
             guard let ghosttyApp = ghosttyApp, let app = ghosttyApp.app else {
                 fatalError("Ghostty app deallocated before surface factory called")
             }
@@ -1449,6 +1449,9 @@ class RawTerminalUIViewController: UIViewController {
             let surface = Ghostty.SurfaceView(app, baseConfig: config)
             let themeBg = ThemeManager.shared.selectedTheme.background
             surface.backgroundColor = UIColor(themeBg)
+            
+            // Wire up shortcut delegate for Ghostty keybindings
+            surface.shortcutDelegate = self
             
             return surface
         }
@@ -1494,6 +1497,9 @@ class RawTerminalUIViewController: UIViewController {
         let themeBg = ThemeManager.shared.selectedTheme.background
         surface.backgroundColor = UIColor(themeBg)
         
+        // Wire up shortcut delegate for Ghostty keybindings
+        surface.shortcutDelegate = self
+        
         // Wire up callbacks directly to SSH (non-tmux mode)
         surface.onWrite = { [weak self] data in
             Task { @MainActor in
@@ -1514,6 +1520,11 @@ class RawTerminalUIViewController: UIViewController {
     /// Display a surface in the view hierarchy
     private func displaySurface(_ surface: Ghostty.SurfaceView) {
         self.surfaceView = surface
+        
+        // Ensure shortcut delegate is wired up (may already be set by factory)
+        if surface.shortcutDelegate == nil {
+            surface.shortcutDelegate = self
+        }
         
         surface.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(surface)
@@ -1879,5 +1890,104 @@ class PassThroughView: UIView {
             return nil
         }
         return hitView
+    }
+}
+
+// MARK: - Ghostty Shortcut Delegate
+
+extension RawTerminalUIViewController: Ghostty.ShortcutDelegate {
+    /// Handle Ghostty-style keyboard shortcuts
+    /// Routes shortcuts to TmuxSessionManager for split/tab/window management
+    func handleShortcut(_ action: Ghostty.ShortcutAction) -> Bool {
+        guard let tmuxManager = viewModel?.tmuxManager else {
+            // Not in tmux mode - shortcuts not applicable
+            logger.debug("⌨️ Shortcut ignored - no tmux manager")
+            return false
+        }
+        
+        logger.info("⌨️ Handling shortcut: \(String(describing: action))")
+        
+        switch action {
+        // MARK: - Split Management
+        case .newSplitRight:
+            tmuxManager.splitHorizontal()
+            return true
+            
+        case .newSplitDown:
+            tmuxManager.splitVertical()
+            return true
+            
+        case .gotoSplitPrevious:
+            tmuxManager.previousPane()
+            return true
+            
+        case .gotoSplitNext:
+            tmuxManager.nextPane()
+            return true
+            
+        case .gotoSplitUp:
+            tmuxManager.navigatePane(.up)
+            return true
+            
+        case .gotoSplitDown:
+            tmuxManager.navigatePane(.down)
+            return true
+            
+        case .gotoSplitLeft:
+            tmuxManager.navigatePane(.left)
+            return true
+            
+        case .gotoSplitRight:
+            tmuxManager.navigatePane(.right)
+            return true
+            
+        case .toggleSplitZoom:
+            tmuxManager.toggleTmuxZoom()
+            return true
+            
+        case .equalizeSplits:
+            tmuxManager.equalizeSplits()
+            return true
+            
+        // MARK: - Tab/Window Management
+        case .newTab:
+            tmuxManager.newWindow()
+            return true
+            
+        case .previousTab:
+            tmuxManager.previousWindow()
+            return true
+            
+        case .nextTab:
+            tmuxManager.nextWindow()
+            return true
+            
+        case .lastTab:
+            tmuxManager.lastWindow()
+            return true
+            
+        case .gotoTab(let index):
+            tmuxManager.selectWindowByIndex(index)
+            return true
+            
+        case .closeTab:
+            tmuxManager.closeWindow()
+            return true
+            
+        case .closeWindow:
+            // On iOS, close window means close the tab (tmux window)
+            tmuxManager.closeWindow()
+            return true
+            
+        case .closeSurface:
+            // Close current pane
+            tmuxManager.closePane()
+            return true
+            
+        case .newWindow:
+            // On iOS, new window means new tmux window (tab)
+            tmuxManager.newWindow()
+            return true
+        }
     }
 }
