@@ -426,6 +426,13 @@ class TmuxSessionManager: ObservableObject {
             currentSplitTree = newTree
             logger.info("📐 ✅ Updated currentSplitTree: \(newTree.paneIds.count) panes, isSplit=\(newTree.isSplit)")
             
+            // Proactively restore scrollback for all panes in this layout
+            // This handles the case where we reconnect to a multi-pane session
+            for paneNum in newTree.paneIds {
+                let paneId = "%\(paneNum)"
+                restorePaneHistoryIfNeeded(paneId: paneId)
+            }
+            
             // If we're down to a single pane, update focused pane ID and ensure primarySurface is set
             if newTree.paneIds.count == 1 {
                 let remainingPaneId = "%\(newTree.paneIds[0])"
