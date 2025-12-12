@@ -55,6 +55,9 @@ class TmuxSessionManager: ObservableObject {
     /// This is always kept alive even when in multi-pane mode
     @Published private(set) var primarySurface: Ghostty.SurfaceView?
     
+    /// Panes that have had their history restored (to avoid duplicate restores)
+    private var restoredPanes: Set<String> = []
+    
     /// Surface creation factory (injected before activation)
     /// This creates Ghostty surfaces with proper configuration
     private var surfaceFactory: ((String) -> Ghostty.SurfaceView)?
@@ -120,6 +123,7 @@ class TmuxSessionManager: ObservableObject {
         panes.removeAll()
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
+        restoredPanes.removeAll()
     }
     
     // MARK: - State Queries
@@ -569,7 +573,28 @@ class TmuxSessionManager: ObservableObject {
             }
         }
         
+        // Restore scrollback history for this pane if not already done
+        restorePaneHistoryIfNeeded(paneId: paneId)
+        
         return surface
+    }
+    
+    /// Restore scrollback history for a pane if not already restored
+    private func restorePaneHistoryIfNeeded(paneId: String) {
+        guard !restoredPanes.contains(paneId) else {
+            logger.debug("📜 Pane \(paneId) history already restored, skipping")
+            return
+        }
+        
+        guard let client = controlClient, let write = writeToSSH else {
+            logger.warning("📜 Cannot restore pane history - control client or write not available")
+            return
+        }
+        
+        logger.info("📜 Restoring scrollback history for pane \(paneId)")
+        restoredPanes.insert(paneId)
+        
+        client.restorePaneHistory(paneId: paneId, via: write)
     }
     
     /// Configure surface management with factory and handlers

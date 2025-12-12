@@ -505,12 +505,8 @@ extension SSHSession: TmuxControlClientDelegate {
             pendingInputQueue.removeAll()
         }
         
-        // Restore session content (scrollback history) FIRST
-        // This must be called before enablePauseMode so the isWaitingForSessionRestore
-        // flag correctly matches the capture-pane response (not the refresh-client response)
-        client.restoreSession { [weak self] command in
-            self?.connection?.write(command)
-        }
+        // Note: Session history restoration is now handled per-pane in TmuxSessionManager
+        // when surfaces are created. This ensures all panes get their history, not just %0.
         
         // Enable pause mode for iOS app lifecycle handling (tmux 3.2+)
         // This buffers output when the app is backgrounded
