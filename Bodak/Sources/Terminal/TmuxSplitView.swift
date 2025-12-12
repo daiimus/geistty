@@ -224,16 +224,16 @@ struct TmuxSplitTreeView<PaneContent: View>: View {
     /// Called when a pane is double-tapped (toggle zoom)
     let onToggleZoom: (Int) -> Void  // paneId
     
-    /// View builder for pane content
-    let paneContent: (Int) -> PaneContent
+    /// View builder for pane content (paneId, cols, rows)
+    let paneContent: (Int, Int, Int) -> PaneContent
     
     var body: some View {
         if let zoomed = tree.zoomed {
             // Zoomed mode - show only the zoomed pane
             switch zoomed {
-            case .leaf(let paneId):
-                ZoomablePane(paneId: paneId, onToggleZoom: onToggleZoom) {
-                    paneContent(paneId)
+            case .leaf(let info):
+                ZoomablePane(paneId: info.paneId, onToggleZoom: onToggleZoom) {
+                    paneContent(info.paneId, info.cols, info.rows)
                 }
                 .accessibilityLabel("Zoomed pane (double-tap to unzoom)")
             case .split(let split):
@@ -274,16 +274,16 @@ private struct TmuxSplitNodeView<PaneContent: View>: View {
     let onResize: (Int, Double) -> Void
     let onEqualize: () -> Void
     let onToggleZoom: (Int) -> Void
-    let paneContent: (Int) -> PaneContent
+    let paneContent: (Int, Int, Int) -> PaneContent  // (paneId, cols, rows)
     
     var body: some View {
         switch node {
-        case .leaf(let paneId):
-            ZoomablePane(paneId: paneId, onToggleZoom: onToggleZoom) {
-                paneContent(paneId)
+        case .leaf(let info):
+            ZoomablePane(paneId: info.paneId, onToggleZoom: onToggleZoom) {
+                paneContent(info.paneId, info.cols, info.rows)
             }
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Terminal pane \(paneId)")
+            .accessibilityLabel("Terminal pane \(info.paneId)")
             
         case .split(let split):
             let direction: SplitViewDirection = split.direction == .horizontal ? .horizontal : .vertical
@@ -360,8 +360,8 @@ struct TmuxSplitView_Previews: PreviewProvider {
         let tree = TmuxSplitTree(root: .split(.init(
             direction: .horizontal,
             ratio: 0.5,
-            left: .leaf(paneId: 0),
-            right: .leaf(paneId: 1)
+            left: .leaf(paneId: 0, cols: 40, rows: 24),
+            right: .leaf(paneId: 1, cols: 40, rows: 24)
         )))
         
         TmuxSplitTreeView(
@@ -370,11 +370,12 @@ struct TmuxSplitView_Previews: PreviewProvider {
             onResize: { _, _ in },
             onEqualize: { },
             onToggleZoom: { paneId in print("Zoom toggled: \(paneId)") },
-            paneContent: { paneId in
+            paneContent: { paneId, cols, rows in
                 ZStack {
                     Color(white: 0.1)
-                    Text("Pane %\(paneId)")
+                    Text("Pane %\(paneId)\n\(cols)x\(rows)")
                         .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
                 }
             }
         )
@@ -384,12 +385,12 @@ struct TmuxSplitView_Previews: PreviewProvider {
         let nestedTree = TmuxSplitTree(root: .split(.init(
             direction: .horizontal,
             ratio: 0.5,
-            left: .leaf(paneId: 0),
+            left: .leaf(paneId: 0, cols: 40, rows: 24),
             right: .split(.init(
                 direction: .vertical,
                 ratio: 0.5,
-                left: .leaf(paneId: 1),
-                right: .leaf(paneId: 2)
+                left: .leaf(paneId: 1, cols: 40, rows: 12),
+                right: .leaf(paneId: 2, cols: 40, rows: 12)
             ))
         )))
         
@@ -399,11 +400,12 @@ struct TmuxSplitView_Previews: PreviewProvider {
             onResize: { _, _ in },
             onEqualize: { },
             onToggleZoom: { paneId in print("Zoom toggled: \(paneId)") },
-            paneContent: { paneId in
+            paneContent: { paneId, cols, rows in
                 ZStack {
                     Color(white: 0.1)
-                    Text("Pane %\(paneId)")
+                    Text("Pane %\(paneId)\n\(cols)x\(rows)")
                         .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
                 }
             }
         )

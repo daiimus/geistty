@@ -222,6 +222,12 @@ class TmuxSessionManager: ObservableObject {
             if let window = TmuxWindow.parse(String(line)) {
                 windows[window.id] = window
                 logger.debug("Parsed window: \(window.id) '\(window.name)'")
+                
+                // Update split tree from layout if available
+                if let layout = window.layout,
+                   let parsedLayout = try? TmuxLayout.parseWithChecksum(layout) {
+                    updateSplitTree(from: parsedLayout, for: window.id)
+                }
             }
         }
     }

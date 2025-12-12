@@ -2742,6 +2742,39 @@ extension Ghostty {
             return ghostty_surface_size(surface)
         }
         
+        /// Force the surface to use an exact grid size.
+        ///
+        /// This calculates the exact pixel dimensions needed for the given
+        /// character grid and updates the surface size. Use this when you
+        /// need the terminal grid to match an external constraint (like tmux).
+        ///
+        /// - Parameters:
+        ///   - cols: Target column count
+        ///   - rows: Target row count
+        /// - Returns: true if the size was set, false if cell size is not yet available
+        @discardableResult
+        func setExactGridSize(cols: Int, rows: Int) -> Bool {
+            guard let surface = surface,
+                  let size = surfaceSize,
+                  size.cell_width_px > 0,
+                  size.cell_height_px > 0 else {
+                return false
+            }
+            
+            // Calculate exact pixel dimensions for the target grid
+            let scale = contentScaleFactor
+            let exactWidthPx = UInt32(cols) * size.cell_width_px
+            let exactHeightPx = UInt32(rows) * size.cell_height_px
+            
+            logger.debug("📐 Setting exact grid size: \(cols)x\(rows) = \(exactWidthPx)x\(exactHeightPx)px (cell: \(size.cell_width_px)x\(size.cell_height_px))")
+            
+            // Update content scale and surface size
+            ghostty_surface_set_content_scale(surface, scale, scale)
+            ghostty_surface_set_size(surface, exactWidthPx, exactHeightPx)
+            
+            return true
+        }
+        
         // MARK: - UIView Overrides
         
         override class var layerClass: AnyClass {

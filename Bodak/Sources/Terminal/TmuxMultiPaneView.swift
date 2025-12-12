@@ -38,8 +38,13 @@ struct TmuxMultiPaneView: View {
             onToggleZoom: { paneId in
                 sessionManager.toggleZoom(paneId: paneId)
             },
-            paneContent: { paneId in
-                TmuxPaneSurfaceView(paneId: paneId, sessionManager: sessionManager)
+            paneContent: { paneId, cols, rows in
+                TmuxPaneSurfaceView(
+                    paneId: paneId,
+                    cols: cols,
+                    rows: rows,
+                    sessionManager: sessionManager
+                )
             }
         )
     }
@@ -50,8 +55,13 @@ struct TmuxMultiPaneView: View {
 /// This view gets the surface from the session manager and wraps it
 /// in a UIViewRepresentable for SwiftUI rendering. Tapping the pane
 /// selects it and focuses its surface.
+///
+/// The cols/rows parameters are the tmux-reported character dimensions
+/// and can be used to constrain the surface to exact character cell boundaries.
 struct TmuxPaneSurfaceView: View {
     let paneId: Int
+    let cols: Int
+    let rows: Int
     @ObservedObject var sessionManager: TmuxSessionManager
     
     /// Whether this pane is currently focused
@@ -64,6 +74,8 @@ struct TmuxPaneSurfaceView: View {
         if let surface = sessionManager.getSurface(forNumericId: paneId) {
             GhosttyPaneSurfaceWrapper(
                 surface: surface,
+                cols: cols,
+                rows: rows,
                 isFocused: isFocused,
                 onTap: {
                     selectPane()
@@ -99,20 +111,31 @@ struct TmuxPaneSurfaceView: View {
     }
 }
 
-/// UIViewRepresentable wrapper for a Ghostty.SurfaceView with focus support
+/// UIViewRepresentable wrapper for a Ghostty.SurfaceView with focus support.
+///
+/// This wrapper accepts the tmux-reported character dimensions (cols/rows)
+/// and constrains the surface to match exactly when cell sizes are available.
 struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
     let surface: Ghostty.SurfaceView
+    let cols: Int
+    let rows: Int
     let isFocused: Bool
     let onTap: () -> Void
     
     func makeUIView(context: Context) -> GhosttyPaneSurfaceContainerView {
         let container = GhosttyPaneSurfaceContainerView()
         container.surface = surface
+        container.targetCols = cols
+        container.targetRows = rows
         container.onTap = onTap
         return container
     }
     
     func updateUIView(_ container: GhosttyPaneSurfaceContainerView, context: Context) {
+        // Update target dimensions if changed
+        container.targetCols = cols
+        container.targetRows = rows
+        
         // Update focus state
         if isFocused && !surface.isFirstResponder {
             surface.focusDidChange(true)
@@ -124,8 +147,26 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
     }
 }
 
-/// Container view for a Ghostty surface that handles tap gestures
+/// Container view for a Ghostty surface that handles tap gestures and size constraints.
+///
+/// This container can constrain the Ghostty surface to exact character cell boundaries
+/// using the targetCols/targetRows properties. It directly tells Ghostty what grid size
+/// to use via setExactGridSize().
 class GhosttyPaneSurfaceContainerView: UIView {
+    /// Target columns (character width) from tmux layout
+    var targetCols: Int = 0 {
+        didSet {
+            if targetCols != oldValue { setNeedsLayout() }
+        }
+    }
+    
+    /// Target rows (character height) from tmux layout
+    var targetRows: Int = 0 {
+        didSet {
+            if targetRows != oldValue { setNeedsLayout() }
+        }
+    }
+    
     var surface: Ghostty.SurfaceView? {
         didSet {
             oldValue?.removeFromSuperview()
@@ -134,6 +175,7 @@ class GhosttyPaneSurfaceContainerView: UIView {
                 surface.removeFromSuperview()
                 surface.isHidden = false
                 
+                // Fill the container - exact size is handled by setExactGridSize
                 surface.translatesAutoresizingMaskIntoConstraints = false
                 addSubview(surface)
                 NSLayoutConstraint.activate([
@@ -142,6 +184,9 @@ class GhosttyPaneSurfaceContainerView: UIView {
                     surface.leadingAnchor.constraint(equalTo: leadingAnchor),
                     surface.trailingAnchor.constraint(equalTo: trailingAnchor)
                 ])
+                
+                // Set the grid size after the surface is added
+                updateGridSize()
             }
         }
     }
@@ -150,10 +195,36 @@ class GhosttyPaneSurfaceContainerView: UIView {
     
     override init(frame: CGRect) {
         super.init(frame: frame)
+        clipsToBounds = true
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        clipsToBounds = true
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Re-evaluate grid size when bounds change
+        updateGridSize()
+    }
+    
+    /// Update the Ghostty surface to use the exact grid size from tmux.
+    private func updateGridSize() {
+        guard let surface = surface,
+              targetCols > 0,
+              targetRows > 0 else {
+            return
+        }
+        
+        // Tell Ghostty to use the exact grid size
+        let success = surface.setExactGridSize(cols: targetCols, rows: targetRows)
+        if !success {
+            // Cell size not available yet - try again on next layout
+            DispatchQueue.main.async { [weak self] in
+                self?.setNeedsLayout()
+            }
+        }
     }
     
     // Override hitTest to trigger focus change whenever this pane is touched
