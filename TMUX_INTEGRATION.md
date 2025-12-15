@@ -2,7 +2,7 @@
 
 ## Vision
 
-Bodak provides a **native Ghostty experience** for iOS/iPadOS that seamlessly integrates with tmux. Instead of fighting against tmux's window/pane model, we embrace it - mapping tmux concepts to iPadOS UI concepts.
+Geistty provides a **native Ghostty experience** for iOS/iPadOS that seamlessly integrates with tmux. Instead of fighting against tmux's window/pane model, we embrace it - mapping tmux concepts to iPadOS UI concepts.
 
 ## Core Principles
 
@@ -18,13 +18,13 @@ Bodak provides a **native Ghostty experience** for iOS/iPadOS that seamlessly in
 | Session | App State / Connection | One SSH connection = one tmux session |
 | Window | iPad Scene/Window | Stage Manager windows, Split View |
 | Pane | Ghostty Surface | One surface per pane |
-| Scrollback | Ghostty Scrollback | Owned by Bodak (via %output) |
+| Scrollback | Ghostty Scrollback | Owned by Geistty (via %output) |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Bodak App                                                           │
+│ Geistty App                                                           │
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │ TmuxSessionManager (NEW)                                     │   │
@@ -159,7 +159,7 @@ All notifications handled:
 #### 4.2 User Activities
 ```swift
 // NSUserActivity for state restoration
-let activity = NSUserActivity(activityType: "com.bodak.tmux-window")
+let activity = NSUserActivity(activityType: "com.geistty.tmux-window")
 activity.userInfo = [
     "sessionName": "main",
     "windowId": "@0"
@@ -174,7 +174,7 @@ activity.userInfo = [
 
 ### Phase 5: Pane Splitting Commands 🔲 FUTURE
 
-**Goal**: Support creating splits from Bodak UI.
+**Goal**: Support creating splits from Geistty UI.
 
 #### 5.1 Split Commands
 - **View → Split Horizontally** - `split-window -h`
@@ -310,8 +310,8 @@ send-keys -H -t %pane hex      # Send input to specific pane
 
 ### Scenario 3: Session Persistence
 1. Connect, create windows/panes
-2. Force-quit Bodak
-3. Relaunch Bodak
+2. Force-quit Geistty
+3. Relaunch Geistty
 4. Reconnect to same server
 5. Should restore all windows/panes
 
@@ -342,5 +342,5 @@ send-keys -H -t %pane hex      # Send input to specific pane
 1. **Layout rendering**: Use SwiftUI container views or custom CALayer arrangement?
 2. **Surface lifecycle**: Create surfaces on-demand or pool them?
 3. **Memory**: How many Ghostty surfaces can we reasonably maintain?
-4. **Scrollback**: Per-pane scrollback in Bodak or query tmux?
+4. **Scrollback**: Per-pane scrollback in Geistty or query tmux?
 5. **Copy/paste**: Native iOS or tmux copy mode?

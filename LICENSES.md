@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-Bodak includes the following open source components. We gratefully acknowledge their authors.
+Geistty includes the following open source components. We gratefully acknowledge their authors.
 
 ---
 
@@ -114,7 +114,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ## Fonts
 
-All fonts included in Bodak are licensed under the **SIL Open Font License, Version 1.1**.
+All fonts included in Geistty are licensed under the **SIL Open Font License, Version 1.1**.
 
 ### Departure Mono
 - **Copyright**: © 2022–2024 Helena Zhang

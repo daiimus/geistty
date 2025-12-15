@@ -5,9 +5,9 @@ This document contains the metadata and assets needed for App Store submission.
 ## App Information
 
 ### Basic Info
-- **App Name**: Bodak
+- **App Name**: Geistty
 - **Subtitle**: SSH Terminal for iOS (30 char limit)
-- **Bundle ID**: com.bodak.app
+- **Bundle ID**: com.geistty.app
 - **Primary Category**: Developer Tools
 - **Secondary Category**: Utilities
 - **Content Rating**: 4+ (No objectionable content)
@@ -15,7 +15,7 @@ This document contains the metadata and assets needed for App Store submission.
 ### Version Info
 - **Version**: 0.2.0
 - **Build**: 2
-- **Copyright**: © 2024 Bodak
+- **Copyright**: © 2024 Geistty
 
 ## App Description
 
@@ -25,10 +25,10 @@ Professional SSH terminal client powered by Ghostty for iOS and iPad.
 ### Full Description (4000 char limit)
 
 ```
-Bodak is a powerful SSH terminal client for iOS, bringing professional-grade terminal emulation to your iPhone and iPad.
+Geistty is a powerful SSH terminal client for iOS, bringing professional-grade terminal emulation to your iPhone and iPad.
 
 POWERED BY GHOSTTY
-Built on Ghostty's acclaimed terminal emulator core, Bodak delivers:
+Built on Ghostty's acclaimed terminal emulator core, Geistty delivers:
 • Fast, accurate terminal emulation
 • GPU-accelerated rendering
 • Full Unicode and emoji support
@@ -128,7 +128,7 @@ Content: See PRIVACY.md in this repository
 
 ## Support URL
 
-GitHub repository: https://github.com/yourusername/bodak
+GitHub repository: https://github.com/yourusername/geistty
 Or create a simple landing page
 
 ## App Review Information
@@ -140,7 +140,7 @@ If reviewers need to test SSH functionality, provide:
 
 ### Review Notes
 ```
-Bodak is an SSH terminal client that requires an SSH server to connect to. 
+Geistty is an SSH terminal client that requires an SSH server to connect to. 
 For testing, reviewers can:
 1. Set up a local SSH server (if available)
 2. Connect to a personal/test server

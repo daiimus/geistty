@@ -1,10 +1,10 @@
-# Agent Development Guide for Bodak
+# Agent Development Guide for Geistty
 
-A guide for [coding agents](https://agents.md/) working on the Bodak iOS SSH terminal app.
+A guide for [coding agents](https://agents.md/) working on the Geistty iOS SSH terminal app.
 
 ## Project Overview
 
-Bodak is an iOS SSH terminal app built on top of Ghostty's terminal emulator. It uses a custom fork of Ghostty with an External termio backend that enables terminal emulation without a local PTY (which iOS doesn't support).
+Geistty is an iOS SSH terminal app built on top of Ghostty's terminal emulator. It uses a custom fork of Ghostty with an External termio backend that enables terminal emulation without a local PTY (which iOS doesn't support).
 
 ## Development Philosophy
 
@@ -12,19 +12,19 @@ We're open to bleeding-edge solutions, but **favor approaches that align with th
 
 ## Repository Structure
 
-- **Main App**: `Bodak/` - Xcode project and Swift sources
+- **Main App**: `Geistty/` - Xcode project and Swift sources
 - **Ghostty Fork**: `../ghostty/` - Custom ghostty with iOS support (branch: `ios-external-backend`)
 - **libxev Fork**: `../libxev-ios/` - Custom libxev with iOS kqueue support
 
 ## Commands
 
-### Building Bodak
+### Building Geistty
 ```bash
 # Build for device
-xcodebuild -project Bodak/Bodak.xcodeproj -scheme Bodak -destination "id=DEVICE_ID" -allowProvisioningUpdates
+xcodebuild -project Geistty/Geistty.xcodeproj -scheme Geistty -destination "id=DEVICE_ID" -allowProvisioningUpdates
 
 # Build for simulator
-xcodebuild -project Bodak/Bodak.xcodeproj -scheme Bodak -destination "platform=iOS Simulator,name=iPhone 15"
+xcodebuild -project Geistty/Geistty.xcodeproj -scheme Geistty -destination "platform=iOS Simulator,name=iPhone 15"
 ```
 
 ### Rebuilding GhosttyKit (when Ghostty changes)
@@ -32,11 +32,11 @@ xcodebuild -project Bodak/Bodak.xcodeproj -scheme Bodak -destination "platform=i
 cd ../ghostty
 zig build -Demit-xcframework=true -Dxcframework-target=universal
 
-# Copy to Bodak
-cp -R macos/GhosttyKit.xcframework ../bodak/Bodak/Frameworks/
+# Copy to Geistty
+cp -R macos/GhosttyKit.xcframework ../geistty/Geistty/Frameworks/
 
 # IMPORTANT: Rename module.modulemap to avoid conflicts with CSSH
-for dir in ../bodak/Bodak/Frameworks/GhosttyKit.xcframework/*/Headers/; do
+for dir in ../geistty/Geistty/Frameworks/GhosttyKit.xcframework/*/Headers/; do
     [ -f "${dir}module.modulemap" ] && mv "${dir}module.modulemap" "${dir}GhosttyKit.modulemap"
 done
 ```
@@ -44,7 +44,7 @@ done
 ## Directory Structure
 
 ```
-Bodak/
+Geistty/
 ├── Sources/
 │   ├── App/              # App entry point, main views
 │   ├── Auth/             # SSH authentication, credentials, keychain
@@ -72,7 +72,7 @@ Bodak/
 
 ## Ghostty C API Usage
 
-Bodak uses the Ghostty C API for terminal emulation:
+Geistty uses the Ghostty C API for terminal emulation:
 
 ```swift
 // Create config with settings
@@ -126,7 +126,7 @@ Live font updates use `ghostty_surface_update_config()` with a new config.
 
 ## tmux Integration
 
-Bodak has special tmux support with two modes:
+Geistty has special tmux support with two modes:
 
 ### Control Mode (Recommended)
 
@@ -140,7 +140,7 @@ Uses tmux's native Control Mode protocol (`tmux -CC`) for proper integration:
 ```
 
 Benefits:
-- Bodak owns the scrollback buffer (receives all `%output`)
+- Geistty owns the scrollback buffer (receives all `%output`)
 - Search works on buffered content without visible commands
 - No marker pollution in terminal output
 - Proper handling of escape sequences
@@ -203,7 +203,7 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 | Decision | Why |
 |----------|-----|
 | External Backend | iOS sandboxing prevents fork/exec/PTY |
-| tmux Control Mode | Proper protocol integration; Bodak owns scrollback buffer |
+| tmux Control Mode | Proper protocol integration; Geistty owns scrollback buffer |
 | capture-pane for search | Alternate screen mode (tmux, vim) has 0 scrollback by design in terminal emulators |
 | libxev fork | iOS uses `kevent`, not `kevent64` |
 | Custom module.modulemap name | Avoids conflicts with CSSH's module.modulemap |
@@ -246,11 +246,11 @@ See `TODO.md` for current tasks, known issues, and planned features.
 ## Debugging
 
 ### Logging Pattern
-Use Swift's unified `Logger` with subsystem `com.bodak`:
+Use Swift's unified `Logger` with subsystem `com.geistty`:
 
 ```swift
 import os
-private let logger = Logger(subsystem: "com.bodak", category: "YourCategory")
+private let logger = Logger(subsystem: "com.geistty", category: "YourCategory")
 
 // Usage
 logger.info("Info message")
@@ -296,34 +296,34 @@ Stream logs from a connected device in real-time using `--console`:
 xcrun devicectl list devices
 
 # Launch app with console output (streams os_log in real-time)
-xcrun devicectl device process launch --device <device-id> --console com.bodak.app
+xcrun devicectl device process launch --device <device-id> --console com.geistty.app
 
 # With grep filter for specific logs
-xcrun devicectl device process launch --device <device-id> --console com.bodak.app 2>&1 | grep -E "(SSH|Terminal|capture)" --line-buffered
+xcrun devicectl device process launch --device <device-id> --console com.geistty.app 2>&1 | grep -E "(SSH|Terminal|capture)" --line-buffered
 
 # Terminate existing, then relaunch with console
-xcrun devicectl device process terminate --device <device-id> com.bodak.app 2>&1; \
-  xcrun devicectl device process launch --device <device-id> --console com.bodak.app
+xcrun devicectl device process terminate --device <device-id> com.geistty.app 2>&1; \
+  xcrun devicectl device process launch --device <device-id> --console com.geistty.app
 ```
 
 Or use Console.app:
 1. Connect device via USB
 2. Open Console.app, select device in sidebar  
-3. Filter: `subsystem:com.bodak`
+3. Filter: `subsystem:com.geistty`
 
 ### Build & Deploy Workflow
 ```bash
 # Build for device
-xcodebuild -project Bodak/Bodak.xcodeproj -scheme Bodak -destination "id=<device-id>" -allowProvisioningUpdates
+xcodebuild -project Geistty/Geistty.xcodeproj -scheme Geistty -destination "id=<device-id>" -allowProvisioningUpdates
 
 # Install on device
-xcrun devicectl device install app --device <device-id> /path/to/Bodak.app
+xcrun devicectl device install app --device <device-id> /path/to/Geistty.app
 
 # Launch app (no console)
-xcrun devicectl device process launch --device <device-id> com.bodak.app
+xcrun devicectl device process launch --device <device-id> com.geistty.app
 
 # Launch with console output (preferred for debugging)
-xcrun devicectl device process launch --device <device-id> --console com.bodak.app
+xcrun devicectl device process launch --device <device-id> --console com.geistty.app
 ```
 
 ### Other Debug Tools
