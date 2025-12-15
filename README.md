@@ -1,4 +1,4 @@
-# Bodak
+# Geistty
 
 > A native iOS/iPadOS SSH terminal powered by [Ghostty](https://github.com/ghostty-org/ghostty)'s terminal engine
 
@@ -10,7 +10,7 @@
 
 ## Overview
 
-Bodak brings **libghostty**—the core terminal emulation library from [Ghostty](https://github.com/ghostty-org/ghostty)—to iPadOS/iOS as a fully-functional SSH terminal client. The terminal rendering, VT parsing, cursor handling, colors, and scrolling are all powered by Ghostty's real engine, compiled from the original Zig source code.
+Geistty brings **libghostty**—the core terminal emulation library from [Ghostty](https://github.com/ghostty-org/ghostty)—to iPadOS/iOS as a fully-functional SSH terminal client. The terminal rendering, VT parsing, cursor handling, colors, and scrolling are all powered by Ghostty's real engine, compiled from the original Zig source code.
 
 ### Why Ghostty on iOS?
 
@@ -99,15 +99,15 @@ The result is a native iOS app with:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/bodak.git
-cd bodak
+git clone https://github.com/yourusername/geistty.git
+cd geistty
 
 # Open in Xcode
-open Bodak/Bodak.xcodeproj
+open Geistty/Geistty.xcodeproj
 
 # Build and run on simulator (Cmd+R) or use CLI:
-xcodebuild -project Bodak/Bodak.xcodeproj \
-  -scheme Bodak \
+xcodebuild -project Geistty/Geistty.xcodeproj \
+  -scheme Geistty \
   -sdk iphonesimulator \
   -destination "platform=iOS Simulator,name=iPad Pro 13-inch (M5)" \
   build
@@ -125,17 +125,17 @@ cd ghostty
 # Build xcframework (requires Zig 0.14+)
 zig build -Demit-xcframework
 
-# Copy to Bodak project
-cp -r macos/GhosttyKit.xcframework ../bodak/Bodak/Frameworks/
+# Copy to Geistty project
+cp -r macos/GhosttyKit.xcframework ../geistty/Geistty/Frameworks/
 ```
 
 ## Project Structure
 
 ```
-bodak/
+geistty/
 ├── README.md
-├── Bodak/
-│   ├── Bodak.xcodeproj
+├── Geistty/
+│   ├── Geistty.xcodeproj
 │   ├── Info.plist
 │   ├── Assets.xcassets/
 │   ├── Frameworks/
@@ -144,7 +144,7 @@ bodak/
 │   │   └── Fonts/                    # Bundled terminal fonts
 │   └── Sources/
 │       ├── App/
-│       │   ├── BodakApp.swift        # @main entry point
+│       │   ├── GeisttyApp.swift        # @main entry point
 │       │   └── ContentView.swift     # Root navigation
 │       ├── Auth/
 │       │   ├── ConnectionProfile.swift
@@ -232,7 +232,7 @@ surfaceView.onWrite = { data in
 
 ## License
 
-Bodak is proprietary software. All rights reserved.
+Geistty is proprietary software. All rights reserved.
 
 Third-party dependencies are used under their respective licenses - see [LICENSES.md](LICENSES.md) for details.
 

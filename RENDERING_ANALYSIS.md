@@ -1,8 +1,8 @@
-# Bodak Terminal Rendering Architecture Analysis
+# Geistty Terminal Rendering Architecture Analysis
 
 ## Executive Summary
 
-This document provides a comprehensive analysis of the terminal rendering pipeline in Bodak, focusing on the sizing synchronization issues between SSH, tmux, Ghostty, and iPadOS. The goal is to achieve a "Ghostty-native experience using SSH + tmux integration."
+This document provides a comprehensive analysis of the terminal rendering pipeline in Geistty, focusing on the sizing synchronization issues between SSH, tmux, Ghostty, and iPadOS. The goal is to achieve a "Ghostty-native experience using SSH + tmux integration."
 
 ---
 
@@ -158,7 +158,7 @@ Path A: iOS View Size Change
 7. Server delivers SIGWINCH to tmux
 8. tmux resizes its internal state
 9. tmux sends %layout-change notification
-10. Bodak updates TmuxSplitTree
+10. Geistty updates TmuxSplitTree
 
 Path B: tmux Split Created (Ctrl+D)
 ───────────────────────────────────
@@ -166,7 +166,7 @@ Path B: tmux Split Created (Ctrl+D)
 2. Input routed to tmux via send-keys
 3. tmux creates new pane
 4. tmux sends %layout-change
-5. Bodak parses, creates new surface
+5. Geistty parses, creates new surface
 6. Surface.setExactGridSize() called
 7. Ghostty resizes to tmux dimensions
 8. ... but iOS container might be different size!
@@ -245,7 +245,7 @@ Key insight: **Don't fight the alternate screen design; embrace it**.
 
 ### The Core Issue
 
-Bodak currently has **split-brain syndrome** for terminal dimensions:
+Geistty currently has **split-brain syndrome** for terminal dimensions:
 
 1. **SwiftUI** thinks it owns layout (via GeometryReader and constraints)
 2. **Ghostty** calculates grid from pixel size

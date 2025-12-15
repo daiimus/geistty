@@ -1,16 +1,16 @@
-# Privacy Policy for Bodak
+# Privacy Policy for Geistty
 
 **Last Updated: December 2024**
 
 ## Overview
 
-Bodak is an SSH terminal app for iOS. We are committed to protecting your privacy. This policy explains what data Bodak collects and how it's used.
+Geistty is an SSH terminal app for iOS. We are committed to protecting your privacy. This policy explains what data Geistty collects and how it's used.
 
 ## Data Collection
 
 ### What We Collect
 
-**Bodak does not collect, store, or transmit any personal data to external servers.**
+**Geistty does not collect, store, or transmit any personal data to external servers.**
 
 All data is stored locally on your device:
 
@@ -30,7 +30,7 @@ All data is stored locally on your device:
 
 ## Network Access
 
-Bodak requires network access solely to establish SSH connections to servers you specify. The app:
+Geistty requires network access solely to establish SSH connections to servers you specify. The app:
 
 - Connects only to servers you explicitly configure
 - May access local network devices when you enable local network permissions
@@ -45,11 +45,11 @@ Bodak requires network access solely to establish SSH connections to servers you
 
 ## Third-Party Services
 
-Bodak does not integrate with any third-party analytics, advertising, or tracking services.
+Geistty does not integrate with any third-party analytics, advertising, or tracking services.
 
 ## Encryption
 
-Bodak uses encryption for:
+Geistty uses encryption for:
 - SSH protocol communication (handled by libssh2)
 - Credential storage (iOS Keychain)
 
@@ -57,11 +57,11 @@ This encryption is used solely for secure SSH connections, not for transmitting 
 
 ## Data Retention
 
-All data remains on your device until you delete it. Uninstalling Bodak removes all associated data from your device.
+All data remains on your device until you delete it. Uninstalling Geistty removes all associated data from your device.
 
 ## Children's Privacy
 
-Bodak does not knowingly collect any information from children under 13.
+Geistty does not knowingly collect any information from children under 13.
 
 ## Changes to This Policy
 
@@ -80,4 +80,4 @@ Since all data is stored locally on your device, you have complete control over 
 
 ---
 
-**Summary**: Bodak is a privacy-focused SSH client. Your data stays on your device. We don't collect anything.
+**Summary**: Geistty is a privacy-focused SSH client. Your data stays on your device. We don't collect anything.

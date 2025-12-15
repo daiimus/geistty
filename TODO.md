@@ -158,7 +158,7 @@ iOS aggressively suspends apps and drops network connections. tmux handles persi
 #### High Priority - DONE
 - [x] Remove legacy tmux capture code (~100 lines) - superseded by TmuxControlClient
 - [x] Remove unused `GhosttyTerminalView.swift` (121 lines) - superseded by RawTerminalViewController
-- [x] Remove unused `BodakTerminalView` struct - never instantiated
+- [x] Remove unused `GeisttyTerminalView` struct - never instantiated
 - [x] Remove `TmuxMode.legacy` case - control mode is now default
 
 #### Medium Priority - TODO
@@ -363,7 +363,7 @@ For a solid v1 release targeting **SSH + SSH with tmux**:
   - [x] SSHKeyCredentialProvider (key-based auth)
   - [x] Unified CredentialManager for multiple sources
   - [x] Password entry at connection time (saved to Keychain)
-  - ~~1Password/LastPass integration~~ (Not possible on iOS - their SSH integration uses desktop SSH Agent, not available via iOS APIs. Export keys from password manager and import into Bodak via Files app)
+  - ~~1Password/LastPass integration~~ (Not possible on iOS - their SSH integration uses desktop SSH Agent, not available via iOS APIs. Export keys from password manager and import into Geistty via Files app)
 - [ ] **Connection status indicators** ⭐ MEDIUM PRIORITY
 - [x] **Handle remote disconnect**
   - [x] Detect SSH channel EOF/close
@@ -504,7 +504,7 @@ Config file (`ghostty.conf`) is now the source of truth.
 
 ### Apple Developer Setup
 - [ ] Enroll in Apple Developer Program ($99/year)
-- [ ] Create App ID (com.bodak.app)
+- [ ] Create App ID (com.geistty.app)
 - [ ] Enable iCloud entitlement (for connection sync)
 - [ ] Create App Store Connect listing
 
@@ -526,6 +526,13 @@ Config file (`ghostty.conf`) is now the source of truth.
 - [x] Keywords for search
 - [x] Privacy policy (PRIVACY.md)
 - [ ] Support URL (GitHub repo)
+
+### Customer-Facing Portal (GitHub Pages)
+- [ ] Set up GitHub Pages with vanity domain
+- [ ] Privacy policy page (from PRIVACY.md)
+- [ ] Support/FAQ page
+- [ ] App landing page with features
+- [ ] Link from App Store listing
 
 ### Compliance
 - [x] Export compliance (ITSAppUsesNonExemptEncryption=NO - exempt)
@@ -613,7 +620,7 @@ These are small improvements that would have big impact:
 
 ## 🚀 AI Coding Tools Support (Cursor/Claude Code/Aider)
 
-Features that would make Bodak essential for developers using AI terminals:
+Features that would make Geistty essential for developers using AI terminals:
 
 ### Large Text Handling
 - [ ] **Paste large code blocks** - Handle multi-KB pastes without lag/truncation
