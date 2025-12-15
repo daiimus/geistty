@@ -1,0 +1,644 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */; };
+		A1000001 /* GeisttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* GeisttyApp.swift */; };
+		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
+		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
+		A1000004 /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* SSHSession.swift */; };
+		A1000005 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* SSHConnection.swift */; };
+		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
+		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* DepartureMono-Regular.otf */; };
+		A1000009 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000001 /* CSSH */; };
+		A1000010 /* Ghostty.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* Ghostty.swift */; };
+		A1000012 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000013 /* GhosttyKit.xcframework */; };
+		A1000013 /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* GhosttyInput.swift */; };
+		A1000020 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* KeychainManager.swift */; };
+		A1000021 /* SSHKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* SSHKeyManager.swift */; };
+		A1000022 /* ConnectionProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* ConnectionProfile.swift */; };
+		A1000023 /* CredentialProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* CredentialProvider.swift */; };
+		A1000030 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* ConnectionListView.swift */; };
+		A1000031 /* ConnectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* ConnectionEditorView.swift */; };
+		A1000040 /* SFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* SFTPClient.swift */; };
+		A1000041 /* SFTPBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* SFTPBrowserView.swift */; };
+		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
+		A1000060 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* Theme.swift */; };
+		A1000061 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* Themes */; };
+		A1000070 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000070 /* JetBrainsMono-Regular.ttf */; };
+		A1000071 /* JetBrainsMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000071 /* JetBrainsMono-Bold.ttf */; };
+		A1000072 /* FiraCode-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000072 /* FiraCode-Regular.ttf */; };
+		A1000073 /* FiraCode-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000073 /* FiraCode-Bold.ttf */; };
+		A1000074 /* Hack-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000074 /* Hack-Regular.ttf */; };
+		A1000075 /* Hack-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000075 /* Hack-Bold.ttf */; };
+		A1000076 /* SourceCodePro-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000076 /* SourceCodePro-Regular.otf */; };
+		A1000077 /* SourceCodePro-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000077 /* SourceCodePro-Bold.otf */; };
+		A1000078 /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000078 /* IBMPlexMono-Regular.ttf */; };
+		A1000079 /* IBMPlexMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000079 /* IBMPlexMono-Bold.ttf */; };
+		A100007A /* Inconsolata-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007A /* Inconsolata-Regular.ttf */; };
+		A100007B /* Inconsolata-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007B /* Inconsolata-Bold.ttf */; };
+		A1000080 /* SurfaceSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000080 /* SurfaceSearchOverlay.swift */; };
+		A1000081 /* TmuxControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000081 /* TmuxControlClient.swift */; };
+		A1000082 /* TmuxModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000082 /* TmuxModels.swift */; };
+		A1000083 /* TmuxSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000083 /* TmuxSessionManager.swift */; };
+		A1000084 /* TmuxLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000084 /* TmuxLayout.swift */; };
+		A1000085 /* TmuxSplitTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000085 /* TmuxSplitTree.swift */; };
+		A1000086 /* TmuxSplitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000086 /* TmuxSplitView.swift */; };
+		A1000087 /* TmuxMultiPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000087 /* TmuxMultiPaneView.swift */; };
+		A1000088 /* TmuxWindowPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000088 /* TmuxWindowPickerView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A3000001 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSyncManager.swift; sourceTree = "<group>"; };
+		A2000001 /* GeisttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyApp.swift; sourceTree = "<group>"; };
+		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A2000003 /* TerminalContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalContainerView.swift; sourceTree = "<group>"; };
+		A2000004 /* SSHSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSession.swift; sourceTree = "<group>"; };
+		A2000005 /* SSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnection.swift; sourceTree = "<group>"; };
+		A2000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A2000007 /* DepartureMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DepartureMono-Regular.otf"; sourceTree = "<group>"; };
+		A2000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000010 /* Geistty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Geistty.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2000011 /* Ghostty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.swift; sourceTree = "<group>"; };
+		A2000013 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
+		A2000014 /* GhosttyInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInput.swift; sourceTree = "<group>"; };
+		A2000020 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
+		A2000021 /* SSHKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyManager.swift; sourceTree = "<group>"; };
+		A2000022 /* ConnectionProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionProfile.swift; sourceTree = "<group>"; };
+		A2000023 /* CredentialProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialProvider.swift; sourceTree = "<group>"; };
+		A2000030 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
+		A2000031 /* ConnectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEditorView.swift; sourceTree = "<group>"; };
+		A2000040 /* SFTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPClient.swift; sourceTree = "<group>"; };
+		A2000041 /* SFTPBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPBrowserView.swift; sourceTree = "<group>"; };
+		A2000050 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A2000060 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A2000061 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
+		A2000070 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
+		A2000071 /* JetBrainsMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Bold.ttf"; sourceTree = "<group>"; };
+		A2000072 /* FiraCode-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "FiraCode-Regular.ttf"; sourceTree = "<group>"; };
+		A2000073 /* FiraCode-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "FiraCode-Bold.ttf"; sourceTree = "<group>"; };
+		A2000074 /* Hack-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Hack-Regular.ttf"; sourceTree = "<group>"; };
+		A2000075 /* Hack-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Hack-Bold.ttf"; sourceTree = "<group>"; };
+		A2000076 /* SourceCodePro-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SourceCodePro-Regular.otf"; sourceTree = "<group>"; };
+		A2000077 /* SourceCodePro-Bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SourceCodePro-Bold.otf"; sourceTree = "<group>"; };
+		A2000078 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
+		A2000079 /* IBMPlexMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Bold.ttf"; sourceTree = "<group>"; };
+		A200007A /* Inconsolata-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Regular.ttf"; sourceTree = "<group>"; };
+		A200007B /* Inconsolata-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Bold.ttf"; sourceTree = "<group>"; };
+		A2000080 /* SurfaceSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceSearchOverlay.swift; sourceTree = "<group>"; };
+		A2000081 /* TmuxControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxControlClient.swift; sourceTree = "<group>"; };
+		A2000082 /* TmuxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModels.swift; sourceTree = "<group>"; };
+		A2000083 /* TmuxSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionManager.swift; sourceTree = "<group>"; };
+		A2000084 /* TmuxLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxLayout.swift; sourceTree = "<group>"; };
+		A2000085 /* TmuxSplitTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitTree.swift; sourceTree = "<group>"; };
+		A2000086 /* TmuxSplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitView.swift; sourceTree = "<group>"; };
+		A2000087 /* TmuxMultiPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiPaneView.swift; sourceTree = "<group>"; };
+		A2000088 /* TmuxWindowPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowPickerView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A4000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000009 /* CSSH in Frameworks */,
+				A1000012 /* GhosttyKit.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A5000001 = {
+			isa = PBXGroup;
+			children = (
+				A5000002 /* Sources */,
+				A5000012 /* Resources */,
+				A5000006 /* Frameworks */,
+				A2000006 /* Assets.xcassets */,
+				A2000008 /* Info.plist */,
+				A5000010 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A5000002 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A5000003 /* App */,
+				A5000007 /* Ghostty */,
+				A5000004 /* Terminal */,
+				A5000005 /* SSH */,
+				A5000008 /* Auth */,
+				A5000009 /* UI */,
+				A5000011 /* SFTP */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A5000003 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A2000001 /* GeisttyApp.swift */,
+				A2000002 /* ContentView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A5000004 /* Terminal */ = {
+			isa = PBXGroup;
+			children = (
+				A2000003 /* TerminalContainerView.swift */,
+				A2000060 /* Theme.swift */,
+				A2000087 /* TmuxMultiPaneView.swift */,
+				A2000086 /* TmuxSplitView.swift */,
+				A2000088 /* TmuxWindowPickerView.swift */,
+			);
+			path = Terminal;
+			sourceTree = "<group>";
+		};
+		A5000005 /* SSH */ = {
+			isa = PBXGroup;
+			children = (
+				A2000004 /* SSHSession.swift */,
+				A2000005 /* SSHConnection.swift */,
+				A2000081 /* TmuxControlClient.swift */,
+				A2000084 /* TmuxLayout.swift */,
+				A2000082 /* TmuxModels.swift */,
+				A2000083 /* TmuxSessionManager.swift */,
+				A2000085 /* TmuxSplitTree.swift */,
+			);
+			path = SSH;
+			sourceTree = "<group>";
+		};
+		A5000006 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A2000013 /* GhosttyKit.xcframework */,
+			);
+			path = Frameworks;
+			sourceTree = "<group>";
+		};
+		A5000007 /* Ghostty */ = {
+			isa = PBXGroup;
+			children = (
+				A2000011 /* Ghostty.swift */,
+				5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */,
+				A2000014 /* GhosttyInput.swift */,
+				A2000080 /* SurfaceSearchOverlay.swift */,
+			);
+			path = Ghostty;
+			sourceTree = "<group>";
+		};
+		A5000008 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				A2000020 /* KeychainManager.swift */,
+				A2000021 /* SSHKeyManager.swift */,
+				A2000022 /* ConnectionProfile.swift */,
+				A2000023 /* CredentialProvider.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		A5000009 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				A2000030 /* ConnectionListView.swift */,
+				A2000031 /* ConnectionEditorView.swift */,
+				A2000050 /* SettingsView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		A5000010 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A2000010 /* Geistty.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A5000011 /* SFTP */ = {
+			isa = PBXGroup;
+			children = (
+				A2000040 /* SFTPClient.swift */,
+				A2000041 /* SFTPBrowserView.swift */,
+			);
+			path = SFTP;
+			sourceTree = "<group>";
+		};
+		A5000012 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A5000013 /* Fonts */,
+				A2000061 /* Themes */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A5000013 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				A2000007 /* DepartureMono-Regular.otf */,
+				A2000070 /* JetBrainsMono-Regular.ttf */,
+				A2000071 /* JetBrainsMono-Bold.ttf */,
+				A2000072 /* FiraCode-Regular.ttf */,
+				A2000073 /* FiraCode-Bold.ttf */,
+				A2000074 /* Hack-Regular.ttf */,
+				A2000075 /* Hack-Bold.ttf */,
+				A2000076 /* SourceCodePro-Regular.otf */,
+				A2000077 /* SourceCodePro-Bold.otf */,
+				A2000078 /* IBMPlexMono-Regular.ttf */,
+				A2000079 /* IBMPlexMono-Bold.ttf */,
+				A200007A /* Inconsolata-Regular.ttf */,
+				A200007B /* Inconsolata-Bold.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A6000001 /* Geistty */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A7000001 /* Build configuration list for PBXNativeTarget "Geistty" */;
+			buildPhases = (
+				A8000001 /* Sources */,
+				A4000001 /* Frameworks */,
+				A9000001 /* Resources */,
+				A3000001 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Geistty;
+			packageProductDependencies = (
+				AE000001 /* CSSH */,
+			);
+			productName = Geistty;
+			productReference = A2000010 /* Geistty.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 2610;
+				TargetAttributes = {
+					A6000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = AB000001 /* Build configuration list for PBXProject "Geistty" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A5000001;
+			packageReferences = (
+				AF000001 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */,
+			);
+			productRefGroup = A5000010 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A6000001 /* Geistty */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A9000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000006 /* Assets.xcassets in Resources */,
+				A1000007 /* DepartureMono-Regular.otf in Resources */,
+				A1000070 /* JetBrainsMono-Regular.ttf in Resources */,
+				A1000071 /* JetBrainsMono-Bold.ttf in Resources */,
+				A1000072 /* FiraCode-Regular.ttf in Resources */,
+				A1000073 /* FiraCode-Bold.ttf in Resources */,
+				A1000074 /* Hack-Regular.ttf in Resources */,
+				A1000075 /* Hack-Bold.ttf in Resources */,
+				A1000076 /* SourceCodePro-Regular.otf in Resources */,
+				A1000077 /* SourceCodePro-Bold.otf in Resources */,
+				A1000078 /* IBMPlexMono-Regular.ttf in Resources */,
+				A1000079 /* IBMPlexMono-Bold.ttf in Resources */,
+				A100007A /* Inconsolata-Regular.ttf in Resources */,
+				A100007B /* Inconsolata-Bold.ttf in Resources */,
+				A1000061 /* Themes in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A8000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000001 /* GeisttyApp.swift in Sources */,
+				A1000002 /* ContentView.swift in Sources */,
+				A1000010 /* Ghostty.swift in Sources */,
+				708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */,
+				A1000013 /* GhosttyInput.swift in Sources */,
+				A1000080 /* SurfaceSearchOverlay.swift in Sources */,
+				A1000003 /* TerminalContainerView.swift in Sources */,
+				A1000004 /* SSHSession.swift in Sources */,
+				A1000005 /* SSHConnection.swift in Sources */,
+				A1000081 /* TmuxControlClient.swift in Sources */,
+				A1000084 /* TmuxLayout.swift in Sources */,
+				A1000082 /* TmuxModels.swift in Sources */,
+				A1000083 /* TmuxSessionManager.swift in Sources */,
+				A1000085 /* TmuxSplitTree.swift in Sources */,
+				A1000086 /* TmuxSplitView.swift in Sources */,
+				A1000087 /* TmuxMultiPaneView.swift in Sources */,
+				A1000088 /* TmuxWindowPickerView.swift in Sources */,
+				A1000020 /* KeychainManager.swift in Sources */,
+				A1000021 /* SSHKeyManager.swift in Sources */,
+				A1000022 /* ConnectionProfile.swift in Sources */,
+				A1000023 /* CredentialProvider.swift in Sources */,
+				A1000030 /* ConnectionListView.swift in Sources */,
+				A1000031 /* ConnectionEditorView.swift in Sources */,
+				A1000040 /* SFTPClient.swift in Sources */,
+				A1000041 /* SFTPBrowserView.swift in Sources */,
+				A1000050 /* SettingsView.swift in Sources */,
+				A1000060 /* Theme.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AC000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = DPF76SZNJB;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AC000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = DPF76SZNJB;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		AD000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Geistty.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = DPF76SZNJB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Geistty;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				OTHER_LDFLAGS = "-lc++";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos*]" = "-Xcc -fmodule-map-file=$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64/Headers/GhosttyKit.modulemap";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator*]" = "-Xcc -fmodule-map-file=$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64-simulator/Headers/GhosttyKit.modulemap";
+				PRODUCT_BUNDLE_IDENTIFIER = com.geistty.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64/Headers";
+				"SWIFT_INCLUDE_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64-simulator/Headers";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AD000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Geistty.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = DPF76SZNJB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Geistty;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				OTHER_LDFLAGS = "-lc++";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos*]" = "-Xcc -fmodule-map-file=$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64/Headers/GhosttyKit.modulemap";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator*]" = "-Xcc -fmodule-map-file=$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64-simulator/Headers/GhosttyKit.modulemap";
+				PRODUCT_BUNDLE_IDENTIFIER = com.geistty.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64/Headers";
+				"SWIFT_INCLUDE_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/Frameworks/GhosttyKit.xcframework/ios-arm64-simulator/Headers";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A7000001 /* Build configuration list for PBXNativeTarget "Geistty" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AD000001 /* Debug */,
+				AD000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB000001 /* Build configuration list for PBXProject "Geistty" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AC000001 /* Debug */,
+				AC000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AF000001 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/daiimus/Libssh2Prebuild";
+			requirement = {
+				kind = exactVersion;
+				version = "1.11.0-OpenSSL-1-1-1w-debug";
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AE000001 /* CSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AF000001 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */;
+			productName = CSSH;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = AA000001 /* Project object */;
+}

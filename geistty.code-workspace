@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "Geistty",
+			"path": "."
+		},
+		{
+			"name": "ghostty",
+			"path": "../ghostty"
+		},
+		{
+			"name": "libxev-ios",
+			"path": "../libxev-ios"
+		}
+	],
+	"settings": {}
+}

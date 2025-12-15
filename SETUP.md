@@ -78,20 +78,20 @@ The xcframework will contain:
 ## Step 4: Create iOS Project
 
 ```bash
-cd ~/Projects/Repositories/bodak
+cd ~/Projects/Repositories/geistty
 
 # Create Xcode project (via Xcode GUI or swift package)
-mkdir -p Bodak
-cd Bodak
+mkdir -p Geistty
+cd Geistty
 
 # Initialize Swift Package (alternative to Xcode project)
-swift package init --type executable --name Bodak
+swift package init --type executable --name Geistty
 ```
 
 Or create via Xcode:
 1. File → New → Project
 2. iOS → App
-3. Product Name: Bodak
+3. Product Name: Geistty
 4. Interface: SwiftUI
 5. Language: Swift
 6. Minimum Deployment: iOS 17.0

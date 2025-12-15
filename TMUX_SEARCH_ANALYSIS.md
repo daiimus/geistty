@@ -128,7 +128,7 @@ This is **correct behavior** - not a bug.
 
 ---
 
-## Part 4: Solutions for Bodak
+## Part 4: Solutions for Geistty
 
 ### Option A: Use tmux's Buffer (Recommended)
 
@@ -202,7 +202,7 @@ Since you mentioned Ghostty's split-screen and iPadOS Stage Manager:
 ### iPadOS Integration Points
 
 1. **Stage Manager windows** = different Ghostty App instances (separate processes)
-2. **Split view within Bodak** = multiple Surfaces in one view hierarchy
+2. **Split view within Geistty** = multiple Surfaces in one view hierarchy
 3. **tmux splits** = single Surface, tmux manages layout internally
 
 ### Search Implications for Splits

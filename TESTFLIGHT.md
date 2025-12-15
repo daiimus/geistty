@@ -1,6 +1,6 @@
 # TestFlight Distribution Guide
 
-This guide covers distributing Bodak via TestFlight for beta testing.
+This guide covers distributing Geistty via TestFlight for beta testing.
 
 ## Prerequisites
 
@@ -20,19 +20,19 @@ This guide covers distributing Bodak via TestFlight for beta testing.
 2. Select "New App"
 3. Fill in:
    - Platform: iOS
-   - Name: Bodak
+   - Name: Geistty
    - Primary Language: English (US)
-   - Bundle ID: com.bodak.app
-   - SKU: bodak-001 (unique identifier)
+   - Bundle ID: com.geistty.app
+   - SKU: geistty-001 (unique identifier)
    - User Access: Full Access
 
 ### 2. Configure Signing in Xcode
 
-1. Open `Bodak.xcodeproj` in Xcode
-2. Select Bodak target → Signing & Capabilities
+1. Open `Geistty.xcodeproj` in Xcode
+2. Select Geistty target → Signing & Capabilities
 3. Team: Select your Apple Developer team
 4. Enable "Automatically manage signing"
-5. Bundle Identifier: com.bodak.app
+5. Bundle Identifier: com.geistty.app
 
 ## Building for TestFlight
 
@@ -47,11 +47,11 @@ This guide covers distributing Bodak via TestFlight for beta testing.
 
 Or via command line:
 ```bash
-xcodebuild -project Bodak/Bodak.xcodeproj \
-    -scheme Bodak \
+xcodebuild -project Geistty/Geistty.xcodeproj \
+    -scheme Geistty \
     -sdk iphoneos \
     -configuration Release \
-    -archivePath build/Bodak.xcarchive \
+    -archivePath build/Geistty.xcarchive \
     archive
 ```
 
@@ -68,7 +68,7 @@ xcodebuild -project Bodak/Bodak.xcodeproj \
 #### Via Command Line
 ```bash
 xcodebuild -exportArchive \
-    -archivePath build/Bodak.xcarchive \
+    -archivePath build/Geistty.xcarchive \
     -exportPath build/export \
     -exportOptionsPlist ExportOptions.plist
 ```
@@ -83,7 +83,7 @@ In App Store Connect → TestFlight → Test Information:
 
 - **Beta App Description**: 
   ```
-  Bodak is an SSH terminal app for iOS powered by Ghostty.
+  Geistty is an SSH terminal app for iOS powered by Ghostty.
   Test features include: SSH connections, theme customization,
   and terminal configuration.
   ```
