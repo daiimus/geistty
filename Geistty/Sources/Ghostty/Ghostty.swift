@@ -182,7 +182,7 @@ extension Ghostty {
             # === Terminal Behavior ===
             window-padding-x = 4
             window-padding-y = 4
-            scrollback-limit = 10000
+            scrollback-limit = 0
             
             # URL detection
             link-url = true
