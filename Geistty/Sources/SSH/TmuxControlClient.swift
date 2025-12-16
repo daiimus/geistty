@@ -770,6 +770,12 @@ class TmuxControlClient {
                 // Block failed
                 finishBlock(block, success: false)
                 pendingBlock = nil
+            } else if trimmedLine.hasPrefix("%") {
+                // This is a notification (like %layout-change, %output) that arrived
+                // in the middle of a %begin/%end block. Process it separately.
+                // tmux can interleave notifications with command responses.
+                let message = parseMessage(trimmedLine)
+                handleMessage(message)
             } else {
                 // Content line - add to block
                 pendingBlock?.lines.append(trimmedLine)
