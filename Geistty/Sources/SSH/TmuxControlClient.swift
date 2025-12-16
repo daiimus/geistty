@@ -1285,9 +1285,9 @@ class TmuxControlClient {
         // -p: output to stdout (control mode captures in %begin/%end)
         // -e: include escape sequences for text and background attributes
         // -t: target pane
-        // -S -N: start from N lines before current position (scrollback)
+        // -S -: start from beginning of history (capture all scrollback)
         // Note: We don't use -J (join) as it destroys line breaks
-        let captureCommand = "capture-pane -pe -t \(paneId) -S -\(sessionRestoreScrollback)"
+        let captureCommand = "capture-pane -pe -t \(paneId) -S -"
         logger.info("Capturing pane history: \(captureCommand)")
         
         // Use proper command routing - the response will come back via callback
