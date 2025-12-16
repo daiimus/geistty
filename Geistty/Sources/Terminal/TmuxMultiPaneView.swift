@@ -18,35 +18,119 @@ private let logger = Logger(subsystem: "com.geistty", category: "TmuxMultiPane")
 /// This view observes the `TmuxSessionManager.currentSplitTree` and renders
 /// the split tree using `TmuxSplitTreeView`. Each pane gets its own Ghostty
 /// surface from the session manager.
+///
+/// When the view's geometry changes, it calculates the total cols/rows based
+/// on cell size and notifies tmux via `refresh-client -C`. This ensures tmux
+/// knows the correct terminal dimensions for proper split layout.
 struct TmuxMultiPaneView: View {
     @ObservedObject var sessionManager: TmuxSessionManager
+    
+    /// Delegate for handling keyboard shortcuts (passed to surfaces)
+    weak var shortcutDelegate: Ghostty.ShortcutDelegate?
     
     /// Divider color (matches Ghostty's split divider)
     var dividerColor: Color = Color(white: 0.3)
     
+    /// Track last sent dimensions to avoid redundant resize commands
+    @State private var lastSentSize: CGSize = .zero
+    
     var body: some View {
-        TmuxSplitTreeView(
-            tree: sessionManager.currentSplitTree,
-            dividerColor: dividerColor,
-            onResize: { paneId, newRatio in
-                // For now, don't send resize to tmux - local UI only
-                // TODO: Implement tmux resize-pane when needed
-            },
-            onEqualize: {
-                sessionManager.equalizeSplits()
-            },
-            onToggleZoom: { paneId in
-                sessionManager.toggleZoom(paneId: paneId)
-            },
-            paneContent: { paneId, cols, rows in
-                TmuxPaneSurfaceView(
-                    paneId: paneId,
-                    cols: cols,
-                    rows: rows,
-                    sessionManager: sessionManager
-                )
+        GeometryReader { geometry in
+            TmuxSplitTreeView(
+                tree: sessionManager.currentSplitTree,
+                dividerColor: dividerColor,
+                onResize: { paneId, newRatio in
+                    // For now, don't send resize to tmux - local UI only
+                    // TODO: Implement tmux resize-pane when needed
+                },
+                onEqualize: {
+                    sessionManager.equalizeSplits()
+                },
+                onToggleZoom: { paneId in
+                    sessionManager.toggleZoom(paneId: paneId)
+                },
+                paneContent: { paneId, cols, rows in
+                    TmuxPaneSurfaceView(
+                        paneId: paneId,
+                        cols: cols,
+                        rows: rows,
+                        sessionManager: sessionManager,
+                        shortcutDelegate: shortcutDelegate
+                    )
+                }
+            )
+            .onChange(of: geometry.size) { _, newSize in
+                handleSizeChange(newSize)
             }
-        )
+            .onChange(of: sessionManager.currentSplitTree.paneIds.count) { _, _ in
+                // When pane count changes (split/close), re-send dimensions
+                logger.info("📐 Pane count changed, triggering resize")
+                handleSizeChange(geometry.size)
+            }
+            .onChange(of: sessionManager.primaryCellSize) { _, newCellSize in
+                // When cell size becomes available (surface initialized), send dimensions
+                if newCellSize.width > 0 && newCellSize.height > 0 {
+                    logger.info("📐 Cell size now available: \(Int(newCellSize.width))x\(Int(newCellSize.height))")
+                    handleSizeChange(geometry.size)
+                }
+            }
+            .onAppear {
+                // Send initial size when view appears
+                logger.info("📐 TmuxMultiPaneView appeared, size: \(Int(geometry.size.width))x\(Int(geometry.size.height))")
+                handleSizeChange(geometry.size)
+            }
+        }
+    }
+    
+    /// Handle geometry size changes by calculating and sending terminal dimensions to tmux
+    private func handleSizeChange(_ size: CGSize) {
+        // Skip resize during transitions or when session is not fully active
+        guard sessionManager.isConnected else {
+            logger.debug("📐 Skipping resize - session not connected")
+            return
+        }
+        
+        // Ensure we have panes to resize
+        guard !sessionManager.currentSplitTree.paneIds.isEmpty else {
+            logger.debug("📐 Skipping resize - no panes")
+            return
+        }
+        
+        logger.info("📐 handleSizeChange called with size: \(Int(size.width))x\(Int(size.height)), lastSent: \(Int(lastSentSize.width))x\(Int(lastSentSize.height))")
+        
+        // Avoid redundant resize commands - use tolerance to avoid floating point issues
+        let sizeDiff = abs(size.width - lastSentSize.width) + abs(size.height - lastSentSize.height)
+        guard sizeDiff > 1.0, size.width > 10, size.height > 10 else {
+            logger.debug("📐 Skipping - same size or too small")
+            return
+        }
+        
+        // Get cell size from session manager (observed property)
+        let cellSize = sessionManager.primaryCellSize
+        
+        guard cellSize.width > 1, cellSize.height > 1 else {
+            logger.debug("📐 Multi-pane size changed but no valid cell size available")
+            return
+        }
+        
+        // Calculate cols/rows from pixel size
+        // Use floor to ensure we don't claim more space than we have
+        let cols = Int(floor(size.width / cellSize.width))
+        let rows = Int(floor(size.height / cellSize.height))
+        
+        // Sanity check dimensions - must be reasonable terminal size
+        guard cols >= 10, cols <= 500, rows >= 5, rows <= 200 else {
+            logger.warning("📐 Calculated unreasonable dimensions: \(cols)x\(rows), skipping")
+            return
+        }
+        
+        logger.info("📐 Multi-pane geometry: \(Int(size.width))x\(Int(size.height))px -> \(cols)x\(rows) cells (cell: \(Int(cellSize.width))x\(Int(cellSize.height)))")
+        
+        // Update tracked size
+        lastSentSize = size
+        
+        // Send resize to tmux - this triggers refresh-client -C
+        sessionManager.resize(cols: cols, rows: rows)
     }
 }
 
@@ -63,6 +147,7 @@ struct TmuxPaneSurfaceView: View {
     let cols: Int
     let rows: Int
     @ObservedObject var sessionManager: TmuxSessionManager
+    weak var shortcutDelegate: Ghostty.ShortcutDelegate?
     
     /// Whether this pane is currently focused
     private var isFocused: Bool {
@@ -77,6 +162,7 @@ struct TmuxPaneSurfaceView: View {
                 cols: cols,
                 rows: rows,
                 isFocused: isFocused,
+                shortcutDelegate: shortcutDelegate,
                 onTap: {
                     selectPane()
                 }
@@ -120,6 +206,7 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
     let cols: Int
     let rows: Int
     let isFocused: Bool
+    weak var shortcutDelegate: Ghostty.ShortcutDelegate?
     let onTap: () -> Void
     
     func makeUIView(context: Context) -> GhosttyPaneSurfaceContainerView {
@@ -128,6 +215,8 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
         container.targetCols = cols
         container.targetRows = rows
         container.onTap = onTap
+        // Set shortcut delegate for keyboard shortcuts
+        surface.shortcutDelegate = shortcutDelegate
         return container
     }
     
@@ -135,6 +224,9 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
         // Update target dimensions if changed
         container.targetCols = cols
         container.targetRows = rows
+        
+        // Ensure shortcut delegate is set (may change between updates)
+        surface.shortcutDelegate = shortcutDelegate
         
         // Update focus state
         if isFocused && !surface.isFirstResponder {
