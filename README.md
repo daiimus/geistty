@@ -232,7 +232,7 @@ surfaceView.onWrite = { data in
 
 ## License
 
-Geistty is proprietary software. All rights reserved.
+Geistty is a hobby.
 
 Third-party dependencies are used under their respective licenses - see [LICENSES.md](LICENSES.md) for details.
 
