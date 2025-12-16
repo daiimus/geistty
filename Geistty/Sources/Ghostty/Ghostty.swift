@@ -858,7 +858,16 @@ extension Ghostty {
         @Published var pwd: String? = nil
         
         /// Cell size for the terminal grid
-        @Published var cellSize: CGSize = .zero
+        @Published var cellSize: CGSize = .zero {
+            didSet {
+                if cellSize != oldValue && cellSize.width > 0 && cellSize.height > 0 {
+                    onCellSizeChanged?(cellSize)
+                }
+            }
+        }
+        
+        /// Callback when cell size changes (for multi-pane layout coordination)
+        var onCellSizeChanged: ((CGSize) -> Void)?
         
         /// Scrollbar state (total rows, offset, visible length)
         @Published var scrollbar: (total: UInt64, offset: UInt64, len: UInt64)? = nil
@@ -2711,12 +2720,22 @@ extension Ghostty {
         func sizeDidChange(_ size: CGSize) {
             guard let surface = surface else { return }
             
+            // Guard against invalid sizes during view transitions
+            // Negative or very small sizes can cause integer overflow in Ghostty
+            guard size.width > 0, size.height > 0 else { return }
+            
             let scale = contentScaleFactor
-            let scaledWidth = UInt32(size.width * scale)
-            let scaledHeight = UInt32(size.height * scale)
+            let scaledWidth = size.width * scale
+            let scaledHeight = size.height * scale
+            
+            // Additional guard: ensure scaled values fit in UInt32
+            guard scaledWidth > 0, scaledWidth < Double(UInt32.max),
+                  scaledHeight > 0, scaledHeight < Double(UInt32.max) else {
+                return
+            }
             
             ghostty_surface_set_content_scale(surface, scale, scale)
-            ghostty_surface_set_size(surface, scaledWidth, scaledHeight)
+            ghostty_surface_set_size(surface, UInt32(scaledWidth), UInt32(scaledHeight))
             
             // IMPORTANT: On iOS, the IOSurfaceLayer is added as a sublayer (not the view's layer).
             // We must manually resize it to match the view's bounds, otherwise it stays at (0,0,0,0).
