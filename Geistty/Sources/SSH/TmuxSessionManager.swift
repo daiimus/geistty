@@ -66,6 +66,10 @@ class TmuxSessionManager: ObservableObject {
     /// This is separate from pendingOutput (which is for pre-surface output)
     private var historyRestoreBuffer: [String: [Data]] = [:]
     
+    /// Buffer for history content received before surface was created
+    /// This is fed to the surface when it's created
+    private var pendingHistoryContent: [String: String] = [:]
+
     /// Surface creation factory (injected before activation)
     /// This creates Ghostty surfaces with proper configuration
     private var surfaceFactory: ((String) -> Ghostty.SurfaceView)?
@@ -447,12 +451,9 @@ class TmuxSessionManager: ObservableObject {
             currentSplitTree = newTree
             logger.info("📐 ✅ Updated currentSplitTree: \(newTree.paneIds.count) panes, isSplit=\(newTree.isSplit)")
             
-            // Proactively restore scrollback for all panes in this layout
-            // This handles the case where we reconnect to a multi-pane session
-            for paneNum in newTree.paneIds {
-                let paneId = "%\(paneNum)"
-                restorePaneHistoryIfNeeded(paneId: paneId)
-            }
+            // Note: History restore is triggered when surfaces are created in getSurfaceOrCreate()
+            // We don't proactively restore here because layout changes can arrive before
+            // the command queue is properly initialized, causing FIFO ordering issues.
             
             // If we're down to a single pane, update focused pane ID and ensure primarySurface is set
             if newTree.paneIds.count == 1 {
@@ -617,6 +618,21 @@ class TmuxSessionManager: ObservableObject {
         
         logger.info("Created Ghostty surface for pane \(paneId)")
         
+        // Check if there's buffered history content for this pane
+        // This happens when history restore completed before the surface was created
+        if let historyContent = pendingHistoryContent.removeValue(forKey: paneId) {
+            logger.info("📜 Feeding buffered history content to new surface for pane \(paneId): \(historyContent.count) chars")
+            feedHistoryToSurface(surface, content: historyContent, paneId: paneId)
+            
+            // Also flush any live output that was buffered during history restore
+            if let buffered = historyRestoreBuffer.removeValue(forKey: paneId), !buffered.isEmpty {
+                logger.info("📜 Flushing \(buffered.count) buffered live output chunks for pane \(paneId)")
+                for data in buffered {
+                    surface.feedData(data)
+                }
+            }
+        }
+        
         // Flush any pending output that was buffered before surface was available
         // This is critical for session restore which arrives before factory is configured
         if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
@@ -659,9 +675,38 @@ class TmuxSessionManager: ObservableObject {
         // Remove from awaiting set
         awaitingHistoryRestore.remove(paneId)
         
-        // Get the surface
-        guard let surface = paneSurfaces[paneId] else {
-            logger.warning("📜 History restore complete but no surface for \(paneId)")
+        // Try to get or create the surface
+        guard let surface = getSurfaceOrCreate(for: paneId) else {
+            // Surface not available yet - buffer the history for when surface is created
+            logger.info("📜 History restore complete but no surface for \(paneId) - buffering content (\(content.count) chars)")
+            pendingHistoryContent[paneId] = content
+            return
+        }
+        
+        // Feed history to the surface
+        feedHistoryToSurface(surface, content: content, paneId: paneId)
+        
+        // Flush any live output that was buffered during history restore
+        if let buffered = historyRestoreBuffer.removeValue(forKey: paneId), !buffered.isEmpty {
+            logger.info("📜 Flushing \(buffered.count) buffered live output chunks for pane \(paneId)")
+            for data in buffered {
+                surface.feedData(data)
+            }
+        }
+    }
+    
+    /// Feed captured history content to a surface
+    private func feedHistoryToSurface(_ surface: Ghostty.SurfaceView, content: String, paneId: String) {
+        // Strip trailing empty lines from captured content
+        // capture-pane includes all lines up to cursor, which may include many blank lines
+        var lines = content.components(separatedBy: "\n")
+        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.removeLast()
+        }
+        let trimmedContent = lines.joined(separator: "\n")
+        
+        guard !trimmedContent.isEmpty else {
+            logger.info("📜 No history content to feed for pane \(paneId)")
             return
         }
         
@@ -674,21 +719,11 @@ class TmuxSessionManager: ObservableObject {
         
         // Feed captured session content to terminal
         // Convert \n to \r\n for proper terminal display (CR moves to column 0, LF moves down)
-        if !content.isEmpty {
-            let terminalContent = content.replacingOccurrences(of: "\n", with: "\r\n")
-            if let data = terminalContent.data(using: .utf8) {
-                surface.feedData(data)
-            }
-            logger.info("📜 Fed history content to pane \(paneId): \(content.count) chars")
+        let terminalContent = trimmedContent.replacingOccurrences(of: "\n", with: "\r\n")
+        if let data = terminalContent.data(using: .utf8) {
+            surface.feedData(data)
         }
-        
-        // Flush any live output that was buffered during history restore
-        if let buffered = historyRestoreBuffer.removeValue(forKey: paneId), !buffered.isEmpty {
-            logger.info("📜 Flushing \(buffered.count) buffered live output chunks for pane \(paneId)")
-            for data in buffered {
-                surface.feedData(data)
-            }
-        }
+        logger.info("📜 Fed history content to pane \(paneId): \(trimmedContent.count) chars (trimmed from \(content.count))")
     }
 
     /// Configure surface management with factory and handlers
