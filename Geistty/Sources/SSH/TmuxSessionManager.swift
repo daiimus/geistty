@@ -280,7 +280,7 @@ class TmuxSessionManager: ObservableObject {
     
     /// Handle window added notification
     func handleWindowAdd(windowId: String) {
-        logger.info("Window added: \(windowId)")
+        logger.info("📑 Window added: \(windowId)")
         
         guard let sessionId = currentSession?.id else { return }
         
@@ -288,9 +288,19 @@ class TmuxSessionManager: ObservableObject {
         let window = TmuxWindow(id: windowId, index: windows.count, name: "new", sessionId: sessionId)
         windows[windowId] = window
         
+        // Add to current session's window list
+        if var session = currentSession {
+            if !session.windowIds.contains(windowId) {
+                session.windowIds.append(windowId)
+                sessions[session.id] = session
+                currentSession = session
+            }
+        }
+        
         // Query window details using proper command routing
         guard let client = controlClient, let write = writeToSSH else { return }
         
+        // Query both window info and layout in parallel
         client.sendCommand("display-message -t '\(windowId)' -p '#{window_index} #{window_name}'", via: write) { [weak self] result in
             if case .success(let response) = result {
                 let parts = response.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1)
@@ -299,6 +309,26 @@ class TmuxSessionManager: ObservableObject {
                         window.index = index
                         window.name = String(parts[1])
                         self?.windows[windowId] = window
+                        logger.info("📑 Window \(windowId) details: index=\(index) name=\(parts[1])")
+                    }
+                }
+            }
+        }
+        
+        // Also query the layout for this window to build its split tree
+        client.sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'", via: write) { [weak self] result in
+            guard let self = self else { return }
+            if case .success(let response) = result {
+                let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !layoutStr.isEmpty {
+                    logger.info("📑 Queried layout for new window \(windowId): \(layoutStr.prefix(50))...")
+                    // Parse and create split tree
+                    if let parsedLayout = try? TmuxLayout.parseWithChecksum(layoutStr) {
+                        self.updatePanePositions(from: parsedLayout, in: windowId)
+                        self.updateSplitTree(from: parsedLayout, for: windowId)
+                    } else if let parsedLayout = try? TmuxLayout.parse(String(layoutStr.dropFirst(5))) {
+                        self.updatePanePositions(from: parsedLayout, in: windowId)
+                        self.updateSplitTree(from: parsedLayout, for: windowId)
                     }
                 }
             }
@@ -371,7 +401,38 @@ class TmuxSessionManager: ObservableObject {
             // Switch to the split tree for the new window
             if let tree = windowSplitTrees[windowId] {
                 currentSplitTree = tree
-                logger.info("📑 Switched to split tree for window \(windowId)")
+                logger.info("📑 Switched to split tree for window \(windowId): \(tree.paneIds.count) panes")
+                
+                // Update focused pane to first pane in this window (or active pane if known)
+                if let window = windows[windowId], let activePaneId = window.activePaneId {
+                    focusedPaneId = activePaneId
+                } else if let firstPaneId = tree.paneIds.first {
+                    focusedPaneId = "%\(firstPaneId)"
+                }
+            } else {
+                // No split tree yet - query the layout
+                logger.info("📑 No split tree for window \(windowId), querying layout...")
+                
+                guard let client = controlClient, let write = writeToSSH else { return }
+                
+                client.sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'", via: write) { [weak self] result in
+                    guard let self = self else { return }
+                    if case .success(let response) = result {
+                        let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !layoutStr.isEmpty {
+                            logger.info("📑 Got layout for window \(windowId): \(layoutStr.prefix(50))...")
+                            
+                            // Parse and create split tree
+                            if let parsedLayout = try? TmuxLayout.parseWithChecksum(layoutStr) {
+                                self.updatePanePositions(from: parsedLayout, in: windowId)
+                                self.updateSplitTree(from: parsedLayout, for: windowId)
+                            } else if let parsedLayout = try? TmuxLayout.parse(String(layoutStr.dropFirst(5))) {
+                                self.updatePanePositions(from: parsedLayout, in: windowId)
+                                self.updateSplitTree(from: parsedLayout, for: windowId)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -462,9 +523,15 @@ class TmuxSessionManager: ObservableObject {
             currentSplitTree = newTree
             logger.info("📐 ✅ Updated currentSplitTree: \(newTree.paneIds.count) panes, isSplit=\(newTree.isSplit)")
             
-            // Note: History restore is triggered when surfaces are created in getSurfaceOrCreate()
-            // We don't proactively restore here because layout changes can arrive before
-            // the command queue is properly initialized, causing FIFO ordering issues.
+            // Ensure surfaces exist for all panes in this window
+            // This is important when switching to a window that hasn't received output yet
+            for numericPaneId in newTree.paneIds {
+                let paneId = "%\(numericPaneId)"
+                if paneSurfaces[paneId] == nil {
+                    logger.info("📐 🆕 Pre-creating surface for pane \(paneId) in newly focused window")
+                    _ = getSurfaceOrCreate(for: paneId)
+                }
+            }
             
             // If we're down to a single pane, update focused pane ID and ensure primarySurface is set
             if newTree.paneIds.count == 1 {
@@ -834,13 +901,69 @@ class TmuxSessionManager: ObservableObject {
     
     /// Select a window by ID
     func selectWindow(_ windowId: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
+        guard let client = controlClient, let write = writeToSSH else {
+            logger.warning("📑 selectWindow(\(windowId)) - NO client or write!")
+            return
+        }
+        
+        logger.info("📑 selectWindow: \(windowId)")
+        logger.info("📑   Current windows: \(windows.keys.sorted().joined(separator: ", "))")
+        logger.info("📑   Current split trees: \(windowSplitTrees.keys.sorted().joined(separator: ", "))")
+        
+        // Send select-window command to tmux
         client.sendCommandFireAndForget("select-window -t '\(windowId)'", via: write)
         focusedWindowId = windowId
         
         // Update current split tree for the newly focused window
         if let tree = windowSplitTrees[windowId] {
             currentSplitTree = tree
+            logger.info("📑 Switched to existing split tree for window \(windowId): \(tree.paneIds.count) panes")
+            
+            // Ensure surfaces exist for all panes in this window
+            for numericPaneId in tree.paneIds {
+                let paneId = "%\(numericPaneId)"
+                if paneSurfaces[paneId] == nil {
+                    logger.info("📑 🆕 Pre-creating surface for pane \(paneId)")
+                    _ = getSurfaceOrCreate(for: paneId)
+                }
+            }
+            
+            // Update focused pane to first pane in this window
+            if let firstPaneId = tree.paneIds.first {
+                focusedPaneId = "%\(firstPaneId)"
+            }
+        } else {
+            // No split tree yet - show loading state and query the layout
+            logger.info("📑 No split tree for window \(windowId), querying layout...")
+            
+            // Clear current split tree while we load the new window's layout
+            // This prevents showing the old window's content during transition
+            currentSplitTree = TmuxSplitTree()
+            
+            client.sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'", via: write) { [weak self] result in
+                guard let self = self else { return }
+                if case .success(let response) = result {
+                    let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !layoutStr.isEmpty {
+                        logger.info("📑 Got layout for window \(windowId): \(layoutStr.prefix(50))...")
+                        
+                        // Parse and create split tree
+                        if let parsedLayout = try? TmuxLayout.parseWithChecksum(layoutStr) {
+                            self.updatePanePositions(from: parsedLayout, in: windowId)
+                            self.updateSplitTree(from: parsedLayout, for: windowId)
+                        } else if let parsedLayout = try? TmuxLayout.parse(String(layoutStr.dropFirst(5))) {
+                            self.updatePanePositions(from: parsedLayout, in: windowId)
+                            self.updateSplitTree(from: parsedLayout, for: windowId)
+                        } else {
+                            logger.error("📑 Failed to parse layout for window \(windowId)")
+                        }
+                    } else {
+                        logger.warning("📑 Empty layout received for window \(windowId)")
+                    }
+                } else if case .failure(let error) = result {
+                    logger.error("📑 Failed to query layout for window \(windowId): \(error)")
+                }
+            }
         }
     }
     

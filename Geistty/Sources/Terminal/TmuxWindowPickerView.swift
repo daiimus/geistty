@@ -69,8 +69,11 @@ struct TmuxWindowPickerView: View {
     }
     
     private func selectWindow(_ window: TmuxWindow) {
-        logger.info("Selecting window: \(window.id) '\(window.name)'")
+        logger.info("📑 TmuxWindowPickerView.selectWindow: \(window.id) '\(window.name)'")
+        logger.info("📑   Current focusedWindowId: \(sessionManager.focusedWindowId)")
+        logger.info("📑   Current split tree panes: \(sessionManager.currentSplitTree.paneIds.count)")
         sessionManager.selectWindow(window.id)
+        logger.info("📑   After selectWindow - focusedWindowId: \(sessionManager.focusedWindowId)")
     }
     
     private func closeWindow(_ window: TmuxWindow) {
