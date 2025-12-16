@@ -156,16 +156,30 @@ class GhosttyPaneSurfaceContainerView: UIView {
     /// Target columns (character width) from tmux layout
     var targetCols: Int = 0 {
         didSet {
-            if targetCols != oldValue { setNeedsLayout() }
+            if targetCols != oldValue {
+                lastAppliedCols = 0  // Force re-apply on next layout
+                setNeedsLayout()
+            }
         }
     }
     
     /// Target rows (character height) from tmux layout
     var targetRows: Int = 0 {
         didSet {
-            if targetRows != oldValue { setNeedsLayout() }
+            if targetRows != oldValue {
+                lastAppliedRows = 0  // Force re-apply on next layout
+                setNeedsLayout()
+            }
         }
     }
+    
+    /// Track last successfully applied grid size to avoid redundant updates
+    private var lastAppliedCols: Int = 0
+    private var lastAppliedRows: Int = 0
+    
+    /// Retry counter to prevent infinite layout loops
+    private var gridSizeRetryCount: Int = 0
+    private let maxGridSizeRetries: Int = 3
     
     var surface: Ghostty.SurfaceView? {
         didSet {
@@ -184,6 +198,11 @@ class GhosttyPaneSurfaceContainerView: UIView {
                     surface.leadingAnchor.constraint(equalTo: leadingAnchor),
                     surface.trailingAnchor.constraint(equalTo: trailingAnchor)
                 ])
+                
+                // Reset tracking for new surface
+                lastAppliedCols = 0
+                lastAppliedRows = 0
+                gridSizeRetryCount = 0
                 
                 // Set the grid size after the surface is added
                 updateGridSize()
@@ -217,13 +236,26 @@ class GhosttyPaneSurfaceContainerView: UIView {
             return
         }
         
+        // Skip if we've already applied these dimensions
+        if targetCols == lastAppliedCols && targetRows == lastAppliedRows {
+            return
+        }
+        
         // Tell Ghostty to use the exact grid size
         let success = surface.setExactGridSize(cols: targetCols, rows: targetRows)
-        if !success {
-            // Cell size not available yet - try again on next layout
-            DispatchQueue.main.async { [weak self] in
-                self?.setNeedsLayout()
+        if success {
+            lastAppliedCols = targetCols
+            lastAppliedRows = targetRows
+            gridSizeRetryCount = 0  // Reset retry counter on success
+        } else {
+            // Cell size not available yet - retry with limited attempts
+            gridSizeRetryCount += 1
+            if gridSizeRetryCount <= maxGridSizeRetries {
+                DispatchQueue.main.async { [weak self] in
+                    self?.setNeedsLayout()
+                }
             }
+            // After max retries, give up - cell size will be set when surface is ready
         }
     }
     

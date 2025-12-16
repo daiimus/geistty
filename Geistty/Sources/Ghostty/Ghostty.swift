@@ -869,6 +869,11 @@ extension Ghostty {
         /// Current mouse cursor shape (for trackpad/mouse users)
         var currentMouseShape: ghostty_action_mouse_shape_e = GHOSTTY_MOUSE_SHAPE_DEFAULT
         
+        /// When true, the surface uses an explicit grid size set via setExactGridSize()
+        /// and won't auto-resize based on view bounds. This prevents layout thrashing
+        /// in multi-pane tmux layouts where each pane has a fixed character size.
+        var usesExactGridSize: Bool = false
+        
         /// Search state - when non-nil, search is active
         @Published var searchState: SearchState? = nil {
             didSet {
@@ -2768,11 +2773,21 @@ extension Ghostty {
             
             logger.debug("📐 Setting exact grid size: \(cols)x\(rows) = \(exactWidthPx)x\(exactHeightPx)px (cell: \(size.cell_width_px)x\(size.cell_height_px))")
             
+            // Mark that we're using explicit grid sizing - prevents layoutSubviews from overriding
+            usesExactGridSize = true
+            
             // Update content scale and surface size
             ghostty_surface_set_content_scale(surface, scale, scale)
             ghostty_surface_set_size(surface, exactWidthPx, exactHeightPx)
             
             return true
+        }
+        
+        /// Clear exact grid size mode, allowing normal auto-resize behavior
+        func clearExactGridSize() {
+            usesExactGridSize = false
+            // Trigger a resize to current bounds
+            sizeDidChange(bounds.size)
         }
         
         // MARK: - UIView Overrides
@@ -2901,7 +2916,15 @@ extension Ghostty {
         
         override func layoutSubviews() {
             super.layoutSubviews()
-            sizeDidChange(bounds.size)
+            
+            // Only auto-resize if not using explicit grid sizing (tmux multi-pane mode)
+            // In exact grid mode, the container controls sizing via setExactGridSize()
+            if !usesExactGridSize {
+                sizeDidChange(bounds.size)
+            } else {
+                // Still need to update sublayer frames to match our bounds
+                updateSublayerFrames()
+            }
             
             // Keep scroll indicator on right edge (without animation)
             if let indicator = scrollIndicator {
@@ -2909,6 +2932,20 @@ extension Ghostty {
                 CATransaction.setDisableActions(true)
                 indicator.frame.origin.x = bounds.width - 6
                 CATransaction.commit()
+            }
+        }
+        
+        /// Update sublayer frames to match current bounds (without changing surface size)
+        private func updateSublayerFrames() {
+            let scale = contentScaleFactor
+            if let sublayers = layer.sublayers {
+                for sublayer in sublayers {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    sublayer.frame = bounds
+                    sublayer.contentsScale = scale
+                    CATransaction.commit()
+                }
             }
         }
     }
