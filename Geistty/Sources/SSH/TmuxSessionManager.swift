@@ -514,6 +514,10 @@ class TmuxSessionManager: ObservableObject {
                         remainingSurface.onCellSizeChanged = { [weak self] cellSize in
                             self?.primaryCellSize = cellSize
                         }
+                        // Manually trigger if cell size is already valid
+                        if remainingSurface.cellSize.width > 0 && remainingSurface.cellSize.height > 0 {
+                            primaryCellSize = remainingSurface.cellSize
+                        }
                     }
                 }
             }
@@ -553,6 +557,10 @@ class TmuxSessionManager: ObservableObject {
                     primarySurface = remainingSurface
                     remainingSurface.onCellSizeChanged = { [weak self] cellSize in
                         self?.primaryCellSize = cellSize
+                    }
+                    // Manually trigger if cell size is already valid
+                    if remainingSurface.cellSize.width > 0 && remainingSurface.cellSize.height > 0 {
+                        primaryCellSize = remainingSurface.cellSize
                     }
                 }
             }
@@ -705,6 +713,12 @@ class TmuxSessionManager: ObservableObject {
             surface.onCellSizeChanged = { [weak self] cellSize in
                 self?.primaryCellSize = cellSize
                 logger.info("📐 Primary cell size updated: \(Int(cellSize.width))x\(Int(cellSize.height))")
+            }
+            // CRITICAL: Manually trigger if cell size is already valid
+            // The callback won't fire via didSet if the value was set before the callback was assigned
+            if surface.cellSize.width > 0 && surface.cellSize.height > 0 {
+                primaryCellSize = surface.cellSize
+                logger.info("📐 Primary cell size initialized: \(Int(surface.cellSize.width))x\(Int(surface.cellSize.height))")
             }
         }
         
