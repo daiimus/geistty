@@ -58,6 +58,14 @@ class TmuxSessionManager: ObservableObject {
     /// Panes that have had their history restored (to avoid duplicate restores)
     private var restoredPanes: Set<String> = []
     
+    /// Panes awaiting history restore - live output is buffered until history arrives
+    /// This prevents the race condition where live output arrives before capture-pane response
+    private var awaitingHistoryRestore: Set<String> = []
+    
+    /// Buffer for live output received while awaiting history restore
+    /// This is separate from pendingOutput (which is for pre-surface output)
+    private var historyRestoreBuffer: [String: [Data]] = [:]
+    
     /// Surface creation factory (injected before activation)
     /// This creates Ghostty surfaces with proper configuration
     private var surfaceFactory: ((String) -> Ghostty.SurfaceView)?
@@ -517,6 +525,17 @@ class TmuxSessionManager: ObservableObject {
     
     /// Route pane output to the appropriate Ghostty surface
     func routeOutput(_ data: Data, to paneId: String) {
+        // If this pane is awaiting history restore, buffer the live output
+        // This prevents the race condition where live output arrives before capture-pane response
+        if awaitingHistoryRestore.contains(paneId) {
+            if historyRestoreBuffer[paneId] == nil {
+                historyRestoreBuffer[paneId] = []
+            }
+            historyRestoreBuffer[paneId]?.append(data)
+            logger.debug("📜 Buffering live output for pane \(paneId) awaiting history restore: \(data.count) bytes")
+            return
+        }
+        
         // Get existing surface or create one if factory is available
         guard let surface = getSurfaceOrCreate(for: paneId) else {
             // No surface available - buffer the output for later
@@ -628,9 +647,50 @@ class TmuxSessionManager: ObservableObject {
         logger.info("📜 Restoring scrollback history for pane \(paneId)")
         restoredPanes.insert(paneId)
         
+        // Mark pane as awaiting history - live output will be buffered until history arrives
+        awaitingHistoryRestore.insert(paneId)
+        
         client.restorePaneHistory(paneId: paneId, via: write)
     }
     
+    /// Called when history restore is complete for a pane
+    /// Flushes any buffered live output that arrived during the restore
+    func historyRestoreComplete(for paneId: String, content: String) {
+        // Remove from awaiting set
+        awaitingHistoryRestore.remove(paneId)
+        
+        // Get the surface
+        guard let surface = paneSurfaces[paneId] else {
+            logger.warning("📜 History restore complete but no surface for \(paneId)")
+            return
+        }
+        
+        // Clear the screen and feed history content
+        // ESC[2J = clear entire screen, ESC[H = move cursor to home position
+        let clearScreen = "\u{1b}[2J\u{1b}[H"
+        if let clearData = clearScreen.data(using: .utf8) {
+            surface.feedData(clearData)
+        }
+        
+        // Feed captured session content to terminal
+        // Convert \n to \r\n for proper terminal display (CR moves to column 0, LF moves down)
+        if !content.isEmpty {
+            let terminalContent = content.replacingOccurrences(of: "\n", with: "\r\n")
+            if let data = terminalContent.data(using: .utf8) {
+                surface.feedData(data)
+            }
+            logger.info("📜 Fed history content to pane \(paneId): \(content.count) chars")
+        }
+        
+        // Flush any live output that was buffered during history restore
+        if let buffered = historyRestoreBuffer.removeValue(forKey: paneId), !buffered.isEmpty {
+            logger.info("📜 Flushing \(buffered.count) buffered live output chunks for pane \(paneId)")
+            for data in buffered {
+                surface.feedData(data)
+            }
+        }
+    }
+
     /// Configure surface management with factory and handlers
     /// Call this before any surfaces are created
     func configureSurfaceManagement(

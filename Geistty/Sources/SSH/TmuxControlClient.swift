@@ -1275,12 +1275,13 @@ class TmuxControlClient {
     ///   - paneId: The pane ID (e.g., "%0", "%1")
     ///   - write: Function to send data to SSH
     func restorePaneHistory(paneId: String, via write: @escaping (String) -> Void) {
-        // Capture pane content (plain text, preserving line structure)
+        // Capture pane content with escape sequences for colors/formatting
         // -p: output to stdout (control mode captures in %begin/%end)
+        // -e: include escape sequences for text and background attributes
         // -t: target pane
-        // -S -N: start from N lines before current position
+        // -S -N: start from N lines before current position (scrollback)
         // Note: We don't use -J (join) as it destroys line breaks
-        let captureCommand = "capture-pane -p -t \(paneId) -S -\(sessionRestoreScrollback)"
+        let captureCommand = "capture-pane -pe -t \(paneId) -S -\(sessionRestoreScrollback)"
         logger.info("Capturing pane history: \(captureCommand)")
         
         // Use proper command routing - the response will come back via callback
