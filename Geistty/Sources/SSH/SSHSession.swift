@@ -520,25 +520,12 @@ extension SSHSession: TmuxControlClientDelegate {
         // Feed it to the terminal so the user sees their session history
         logger.info("Restoring session content to terminal: \(content.count) chars for pane \(paneId)")
         
-        // Route through TmuxSessionManager to ensure it goes to the correct surface
-        // This is important because the displayed surface might be different from
-        // the delegate's surfaceView (e.g., after surface replacement in Option A)
+        // Route through TmuxSessionManager which handles:
+        // 1. Clearing the screen
+        // 2. Feeding history content
+        // 3. Flushing any buffered live output that arrived during capture
         if let manager = tmuxSessionManager {
-            // Clear the screen first to remove pre-tmux SSH output (MOTD, command echo, etc.)
-            // ESC[2J = clear entire screen, ESC[H = move cursor to home position
-            let clearScreen = "\u{1b}[2J\u{1b}[H"
-            if let clearData = clearScreen.data(using: .utf8) {
-                manager.routeOutput(clearData, to: paneId)
-            }
-            
-            // Feed captured session content to terminal
-            // Convert \n to \r\n for proper terminal display (CR moves to column 0, LF moves down)
-            if !content.isEmpty {
-                let terminalContent = content.replacingOccurrences(of: "\n", with: "\r\n")
-                if let data = terminalContent.data(using: .utf8) {
-                    manager.routeOutput(data, to: paneId)
-                }
-            }
+            manager.historyRestoreComplete(for: paneId, content: content)
         } else {
             // Fallback for non-tmux mode (shouldn't happen in practice)
             logger.warning("No tmux session manager, using delegate fallback for session restore")
