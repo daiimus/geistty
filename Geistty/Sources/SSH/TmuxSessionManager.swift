@@ -88,6 +88,8 @@ class TmuxSessionManager: ObservableObject {
     private var lastResizeCols: Int = 0
     private var lastResizeRows: Int = 0
     
+    /// Cache of last processed layout strings per window (to avoid redundant updates)
+    private var lastProcessedLayouts: [String: String] = [:]
     /// Buffer for output received before surfaces are created
     /// This is essential for session restore which arrives before surface factory is configured
     private var pendingOutput: [String: [Data]] = [:]
@@ -143,6 +145,7 @@ class TmuxSessionManager: ObservableObject {
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
         restoredPanes.removeAll()
+        lastProcessedLayouts.removeAll()
     }
     
     // MARK: - State Queries
@@ -380,6 +383,14 @@ class TmuxSessionManager: ObservableObject {
         if cleanLayout.hasSuffix(" *") || cleanLayout.hasSuffix(" -") {
             cleanLayout = String(cleanLayout.dropLast(2))
         }
+        
+        // Skip if this layout is identical to the last one we processed for this window
+        // This prevents redundant UI updates during rapid layout changes
+        if lastProcessedLayouts[windowId] == cleanLayout {
+            logger.debug("📐 Skipping duplicate layout for \(windowId)")
+            return
+        }
+        lastProcessedLayouts[windowId] = cleanLayout
         
         logger.info("📐 Layout changed: \(windowId) [\(windowIndex)] layout=\(cleanLayout.prefix(80))...")
         
@@ -1099,6 +1110,7 @@ class TmuxSessionManager: ObservableObject {
         sessions.removeAll()
         windows.removeAll()
         panes.removeAll()
+        lastProcessedLayouts.removeAll()
         currentSession = nil
         isConnected = false
         
