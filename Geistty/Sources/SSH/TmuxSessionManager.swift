@@ -55,6 +55,10 @@ class TmuxSessionManager: ObservableObject {
     /// This is always kept alive even when in multi-pane mode
     @Published private(set) var primarySurface: Ghostty.SurfaceView?
     
+    /// Cell size from the primary surface (for calculating terminal dimensions)
+    /// This is updated when the surface reports its cell size
+    @Published private(set) var primaryCellSize: CGSize = .zero
+    
     /// Panes that have had their history restored (to avoid duplicate restores)
     private var restoredPanes: Set<String> = []
     
@@ -507,6 +511,9 @@ class TmuxSessionManager: ObservableObject {
                        let remainingSurface = paneSurfaces[firstRemainingPaneId] {
                         logger.info("📐 🔄 Primary pane %0 closed, reassigning primarySurface to \(firstRemainingPaneId)")
                         primarySurface = remainingSurface
+                        remainingSurface.onCellSizeChanged = { [weak self] cellSize in
+                            self?.primaryCellSize = cellSize
+                        }
                     }
                 }
             }
@@ -544,6 +551,9 @@ class TmuxSessionManager: ObservableObject {
                 if let remainingSurface = paneSurfaces[remainingPaneId], primarySurface !== remainingSurface {
                     logger.info("📐 🔄 Reassigning primarySurface to remaining pane \(remainingPaneId)")
                     primarySurface = remainingSurface
+                    remainingSurface.onCellSizeChanged = { [weak self] cellSize in
+                        self?.primaryCellSize = cellSize
+                    }
                 }
             }
         } else {
@@ -689,9 +699,13 @@ class TmuxSessionManager: ObservableObject {
         
         paneSurfaces[paneId] = surface
         
-        // If this is %0, also set as primary surface
+        // If this is %0, also set as primary surface and wire up cell size callback
         if paneId == "%0" {
             primarySurface = surface
+            surface.onCellSizeChanged = { [weak self] cellSize in
+                self?.primaryCellSize = cellSize
+                logger.info("📐 Primary cell size updated: \(Int(cellSize.width))x\(Int(cellSize.height))")
+            }
         }
         
         logger.info("Created Ghostty surface for pane \(paneId)")

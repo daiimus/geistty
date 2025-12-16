@@ -1757,7 +1757,8 @@ class RawTerminalUIViewController: UIViewController {
         surfaceView?.isHidden = true
         
         // Create and add the multi-pane hosting controller
-        let multiPaneView = TmuxMultiPaneView(sessionManager: tmuxManager)
+        var multiPaneView = TmuxMultiPaneView(sessionManager: tmuxManager)
+        multiPaneView.shortcutDelegate = self  // Wire up keyboard shortcuts
         let hostingController = UIHostingController(rootView: multiPaneView)
         multiPaneHostingController = hostingController
         

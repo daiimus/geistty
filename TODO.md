@@ -12,6 +12,54 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 
 These are the current focus areas before continuing with other roadmap items:
 
+### 🐛 CRITICAL: Multi-Pane Dimension Bug
+**Symptom:** After splitting, panes don't use full available screen space.
+Both panes appear undersized - neither fills its allocated area.
+
+**Session Progress (Dec 15, 2025):**
+- [x] Added `GeometryReader` to `TmuxMultiPaneView` to detect size changes
+- [x] Fixed crash (integer overflow in `sizeDidChange`) with bounds guards
+- [x] Wired up `shortcutDelegate` for multi-pane mode (Cmd+D, Cmd+] work)
+- [x] Added `@Published primaryCellSize` to `TmuxSessionManager`
+- [x] Added `onCellSizeChanged` callback to `SurfaceView` in Ghostty.swift
+- [x] Wired callback to update `primaryCellSize` when surface reports cell size
+- [x] Updated `TmuxMultiPaneView` to observe `sessionManager.primaryCellSize`
+- [ ] **STILL BROKEN**: Panes don't use full space despite above changes
+
+**Root Cause Investigation:**
+The issue was identified as SwiftUI not being able to observe nested `@Published` properties
+across different objects. We added `onCellSizeChanged` callback but the resize still isn't
+triggering correctly.
+
+**What Works:**
+- Connect ✅
+- Cmd+D (split) ✅  
+- Cmd+] (switch panes) ✅
+- Exit one pane ✅
+
+**What's Broken:**
+- Neither pane uses full available space after split
+
+**Next Debug Steps:**
+1. Check console logs for `📐 Primary cell size updated` messages
+2. Verify `handleSizeChange` is being called with correct geometry
+3. Check if `refresh-client -C` is actually being sent to tmux
+4. Compare sent dimensions with actual available pixel space
+5. May need to investigate if the issue is in `TmuxSplitTreeView` layout
+
+**Files Modified This Session:**
+- `Ghostty.swift` - Added `onCellSizeChanged` callback, `sizeDidChange` guards
+- `TmuxSessionManager.swift` - Added `primaryCellSize`, wired up callbacks
+- `TmuxMultiPaneView.swift` - GeometryReader, observe `primaryCellSize`
+
+**Related Code:**
+- `TmuxMultiPaneView.swift` - GeometryReader, handleSizeChange
+- `Ghostty.swift` - `onCellSizeChanged` callback, `sizeDidChange()`
+- `TmuxSessionManager.swift` - `primaryCellSize`, `resize(cols:rows:)`
+- `TmuxSplitTreeView.swift` - Recursive split layout rendering
+
+---
+
 ### 1. tmux Control Mode Integration ✅ COMPLETE
 - [x] Create TmuxControlClient.swift for tmux -CC protocol
 - [x] Implement control message parser (%output, %begin/%end, etc.)
@@ -71,8 +119,48 @@ See TMUX_INTEGRATION.md for full architecture.
   - [x] Split navigation: Cmd+[ / ], Cmd+Option+Arrows
   - [x] Tab/Window: Cmd+T, Cmd+1-9, Cmd+Shift+[/], Cmd+W variants
   - [x] Split zoom: Cmd+Shift+Enter, Cmd+Ctrl+= (equalize)
-- [ ] Handle %window-add/%window-close notifications (partial - have close)
-- [ ] Window rename support
+- [x] Handle %window-add/%window-close notifications
+- [x] Window switching with layout query & surface pre-creation
+- [ ] Window rename support (handler exists, UI may need work)
+
+#### Phase 3.5: Disconnection & Error Handling 🔲 TODO
+Handle SSH disconnection gracefully instead of frozen screen.
+
+**Current Issue:**
+- SSH disconnect leaves terminal frozen with no indication
+- User has no feedback that connection was lost
+- No way to reconnect without force-closing app
+
+**Ghostty Behavior (for reference):**
+- Ghostty uses `close_surface_cb` callback when child process exits
+- Posts notification with `processAlive: false`
+- Shows confirmation dialog if process still alive, closes immediately if dead
+- Terminal closes automatically when shell exits
+
+**Required for Geistty (Multi-Window Aware):**
+- [ ] Detect SSH connection drop (socket error, EOF, timeout)
+- [ ] Per-pane disconnect state (not all panes disconnect at once)
+- [ ] Show subtle disconnected indicator on affected pane (icon, border color, or banner)
+- [ ] Preserve scrollback/history - user may want to copy logs before closing
+- [ ] Allow pane close (X button or Cmd+W) to reclaim space for other panes
+- [ ] Handle tmux %exit notification (tmux session ended on server)
+- [ ] Graceful handling of tmux detach vs connection drop
+- [ ] Options: Reconnect button, return to connection screen, or auto-reconnect
+- [ ] Display disconnect reason if available (server closed, network error, auth failure)
+
+**UX Flow:**
+1. Connection drops → Pane shows "Disconnected" overlay (non-blocking)
+2. User can still scroll/copy from disconnected pane
+3. User can close disconnected pane to give space to others
+4. Other panes continue working if connection is per-pane (future multi-connection)
+5. Reconnect option available (re-attaches to tmux session if possible)
+
+**Implementation Notes:**
+- SSHSession already tracks `isConnected` state
+- TmuxControlClient handles `%exit` notification → delegate callback
+- Need per-surface disconnect state tracking
+- May want configurable behavior (auto-close vs show reconnect prompt)
+- Mirror Ghostty's approach: surface stays visible but marked as dead
 
 #### Phase 4: iPadOS Window Integration 🔲 FUTURE
 - [ ] Each pane as native iPadOS Scene
