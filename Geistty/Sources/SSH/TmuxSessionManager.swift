@@ -474,12 +474,12 @@ class TmuxSessionManager: ObservableObject {
         
         // Parse layout and update split tree
         if let parsedLayout = try? TmuxLayout.parseWithChecksum(cleanLayout) {
-            logger.info("📐 Parsed layout with checksum: \(parsedLayout.content)")
+            logger.info("📐 Parsed layout: \(parsedLayout.width)x\(parsedLayout.height) content=\(parsedLayout.content)")
             updatePanePositions(from: parsedLayout, in: windowId)
             updateSplitTree(from: parsedLayout, for: windowId)
         } else if let parsedLayout = try? TmuxLayout.parse(String(cleanLayout.dropFirst(5))) {
             // Try parsing without checksum (skip "XXXX," prefix)
-            logger.info("📐 Parsed layout without checksum: \(parsedLayout.content)")
+            logger.info("📐 Parsed layout (no checksum): \(parsedLayout.width)x\(parsedLayout.height) content=\(parsedLayout.content)")
             updatePanePositions(from: parsedLayout, in: windowId)
             updateSplitTree(from: parsedLayout, for: windowId)
         } else {
@@ -528,6 +528,11 @@ class TmuxSessionManager: ObservableObject {
         }
         
         logger.info("📐 Split tree for \(windowId): panes=\(newTree.paneIds), isSplit=\(newTree.isSplit), focusedWindow=\(focusedWindowId)")
+        
+        // Log the tree details including dimensions for debugging
+        if let rootNode = newTree.root {
+            logTreeNode(rootNode, prefix: "📐 Tree: ")
+        }
         
         // Update current split tree if this is the focused window
         if windowId == focusedWindowId {
@@ -737,19 +742,38 @@ class TmuxSessionManager: ObservableObject {
                     surface.feedData(data)
                 }
             }
-        }
-        
-        // Flush any pending output that was buffered before surface was available
-        // This is critical for session restore which arrives before factory is configured
-        if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
-            logger.info("🔄 Flushing \(pending.count) buffered chunks to new surface for pane \(paneId)")
-            for data in pending {
-                surface.feedData(data)
+            
+            // Flush any pre-surface output (now that history is done)
+            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+                logger.info("🔄 Flushing \(pending.count) pre-surface chunks for pane \(paneId)")
+                for data in pending {
+                    surface.feedData(data)
+                }
             }
+        } else if restoredPanes.contains(paneId) {
+            // History was already restored for this pane (e.g., surface recreated)
+            // Safe to flush pending output directly
+            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+                logger.info("🔄 Flushing \(pending.count) buffered chunks to surface for pane \(paneId) (already restored)")
+                for data in pending {
+                    surface.feedData(data)
+                }
+            }
+        } else {
+            // History restore hasn't happened yet - move pendingOutput to historyRestoreBuffer
+            // so it gets flushed AFTER history content
+            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+                logger.info("📜 Moving \(pending.count) pre-surface chunks to history restore buffer for pane \(paneId)")
+                if historyRestoreBuffer[paneId] == nil {
+                    historyRestoreBuffer[paneId] = []
+                }
+                // Prepend to buffer (this output arrived before any historyRestoreBuffer entries)
+                historyRestoreBuffer[paneId] = pending + (historyRestoreBuffer[paneId] ?? [])
+            }
+            
+            // Now start history restore - this will mark pane as awaiting
+            restorePaneHistoryIfNeeded(paneId: paneId)
         }
-        
-        // Restore scrollback history for this pane if not already done
-        restorePaneHistoryIfNeeded(paneId: paneId)
         
         return surface
     }
@@ -1184,6 +1208,18 @@ class TmuxSessionManager: ObservableObject {
     }
     
     // MARK: - Layout Helpers
+    
+    /// Log tree node dimensions for debugging
+    private func logTreeNode(_ node: TmuxSplitTree.Node, prefix: String) {
+        switch node {
+        case .leaf(let info):
+            logger.info("\(prefix)Leaf pane %\(info.paneId): \(info.cols)x\(info.rows)")
+        case .split(let split):
+            logger.info("\(prefix)Split \(split.direction) ratio=\(String(format: "%.2f", split.ratio))")
+            logTreeNode(split.left, prefix: prefix + "  L: ")
+            logTreeNode(split.right, prefix: prefix + "  R: ")
+        }
+    }
     
     /// Update pane positions from parsed layout
     private func updatePanePositions(from layout: TmuxLayout, in windowId: String) {
