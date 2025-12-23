@@ -125,11 +125,13 @@ struct TmuxMultiPaneView: View {
         }
         
         logger.info("📐 Multi-pane geometry: \(Int(size.width))x\(Int(size.height))px -> \(cols)x\(rows) cells (cell: \(Int(cellSize.width))x\(Int(cellSize.height)))")
+        logger.info("📐 Current split tree before resize: panes=\(sessionManager.currentSplitTree.paneIds), isSplit=\(sessionManager.currentSplitTree.isSplit)")
         
         // Update tracked size
         lastSentSize = size
         
         // Send resize to tmux - this triggers refresh-client -C
+        logger.info("📐 🚀 SENDING refresh-client -C \(cols),\(rows)")
         sessionManager.resize(cols: cols, rows: rows)
     }
 }
