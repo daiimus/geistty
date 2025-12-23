@@ -1286,6 +1286,11 @@ extension Ghostty {
             
             logger.info("Ghostty surface created successfully with backend: \(surfaceConfig.backendType)")
             
+            // Add accessibility identifiers for UI testing
+            isAccessibilityElement = true
+            accessibilityIdentifier = "TerminalSurface-\(self.uuid.uuidString.prefix(8))"
+            accessibilityLabel = "Terminal Surface"
+            
             // Enable user interaction and add tap gesture to become first responder
             isUserInteractionEnabled = true
             let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
