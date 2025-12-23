@@ -754,6 +754,10 @@ class RawTerminalUIViewController: UIViewController {
     // Search state observer
     private var searchStateObserver: AnyCancellable?
     
+    // Key table indicator (vim-style modal keys)
+    private var keyTableIndicatorHostingController: UIHostingController<KeyTableIndicatorView>?
+    private var keyTableObserver: AnyCancellable?
+    
     // Secure keyboard entry state
     private var secureKeyboardEntry = false
     
@@ -987,6 +991,11 @@ class RawTerminalUIViewController: UIViewController {
             self?.closeSearch()
         }
         
+        // Background opacity toggle
+        NotificationCenter.default.addObserver(forName: .toggleBackgroundOpacity, object: nil, queue: .main) { [weak self] _ in
+            self?.toggleBackgroundOpacity()
+        }
+        
         // Connection management
         NotificationCenter.default.addObserver(forName: .terminalDisconnect, object: nil, queue: .main) { [weak self] _ in
             self?.handleBackButton()
@@ -1035,6 +1044,28 @@ class RawTerminalUIViewController: UIViewController {
         // Select all text in terminal
         // TODO: Implement via Ghostty API if available
         viewModel?.surfaceView?.selectAll()
+    }
+    
+    /// Toggle between transparent and opaque background
+    /// Saves state to config file and reloads configuration
+    private func toggleBackgroundOpacity() {
+        let currentOpacity = ConfigSyncManager.shared.getBackgroundOpacity()
+        let newOpacity: Double
+        
+        if currentOpacity < 1.0 {
+            // Currently transparent → make opaque
+            newOpacity = 1.0
+        } else {
+            // Currently opaque → use configured transparent value (default 0.95)
+            // Or use the stored transparent value if user had set one
+            let settings = AppSettings.shared
+            newOpacity = settings.backgroundOpacity < 1.0 ? settings.backgroundOpacity : 0.95
+        }
+        
+        ConfigSyncManager.shared.updateBackgroundOpacity(newOpacity)
+        reloadConfiguration()
+        
+        logger.info("🎨 Toggled background opacity: \(currentOpacity) → \(newOpacity)")
     }
     
     // MARK: - Search/Find Handlers
@@ -1265,6 +1296,47 @@ class RawTerminalUIViewController: UIViewController {
             searchOverlayHostingController = nil
         }
     }
+    
+    // MARK: - Key Table Indicator
+    
+    private func updateKeyTableIndicator(tableName: String?) {
+        if let name = tableName {
+            // Show or update key table indicator
+            if keyTableIndicatorHostingController == nil {
+                let indicator = KeyTableIndicatorView(tableName: name)
+                let hostingController = UIHostingController(rootView: indicator)
+                hostingController.view.backgroundColor = .clear
+                hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+                
+                addChild(hostingController)
+                view.addSubview(hostingController.view)
+                
+                // Position at bottom-left corner with safe area consideration
+                NSLayoutConstraint.activate([
+                    hostingController.view.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+                    hostingController.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+                ])
+                
+                hostingController.didMove(toParent: self)
+                keyTableIndicatorHostingController = hostingController
+            } else {
+                // Update existing indicator
+                keyTableIndicatorHostingController?.rootView = KeyTableIndicatorView(tableName: name)
+            }
+        } else {
+            // Hide indicator
+            removeKeyTableIndicator()
+        }
+    }
+    
+    private func removeKeyTableIndicator() {
+        if let hostingController = keyTableIndicatorHostingController {
+            hostingController.willMove(toParent: nil)
+            hostingController.view.removeFromSuperview()
+            hostingController.removeFromParent()
+            keyTableIndicatorHostingController = nil
+        }
+    }
 
     private func setupSearchStateObserver() {
         // Observe search state changes on the surface view
@@ -1274,6 +1346,13 @@ class RawTerminalUIViewController: UIViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateSearchOverlay()
+            }
+        
+        // Observe active key table changes for vim-style modal indicator
+        keyTableObserver = surface.$activeKeyTable
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] tableName in
+                self?.updateKeyTableIndicator(tableName: tableName)
             }
     }
     
@@ -1862,6 +1941,11 @@ class RawTerminalUIViewController: UIViewController {
         searchStateObserver = nil
         removeSearchOverlay()
         
+        // Cancel key table observer and remove indicator
+        keyTableObserver?.cancel()
+        keyTableObserver = nil
+        removeKeyTableIndicator()
+        
         // Cancel split tree and connection observers, cleanup multi-pane view
         splitTreeObserver?.cancel()
         splitTreeObserver = nil
@@ -1886,6 +1970,7 @@ class RawTerminalUIViewController: UIViewController {
         searchStateObserver?.cancel()
         splitTreeObserver?.cancel()
         connectionObserver?.cancel()
+        keyTableObserver?.cancel()
     }
 }
 
@@ -2008,5 +2093,34 @@ extension RawTerminalUIViewController: Ghostty.ShortcutDelegate {
             tmuxManager.newWindow()
             return true
         }
+    }
+}
+
+// MARK: - Key Table Indicator View
+
+/// Visual indicator showing when a key table is active (vim-style modal keys)
+struct KeyTableIndicatorView: View {
+    let tableName: String
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "keyboard.badge.ellipsis")
+                .font(.system(size: 12, weight: .medium))
+            
+            Text(tableName.uppercased())
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
+                )
+        )
+        .foregroundStyle(Color.accentColor)
+        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
     }
 }

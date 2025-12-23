@@ -171,7 +171,7 @@ extension Ghostty {
             
             # === Colors ===
             # Using Ghostty default theme (or specify: theme = tokyo-night)
-            background-opacity = 1.0
+            background-opacity = 0.95
             bold-color = bright
             
             # === Input ===
@@ -710,6 +710,50 @@ extension Ghostty {
                 }
                 return true
                 
+            case GHOSTTY_ACTION_KEY_TABLE:
+                // Handle key table activation/deactivation (vim-style modal keys)
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let keyTableData = action.action.key_table
+                
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        switch keyTableData.tag {
+                        case GHOSTTY_KEY_TABLE_ACTIVATE:
+                            // Key table activated - show indicator
+                            if let namePtr = keyTableData.value.activate.name {
+                                let name = String(cString: namePtr)
+                                surfaceView.activeKeyTable = name
+                                logger.info("⌨️ Key table activated: \(name)")
+                            }
+                        case GHOSTTY_KEY_TABLE_DEACTIVATE:
+                            // Key table deactivated - hide indicator
+                            surfaceView.activeKeyTable = nil
+                            logger.info("⌨️ Key table deactivated")
+                        case GHOSTTY_KEY_TABLE_DEACTIVATE_ALL:
+                            // All key tables deactivated
+                            surfaceView.activeKeyTable = nil
+                            logger.info("⌨️ All key tables deactivated")
+                        default:
+                            break
+                        }
+                    }
+                }
+                return true
+                
+            case GHOSTTY_ACTION_TOGGLE_BACKGROUND_OPACITY:
+                // Handle background opacity toggle
+                logger.info("🎨 Toggle background opacity requested")
+                // Post notification for UI to handle
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .toggleBackgroundOpacity, object: nil)
+                }
+                return true
+                
             default:
                 return false
             }
@@ -882,6 +926,9 @@ extension Ghostty {
         /// and won't auto-resize based on view bounds. This prevents layout thrashing
         /// in multi-pane tmux layouts where each pane has a fixed character size.
         var usesExactGridSize: Bool = false
+        
+        /// Active key table name - when non-nil, a key table is active (vim-style modal keys)
+        @Published var activeKeyTable: String? = nil
         
         /// Search state - when non-nil, search is active
         @Published var searchState: SearchState? = nil {
