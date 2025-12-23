@@ -302,6 +302,33 @@ class ConfigSyncManager: ObservableObject {
         updateThemeColors(theme)
     }
     
+    /// Update background opacity in config file
+    func updateBackgroundOpacity(_ opacity: Double) {
+        updateConfigValue(key: "background-opacity", value: String(format: "%.2f", opacity))
+    }
+    
+    /// Get current background opacity from config (default 0.95)
+    func getBackgroundOpacity() -> Double {
+        guard FileManager.default.fileExists(atPath: configFilePath.path),
+              let content = try? String(contentsOf: configFilePath, encoding: .utf8) else {
+            return 0.95
+        }
+        
+        let lines = content.components(separatedBy: "\n")
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
+                  let equalsIndex = trimmed.firstIndex(of: "=") else { continue }
+            
+            let key = trimmed[..<equalsIndex].trimmingCharacters(in: .whitespaces)
+            if key == "background-opacity" {
+                let value = String(trimmed[trimmed.index(after: equalsIndex)...]).trimmingCharacters(in: .whitespaces)
+                return Double(value) ?? 0.95
+            }
+        }
+        return 0.95
+    }
+    
     /// Called when config file is edited externally - reload GUI
     func onConfigFileChanged() {
         loadConfigToGUI()

@@ -125,6 +125,13 @@ struct GeisttyApp: App {
                     NotificationCenter.default.post(name: .terminalResetFontSize, object: nil)
                 }
                 .keyboardShortcut("0", modifiers: .command)
+                
+                Divider()
+                
+                Button("Toggle Background Transparency") {
+                    NotificationCenter.default.post(name: .toggleBackgroundOpacity, object: nil)
+                }
+                .keyboardShortcut("u", modifiers: .command)
             }
             
             // MARK: - Terminal Menu (Custom)
@@ -228,6 +235,9 @@ extension Notification.Name {
     static let showConnectionProfiles = Notification.Name("showConnectionProfiles")
     static let showKeyboardShortcuts = Notification.Name("showKeyboardShortcuts")
     static let showSettings = Notification.Name("showSettings")
+    
+    // Appearance
+    static let toggleBackgroundOpacity = Notification.Name("toggleBackgroundOpacity")
 }
 
 /// Global application state

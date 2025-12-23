@@ -22,6 +22,10 @@ class AppSettings: ObservableObject {
     @AppStorage("terminal.fontThicken") var fontThicken: Bool = true
     @AppStorage("terminal.fontThickenStrength") var fontThickenStrength: Int = 255
     
+    // MARK: - Appearance Settings
+    
+    @AppStorage("terminal.backgroundOpacity") var backgroundOpacity: Double = 0.95
+    
     // MARK: - UI Settings
     
     @AppStorage("ui.showStatusBar") var showStatusBar: Bool = false
@@ -184,6 +188,30 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 
+                // Appearance
+                Section("Appearance") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Background Opacity")
+                            Spacer()
+                            Text("\(Int(settings.backgroundOpacity * 100))%")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        
+                        Slider(
+                            value: $settings.backgroundOpacity,
+                            in: 0.5...1.0,
+                            step: 0.05
+                        )
+                    }
+                    .padding(.vertical, 4)
+                    
+                    Text("When less than 100%, apps behind the terminal will be visible. Use Cmd+U to toggle.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
                 // Ghostty Configuration
                 Section {
                     NavigationLink {
@@ -246,6 +274,10 @@ struct SettingsView: View {
             .onChange(of: themeManager.selectedTheme.id) { _, _ in
                 ConfigSyncManager.shared.updateTheme(themeManager.selectedTheme)
                 // Immediately reload so theme change is visible
+                NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
+            }
+            .onChange(of: settings.backgroundOpacity) { _, newValue in
+                ConfigSyncManager.shared.updateBackgroundOpacity(newValue)
                 NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
             }
             // No auto-reload on dismiss - changes are applied immediately above
