@@ -4,6 +4,7 @@ DerivedData/
 *.xcuserstate
 *.xcscmblueprint
 xcuserdata/
+*.xcresult
 
 # macOS
 .DS_Store
@@ -46,3 +47,39 @@ fastlane/test_output
 
 # Code Injection
 iOSInjectionProject/
+
+# ===========================================
+# SENSITIVE FILES - NEVER COMMIT
+# ===========================================
+
+# SSH Keys and Certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.ppk
+
+# Test credentials and configs
+test_credentials.json
+test_config.json
+TestCredentials.swift
+test_secrets/
+secrets/
+.secrets
+.env
+.env.*
+*.env
+
+# Local test configuration (create from .example template)
+TestConfig.local.swift
+LocalTestConfig.swift
+Geistty/GeisttyUITests/TestConfig.local.swift
+
+# SSH known hosts and config for testing
+test_known_hosts
+test_ssh_config
