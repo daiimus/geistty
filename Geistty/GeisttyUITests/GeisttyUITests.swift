@@ -21,15 +21,34 @@ final class GeisttyUITests: XCTestCase {
         app = nil
     }
     
+    // Helper to take and attach screenshot
+    private func takeScreenshot(name: String) {
+        let screenshot = app.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+    
     // MARK: - Connection Tests
     
     /// Test that the app launches and shows the connection screen
     func testAppLaunches() throws {
+        // Take screenshot of launch state
+        takeScreenshot(name: "01-App-Launch-State")
+        
         // Check for connection-related UI elements
         // The app should show either a connection list or quick connect option
         let exists = app.buttons["New Connection"].waitForExistence(timeout: 5) ||
                      app.buttons["Quick Connect"].waitForExistence(timeout: 5) ||
                      app.staticTexts["Connections"].waitForExistence(timeout: 5)
+        
+        takeScreenshot(name: "02-After-Wait-For-UI")
+        
+        // Print all visible elements for debugging
+        print("📱 All buttons: \(app.buttons.allElementsBoundByIndex.map { $0.label })")
+        print("📱 All static texts: \(app.staticTexts.allElementsBoundByIndex.map { $0.label })")
+        print("📱 All text fields: \(app.textFields.allElementsBoundByIndex.map { $0.placeholderValue ?? $0.label })")
         
         XCTAssertTrue(exists, "App should show connection UI on launch")
     }
