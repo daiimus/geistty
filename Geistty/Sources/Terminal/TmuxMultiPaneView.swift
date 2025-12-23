@@ -57,8 +57,10 @@ struct TmuxMultiPaneView: View {
                         sessionManager: sessionManager,
                         shortcutDelegate: shortcutDelegate
                     )
+                    .accessibilityIdentifier("TerminalPane-\(paneId)")
                 }
             )
+            .accessibilityIdentifier("TmuxMultiPaneContainer")
             .onChange(of: geometry.size) { _, newSize in
                 handleSizeChange(newSize)
             }
