@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */; };
+		B1000001 /* GeisttyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* GeisttyUITests.swift */; };
+		B1000002 /* TmuxPaneUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* TmuxPaneUITests.swift */; };
+		B1000003 /* TmuxSizingDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* TmuxSizingDebugTests.swift */; };
 		A1000001 /* GeisttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* GeisttyApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
@@ -53,6 +56,16 @@
 		A1000088 /* TmuxWindowPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000088 /* TmuxWindowPickerView.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		B3000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A6000001;
+			remoteInfo = Geistty;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXCopyFilesBuildPhase section */
 		A3000001 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -68,6 +81,10 @@
 
 /* Begin PBXFileReference section */
 		5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSyncManager.swift; sourceTree = "<group>"; };
+		B2000001 /* GeisttyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyUITests.swift; sourceTree = "<group>"; };
+		B2000002 /* TmuxPaneUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxPaneUITests.swift; sourceTree = "<group>"; };
+		B2000003 /* TmuxSizingDebugTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSizingDebugTests.swift; sourceTree = "<group>"; };
+		B2000010 /* GeisttyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000001 /* GeisttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyApp.swift; sourceTree = "<group>"; };
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A2000003 /* TerminalContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalContainerView.swift; sourceTree = "<group>"; };
@@ -124,6 +141,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B8000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -136,6 +160,7 @@
 				A2000006 /* Assets.xcassets */,
 				A2000008 /* Info.plist */,
 				A5000010 /* Products */,
+				B5000001 /* GeisttyUITests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -232,8 +257,19 @@
 			isa = PBXGroup;
 			children = (
 				A2000010 /* Geistty.app */,
+				B2000010 /* GeisttyUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B5000001 /* GeisttyUITests */ = {
+			isa = PBXGroup;
+			children = (
+				B2000001 /* GeisttyUITests.swift */,
+				B2000002 /* TmuxPaneUITests.swift */,
+				B2000003 /* TmuxSizingDebugTests.swift */,
+			);
+			path = GeisttyUITests;
 			sourceTree = "<group>";
 		};
 		A5000011 /* SFTP */ = {
@@ -298,6 +334,24 @@
 			productReference = A2000010 /* Geistty.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B6000001 /* GeisttyUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7000001 /* Build configuration list for PBXNativeTarget "GeisttyUITests" */;
+			buildPhases = (
+				B8000001 /* Sources */,
+				B8000002 /* Frameworks */,
+				B8000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B6000002 /* PBXTargetDependency */,
+			);
+			name = GeisttyUITests;
+			productName = GeisttyUITests;
+			productReference = B2000010 /* GeisttyUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -310,6 +364,10 @@
 				TargetAttributes = {
 					A6000001 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					B6000001 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = A6000001;
 					};
 				};
 			};
@@ -330,6 +388,7 @@
 			projectRoot = "";
 			targets = (
 				A6000001 /* Geistty */,
+				B6000001 /* GeisttyUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -354,6 +413,13 @@
 				A100007A /* Inconsolata-Regular.ttf in Resources */,
 				A100007B /* Inconsolata-Bold.ttf in Resources */,
 				A1000061 /* Themes in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B8000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -394,7 +460,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B8000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1000001 /* GeisttyUITests.swift in Sources */,
+				B1000002 /* TmuxPaneUITests.swift in Sources */,
+				B1000003 /* TmuxSizingDebugTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B6000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A6000001 /* Geistty */;
+			targetProxy = B3000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AC000001 /* Debug */ = {
@@ -598,6 +682,46 @@
 			};
 			name = Release;
 		};
+		BD000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DPF76SZNJB;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.geistty.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Geistty;
+			};
+			name = Debug;
+		};
+		BD000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DPF76SZNJB;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.geistty.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Geistty;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -606,6 +730,15 @@
 			buildConfigurations = (
 				AD000001 /* Debug */,
 				AD000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7000001 /* Build configuration list for PBXNativeTarget "GeisttyUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BD000001 /* Debug */,
+				BD000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
