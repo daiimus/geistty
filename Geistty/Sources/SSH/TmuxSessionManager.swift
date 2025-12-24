@@ -697,13 +697,24 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // Wire up resize handler for this surface
-        // Only the focused pane triggers resize to avoid thrashing with multiple windows
-        // Also uses debouncing to coalesce rapid resize events
+        // IMPORTANT: In multi-pane mode, we do NOT use individual surface resize callbacks.
+        // The TmuxMultiPaneView.handleSizeChange() calculates the total container size
+        // and sends refresh-client -C with the correct total dimensions.
+        // Individual surface callbacks would report the pane's size (smaller than window),
+        // which would override the correct total window size.
+        //
+        // For single-pane mode (no splits), the surface resize is still needed.
         if surfaceResizeHandler != nil {
             surface.onResize = { [weak self] cols, rows in
                 guard let self = self else { return }
-                // Only trigger resize from the focused pane to avoid multiple surfaces
-                // all sending resize commands simultaneously
+                // Only use surface resize in single-pane mode
+                // In multi-pane mode, TmuxMultiPaneView handles resize
+                guard !self.currentSplitTree.isSplit else {
+                    logger.debug("📐 Ignoring surface resize in multi-pane mode (handled by container)")
+                    return
+                }
+                
+                // Single pane mode - use surface resize
                 if self.focusedPaneId == paneId {
                     self.debouncedResize(cols: cols, rows: rows)
                 }
