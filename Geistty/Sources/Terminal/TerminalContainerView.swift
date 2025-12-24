@@ -1878,6 +1878,9 @@ class RawTerminalUIViewController: UIViewController {
         // Add UIKit divider overlay ON TOP of the SwiftUI view for drag handling
         let overlay = DividerOverlayView()
         overlay.translatesAutoresizingMaskIntoConstraints = false
+        
+        // On drag end: update local layout and commit to tmux
+        // We don't update during drag - the blue indicator provides visual feedback
         overlay.onDragEnded = { [weak tmuxManager] paneId, ratio in
             // Update local UI and sync to tmux
             tmuxManager?.updateSplitRatioAndSync(forPaneId: paneId, ratio: ratio)

@@ -475,25 +475,43 @@ class TmuxMultiPaneContainerView: UIView {
 /// This view sits on top of the SwiftUI split view and uses UIPanGestureRecognizer
 /// to handle divider drags, which works reliably with UIKit views underneath.
 class DividerOverlayView: UIView {
-    /// Callback when a divider drag ends - commits the new ratio
+    /// Callback during drag - updates ratio for live visual feedback (no tmux sync)
+    var onDragChanged: ((Int, Double) -> Void)?
+    
+    /// Callback when a divider drag ends - commits the new ratio to tmux
     var onDragEnded: ((Int, Double) -> Void)?
     
     /// Current divider views
     private var dividerViews: [DividerHitAreaView] = []
     
+    /// Visual indicator layer that shows during drag
+    private let dragIndicatorLayer = CALayer()
+    
     /// Divider hit area size (invisible touch target)
     private let hitAreaSize: CGFloat = 30
+    
+    /// Visible drag indicator thickness
+    private let indicatorThickness: CGFloat = 4
     
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         isUserInteractionEnabled = true
+        setupDragIndicator()
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         backgroundColor = .clear
         isUserInteractionEnabled = true
+        setupDragIndicator()
+    }
+    
+    private func setupDragIndicator() {
+        dragIndicatorLayer.backgroundColor = UIColor.systemBlue.cgColor
+        dragIndicatorLayer.cornerRadius = indicatorThickness / 2
+        dragIndicatorLayer.isHidden = true
+        layer.addSublayer(dragIndicatorLayer)
     }
     
     /// Update dividers based on the split tree
@@ -520,7 +538,23 @@ class DividerOverlayView: UIView {
         dividerView.hitAreaSize = hitAreaSize
         dividerView.containerRect = rect
         
-        // Only commit to session manager when drag ends
+        // During drag: update visual ratio and show indicator
+        dividerView.onDragChanged = { [weak self] newRatio in
+            self?.onDragChanged?(paneId, Double(newRatio))
+        }
+        
+        // Show/hide the visual drag indicator
+        dividerView.onDragBegan = { [weak self] frame, direction in
+            self?.showDragIndicator(at: frame, direction: direction)
+        }
+        dividerView.onDragMoved = { [weak self] frame, direction in
+            self?.updateDragIndicator(at: frame, direction: direction)
+        }
+        dividerView.onDragFinished = { [weak self] in
+            self?.hideDragIndicator()
+        }
+        
+        // On drag end: commit to session manager for tmux sync
         dividerView.onDragEnded = { [weak self] newRatio in
             self?.onDragEnded?(paneId, Double(newRatio))
         }
@@ -566,6 +600,49 @@ class DividerOverlayView: UIView {
         dividerViews.append(dividerView)
     }
     
+    // MARK: - Drag Indicator
+    
+    private func showDragIndicator(at frame: CGRect, direction: SplitViewDirection) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        updateDragIndicator(at: frame, direction: direction)
+        dragIndicatorLayer.isHidden = false
+        CATransaction.commit()
+    }
+    
+    private func updateDragIndicator(at frame: CGRect, direction: SplitViewDirection) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        
+        switch direction {
+        case .horizontal:
+            // Vertical line for horizontal split
+            dragIndicatorLayer.frame = CGRect(
+                x: frame.midX - indicatorThickness / 2,
+                y: frame.origin.y,
+                width: indicatorThickness,
+                height: frame.height
+            )
+        case .vertical:
+            // Horizontal line for vertical split
+            dragIndicatorLayer.frame = CGRect(
+                x: frame.origin.x,
+                y: frame.midY - indicatorThickness / 2,
+                width: frame.width,
+                height: indicatorThickness
+            )
+        }
+        
+        CATransaction.commit()
+    }
+    
+    private func hideDragIndicator() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dragIndicatorLayer.isHidden = true
+        CATransaction.commit()
+    }
+    
     /// Only respond to touches on divider areas - pass through everything else
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         for divider in dividerViews {
@@ -585,11 +662,20 @@ class DividerHitAreaView: UIView {
     var hitAreaSize: CGFloat = 30
     var containerRect: CGRect = .zero
     
-    /// Called during drag with the new ratio (for fluid visual feedback)
+    /// Called when drag begins (to show indicator)
+    var onDragBegan: ((CGRect, SplitViewDirection) -> Void)?
+    
+    /// Called during drag movement (to update indicator position)
+    var onDragMoved: ((CGRect, SplitViewDirection) -> Void)?
+    
+    /// Called during drag with the new ratio (for live visual feedback)
     var onDragChanged: ((CGFloat) -> Void)?
     
     /// Called when drag ends with the final ratio (to commit to tmux)
     var onDragEnded: ((CGFloat) -> Void)?
+    
+    /// Called when drag finishes (to hide indicator)
+    var onDragFinished: (() -> Void)?
     
     private var panGesture: UIPanGestureRecognizer!
     private var initialCenter: CGPoint = .zero
@@ -619,24 +705,43 @@ class DividerHitAreaView: UIView {
         switch gesture.state {
         case .began:
             initialCenter = center
+            // Notify that drag started
+            onDragBegan?(frame, direction)
             
         case .changed:
             // Move the divider view directly for fluid feedback
             let translation = gesture.translation(in: superview)
+            var newRatio: CGFloat = 0.5
             
             switch direction {
             case .horizontal:
                 let newX = initialCenter.x + translation.x
                 let minX = containerRect.origin.x + containerRect.width * minRatio
                 let maxX = containerRect.origin.x + containerRect.width * maxRatio
-                center.x = min(max(minX, newX), maxX)
+                let clampedX = min(max(minX, newX), maxX)
+                center.x = clampedX
+                
+                // Calculate ratio for live preview
+                let relativeX = clampedX - containerRect.origin.x
+                newRatio = relativeX / containerRect.width
                 
             case .vertical:
                 let newY = initialCenter.y + translation.y
                 let minY = containerRect.origin.y + containerRect.height * minRatio
                 let maxY = containerRect.origin.y + containerRect.height * maxRatio
-                center.y = min(max(minY, newY), maxY)
+                let clampedY = min(max(minY, newY), maxY)
+                center.y = clampedY
+                
+                // Calculate ratio for live preview
+                let relativeY = clampedY - containerRect.origin.y
+                newRatio = relativeY / containerRect.height
             }
+            
+            // Update visual indicator position
+            onDragMoved?(frame, direction)
+            
+            // Update the split tree for live visual resize
+            onDragChanged?(newRatio)
             
         case .ended, .cancelled:
             // Calculate final ratio and commit
@@ -653,6 +758,11 @@ class DividerHitAreaView: UIView {
             }
             
             newRatio = min(max(minRatio, newRatio), maxRatio)
+            
+            // Hide drag indicator
+            onDragFinished?()
+            
+            // Commit to tmux
             onDragEnded?(newRatio)
             
         default:
