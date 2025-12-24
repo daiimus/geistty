@@ -1134,9 +1134,117 @@ class TmuxSessionManager: ObservableObject {
         client.sendCommandFireAndForget("select-layout even-horizontal", via: write)
     }
     
+    /// Update a split ratio locally (for UI drag feedback)
+    /// This updates the local split tree immediately for smooth dragging.
+    /// The ratio will be synced to tmux when the drag ends.
+    func updateSplitRatio(forPaneId paneId: Int, ratio: Double) {
+        currentSplitTree = currentSplitTree.updateRatio(forPaneId: paneId, ratio: ratio)
+        windowSplitTrees[focusedWindowId] = currentSplitTree
+    }
+    
+    /// Update a split ratio and sync to tmux
+    /// Called when the user finishes dragging a divider.
+    func updateSplitRatioAndSync(forPaneId paneId: Int, ratio: Double) {
+        // First update local state
+        updateSplitRatio(forPaneId: paneId, ratio: ratio)
+        
+        // Then send resize-pane to tmux
+        guard let client = controlClient, let write = writeToSSH else { return }
+        
+        // Find the split that contains this pane to determine direction and calculate size
+        guard let splitInfo = findSplitContainingWithSize(paneId: paneId) else {
+            logger.warning("⚠️ Could not find split containing %\(paneId)")
+            return
+        }
+        
+        logger.info("📐 Syncing resize to tmux: pane %\(paneId), ratio \(ratio), direction \(splitInfo.direction), totalSize \(splitInfo.totalSize)")
+        
+        // Calculate target size in cells
+        // Account for 1 cell for the divider
+        let availableSize = splitInfo.totalSize - 1
+        let newSize = max(1, Int(Double(availableSize) * ratio))
+        
+        // Use resize-pane to set the exact size
+        // For horizontal splits (left|right), we set width (-x)
+        // For vertical splits (top|bottom), we set height (-y)
+        let sizeFlag: String
+        switch splitInfo.direction {
+        case .horizontal:
+            sizeFlag = "-x"
+        case .vertical:
+            sizeFlag = "-y"
+        }
+        
+        let command = "resize-pane -t %\(paneId) \(sizeFlag) \(newSize)"
+        logger.info("📐 Sending: \(command)")
+        client.sendCommandFireAndForget(command, via: write)
+    }
+    
+    /// Find the split node that contains the given pane ID and return its direction and total size
+    private func findSplitContainingWithSize(paneId: Int) -> (direction: TmuxSplitTree.Direction, ratio: Double, totalSize: Int)? {
+        guard let root = currentSplitTree.root else { return nil }
+        
+        // Get the total window size first
+        guard let size = lastRefreshSize else {
+            logger.warning("⚠️ No lastRefreshSize available for split calculation")
+            return nil
+        }
+        
+        return findSplitContainingWithSizeHelper(node: root, paneId: paneId, totalCols: size.cols, totalRows: size.rows)
+    }
+    
+    private func findSplitContainingWithSizeHelper(
+        node: TmuxSplitTree.Node, 
+        paneId: Int, 
+        totalCols: Int, 
+        totalRows: Int
+    ) -> (direction: TmuxSplitTree.Direction, ratio: Double, totalSize: Int)? {
+        guard case .split(let split) = node else { return nil }
+        
+        if split.left.leftmostPaneId == paneId {
+            // Found the split - calculate total size based on direction
+            let totalSize = split.direction == .horizontal ? totalCols : totalRows
+            return (split.direction, split.ratio, totalSize)
+        }
+        
+        // Recurse into children with adjusted sizes
+        let leftCols: Int
+        let leftRows: Int
+        let rightCols: Int
+        let rightRows: Int
+        
+        switch split.direction {
+        case .horizontal:
+            // Split divides columns
+            let leftWidth = Int(Double(totalCols - 1) * split.ratio) // -1 for divider
+            leftCols = leftWidth
+            rightCols = totalCols - leftWidth - 1
+            leftRows = totalRows
+            rightRows = totalRows
+        case .vertical:
+            // Split divides rows
+            let leftHeight = Int(Double(totalRows - 1) * split.ratio) // -1 for divider
+            leftCols = totalCols
+            rightCols = totalCols
+            leftRows = leftHeight
+            rightRows = totalRows - leftHeight - 1
+        }
+        
+        if let result = findSplitContainingWithSizeHelper(node: split.left, paneId: paneId, totalCols: leftCols, totalRows: leftRows) {
+            return result
+        }
+        return findSplitContainingWithSizeHelper(node: split.right, paneId: paneId, totalCols: rightCols, totalRows: rightRows)
+    }
+
+    /// Track last refresh size for re-syncing
+    private var lastRefreshSize: (cols: Int, rows: Int)?
+    
     /// Debounced resize to prevent thrashing with rapid resize events
     /// Waits 50ms to coalesce multiple resize calls into one
     private func debouncedResize(cols: Int, rows: Int) {
+        // Track for later re-sync
+        lastRefreshSize = (cols, rows)
+        
         // Skip if dimensions haven't changed
         guard cols != lastResizeCols || rows != lastResizeRows else {
             return
