@@ -278,6 +278,13 @@ struct TmuxSplitTree: Equatable {
         return TmuxSplitTree(root: root.equalize(), zoomed: zoomed)
     }
     
+    /// Update the split ratio for a split that contains the given pane ID
+    /// The pane ID should be the leftmost pane ID of the left side of the split
+    func updateRatio(forPaneId paneId: Int, ratio: Double) -> TmuxSplitTree {
+        guard let root else { return self }
+        return TmuxSplitTree(root: root.updateRatio(forPaneId: paneId, ratio: ratio), zoomed: zoomed)
+    }
+    
     /// Update dimensions for a specific pane (e.g., when Ghostty reports a resize)
     /// Returns a new tree with updated dimensions
     func updatingDimensions(paneId: Int, cols: Int, rows: Int) -> TmuxSplitTree {
@@ -424,6 +431,33 @@ extension TmuxSplitTree.Node {
                 left: split.left.equalize(),
                 right: split.right.equalize()
             ))
+        }
+    }
+    
+    /// Update the ratio for a split whose left child contains the given pane ID as its leftmost pane
+    func updateRatio(forPaneId paneId: Int, ratio: Double) -> TmuxSplitTree.Node {
+        switch self {
+        case .leaf:
+            return self
+        case .split(let split):
+            // Check if this split's left child has the target pane as its leftmost
+            if split.left.leftmostPaneId == paneId {
+                // Update this split's ratio
+                return .split(Split(
+                    direction: split.direction,
+                    ratio: ratio,
+                    left: split.left,
+                    right: split.right
+                ))
+            } else {
+                // Recurse into children
+                return .split(Split(
+                    direction: split.direction,
+                    ratio: split.ratio,
+                    left: split.left.updateRatio(forPaneId: paneId, ratio: ratio),
+                    right: split.right.updateRatio(forPaneId: paneId, ratio: ratio)
+                ))
+            }
         }
     }
     

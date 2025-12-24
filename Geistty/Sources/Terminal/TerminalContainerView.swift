@@ -769,6 +769,10 @@ class RawTerminalUIViewController: UIViewController {
     private var connectionObserver: AnyCancellable?
     private var isMultiPaneMode = false
     
+    // UIKit divider overlay for drag gestures (sits on top of multi-pane view)
+    private var dividerOverlayView: DividerOverlayView?
+    private var dividerTreeObserver: AnyCancellable?
+    
     // Window picker support (shown when multiple tmux windows exist)
     private var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
     private var windowPickerHeightConstraint: NSLayoutConstraint?
@@ -1816,6 +1820,12 @@ class RawTerminalUIViewController: UIViewController {
     
     /// Clean up multi-pane mode without requiring a primary surface
     private func cleanupMultiPaneMode() {
+        // Clean up divider overlay
+        dividerTreeObserver?.cancel()
+        dividerTreeObserver = nil
+        dividerOverlayView?.removeFromSuperview()
+        dividerOverlayView = nil
+        
         if let hostingController = multiPaneHostingController {
             hostingController.willMove(toParent: nil)
             hostingController.view.removeFromSuperview()
@@ -1864,6 +1874,32 @@ class RawTerminalUIViewController: UIViewController {
         
         // Set transparent background to show through to our view background
         hostingController.view.backgroundColor = .clear
+        
+        // Add UIKit divider overlay ON TOP of the SwiftUI view for drag handling
+        let overlay = DividerOverlayView()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.onDragEnded = { [weak tmuxManager] paneId, ratio in
+            // Update local UI and sync to tmux
+            tmuxManager?.updateSplitRatioAndSync(forPaneId: paneId, ratio: ratio)
+        }
+        view.addSubview(overlay)
+        dividerOverlayView = overlay
+        
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: hostingController.view.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: hostingController.view.bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: hostingController.view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: hostingController.view.trailingAnchor)
+        ])
+        
+        // Observe split tree changes to update divider positions
+        dividerTreeObserver = tmuxManager.$currentSplitTree
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak overlay] tree in
+                guard let self = self, let overlay = overlay else { return }
+                let size = self.multiPaneHostingController?.view.bounds.size ?? .zero
+                overlay.updateDividers(from: tree, containerSize: size)
+            }
         
         isMultiPaneMode = true
     }
