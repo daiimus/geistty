@@ -534,11 +534,16 @@ extension Ghostty {
                 if let userdata = ghostty_surface_userdata(surface) {
                     let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
                     DispatchQueue.main.async {
+                        // IMPORTANT: cellSizeData is in backing pixels (physical pixels on retina).
+                        // SwiftUI's GeometryReader returns points (logical units).
+                        // We must convert to points for correct layout calculations.
+                        // This matches macOS Ghostty's convertFromBacking() behavior.
+                        let scale = surfaceView.contentScaleFactor
                         surfaceView.cellSize = CGSize(
-                            width: CGFloat(cellSizeData.width),
-                            height: CGFloat(cellSizeData.height)
+                            width: CGFloat(cellSizeData.width) / scale,
+                            height: CGFloat(cellSizeData.height) / scale
                         )
-                        logger.debug("📐 Cell size: \(cellSizeData.width)x\(cellSizeData.height)")
+                        logger.debug("📐 Cell size: \(cellSizeData.width)x\(cellSizeData.height) px = \(surfaceView.cellSize.width)x\(surfaceView.cellSize.height) pt (scale: \(scale))")
                     }
                 }
                 return true

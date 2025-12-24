@@ -35,6 +35,7 @@ struct ConnectionListView: View {
                     } label: {
                         Label("Quick Connect", systemImage: "bolt.fill")
                     }
+                    .accessibilityIdentifier("QuickConnectButton")
                 }
                 
                 // Favorites Section
@@ -351,18 +352,22 @@ struct QuickConnectView: View {
                     .textContentType(.URL)
                     .autocapitalization(.none)
                     .keyboardType(.URL)
+                    .accessibilityIdentifier("HostField")
                 
                 TextField("Port", text: $port)
                     .keyboardType(.numberPad)
+                    .accessibilityIdentifier("PortField")
             }
             
             Section {
                 TextField("Username", text: $username)
                     .textContentType(.username)
                     .autocapitalization(.none)
+                    .accessibilityIdentifier("UsernameField")
                 
                 SecureField("Password", text: $password)
                     .textContentType(.password)
+                    .accessibilityIdentifier("PasswordField")
             } header: {
                 Text("Authentication")
             } footer: {
@@ -401,6 +406,7 @@ struct QuickConnectView: View {
                     }
                 }
                 .disabled(!isValid || isConnecting)
+                .accessibilityIdentifier("ConnectButton")
             }
         }
     }
