@@ -1431,14 +1431,21 @@ class TmuxControlClient {
         pendingBlock = nil
         parseBuffer = Data()
         
-        // Cancel all pending command timeouts
-        for pending in pendingCommandQueue {
-            pending.timeoutTask?.cancel()
-        }
+        // CRITICAL: Cancel timeouts AND invoke callbacks with failure
+        // This prevents callers from waiting forever for responses that will never come
+        let pendingCommands = pendingCommandQueue
         pendingCommandQueue.removeAll()
         commandNumberToLocalId.removeAll()
         
+        for pending in pendingCommands {
+            pending.timeoutTask?.cancel()
+            // Invoke callback with disconnected error so callers can clean up
+            pending.callback(.failure(TmuxControlError.notConnected))
+        }
+        
         paneBuffers.removeAll()
+        
+        logger.info("🔌 TmuxControlClient reset, notified \(pendingCommands.count) pending command(s) of disconnect")
     }
 }
 

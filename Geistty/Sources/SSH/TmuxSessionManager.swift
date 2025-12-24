@@ -150,6 +150,19 @@ class TmuxSessionManager: ObservableObject {
         currentSplitTree = TmuxSplitTree()
         restoredPanes.removeAll()
         lastProcessedLayouts.removeAll()
+        
+        // HIGH FIX: Clear buffer state to prevent memory leaks on reconnect
+        awaitingHistoryRestore.removeAll()
+        historyRestoreBuffer.removeAll()
+        pendingHistoryContent.removeAll()
+        pendingOutput.removeAll()
+        
+        // HIGH FIX: Cancel resize debounce task to prevent crash after cleanup
+        resizeDebounceTask?.cancel()
+        resizeDebounceTask = nil
+        lastResizeCols = 0
+        lastResizeRows = 0
+        lastRefreshSize = nil
     }
     
     // MARK: - State Queries
@@ -501,8 +514,15 @@ class TmuxSessionManager: ObservableObject {
             
             for paneId in removedPaneIds {
                 logger.info("📐 🗑️ Pane \(paneId) was closed, cleaning up surface")
-                removeSurface(for: paneId)
+                removeSurface(for: paneId, paneActuallyClosed: true)
                 panes.removeValue(forKey: paneId)
+                
+                // HIGH FIX: Clear history restore buffers to prevent memory leak
+                awaitingHistoryRestore.remove(paneId)
+                historyRestoreBuffer.removeValue(forKey: paneId)
+                pendingHistoryContent.removeValue(forKey: paneId)
+                pendingOutput.removeValue(forKey: paneId)
+                restoredPanes.remove(paneId)
                 
                 // If the removed pane was our primary surface, reassign it
                 if paneId == "%0" {
@@ -910,19 +930,24 @@ class TmuxSessionManager: ObservableObject {
         return getSurfaceOrCreate(for: "%\(paneId)")
     }
     
-    /// Remove surface for a pane (but never remove primary surface)
-    func removeSurface(for paneId: String) {
-        // Never remove the primary surface - it's always kept alive
-        if paneId == "%0" {
-            logger.info("Keeping primary surface %0 alive")
+    /// Remove surface for a pane
+    /// - Parameters:
+    ///   - paneId: The pane ID to remove
+    ///   - paneActuallyClosed: If true, the pane was actually closed in tmux (allow %0 removal).
+    ///                         If false (default), this is cleanup during disconnect (keep %0 alive).
+    func removeSurface(for paneId: String, paneActuallyClosed: Bool = false) {
+        // Only keep %0 alive during disconnect (not when pane actually closes)
+        // When pane %0 actually closes, we need to remove it to avoid zombie surface
+        if paneId == "%0" && !paneActuallyClosed {
+            logger.info("Keeping primary surface %0 alive (disconnect, not pane close)")
             return
         }
         
         if let surface = paneSurfaces.removeValue(forKey: paneId) {
-            // Clean up surface
-            logger.info("Removed Ghostty surface for pane \(paneId)")
-            // Surface will be deallocated when no longer referenced
-            _ = surface
+            // Clean up surface callbacks to break retain cycles
+            surface.onResize = nil
+            surface.onCellSizeChanged = nil
+            logger.info("Removed Ghostty surface for pane \(paneId) (paneActuallyClosed=\(paneActuallyClosed))")
         }
     }
     
@@ -1408,17 +1433,35 @@ class TmuxSessionManager: ObservableObject {
     
     /// Clean up all state
     func cleanup() {
+        // HIGH FIX: Cancel resize debounce task to prevent crash after cleanup
+        resizeDebounceTask?.cancel()
+        resizeDebounceTask = nil
+        
         // Remove all surfaces
         for paneId in paneSurfaces.keys {
             removeSurface(for: paneId)
         }
         
+        // Clear all buffer state
+        awaitingHistoryRestore.removeAll()
+        historyRestoreBuffer.removeAll()
+        pendingHistoryContent.removeAll()
+        pendingOutput.removeAll()
+        restoredPanes.removeAll()
+        
         sessions.removeAll()
         windows.removeAll()
         panes.removeAll()
         lastProcessedLayouts.removeAll()
+        windowSplitTrees.removeAll()
+        currentSplitTree = TmuxSplitTree()
         currentSession = nil
         isConnected = false
+        
+        // Reset resize tracking
+        lastResizeCols = 0
+        lastResizeRows = 0
+        lastRefreshSize = nil
         
         logger.info("TmuxSessionManager cleaned up")
     }
