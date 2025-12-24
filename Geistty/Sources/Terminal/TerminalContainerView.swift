@@ -1797,6 +1797,18 @@ class RawTerminalUIViewController: UIViewController {
         
         logger.info("🔄 handleSplitTreeChange: panes=\(tree.paneIds), isSplit=\(hasSplits), hasPanes=\(hasPanes), isMultiPaneMode=\(isMultiPaneMode)")
         
+        // Log the actual tree structure for debugging
+        if let root = tree.root {
+            switch root {
+            case .leaf(let info):
+                logger.info("🔄 Tree root is LEAF: pane=\(info.paneId)")
+            case .split(let split):
+                logger.info("🔄 Tree root is SPLIT: direction=\(split.direction), ratio=\(split.ratio)")
+            }
+        } else {
+            logger.info("🔄 Tree root is NIL")
+        }
+        
         // Handle empty tree (all panes closed) - just clean up multi-pane mode
         // The disconnect handler will navigate away when tmux sends %exit
         if !hasPanes {
@@ -1807,15 +1819,75 @@ class RawTerminalUIViewController: UIViewController {
             return
         }
         
-        if hasSplits && !isMultiPaneMode {
-            // Transition to multi-pane mode
-            logger.info("🔄 Transitioning to multi-pane mode")
-            transitionToMultiPaneMode()
-        } else if !hasSplits && isMultiPaneMode {
-            // Transition back to single surface mode
-            logger.info("🔄 Transitioning to single surface mode")
-            transitionToSingleSurfaceMode()
+        // SIMPLIFIED: Once we enter multi-pane mode, STAY in multi-pane mode
+        // The SwiftUI TmuxMultiPaneView can handle showing 1 pane just fine
+        // This avoids the complex surface re-parenting that was causing blank screens
+        if hasPanes && !isMultiPaneMode {
+            // First time we have panes and splits - enter multi-pane mode
+            if hasSplits {
+                logger.info("🔄 PATH: hasPanes && hasSplits && !isMultiPaneMode -> transitionToMultiPaneMode")
+                transitionToMultiPaneMode()
+            }
+            // If single pane and not in multi-pane mode, stay with single surface
+            // This handles initial connection with no splits
+        } else if !hasPanes && isMultiPaneMode {
+            // No panes left - already handled above
         }
+        // If we're in multi-pane mode, stay there - TmuxMultiPaneView handles all pane counts
+    }
+    
+    /// Update the displayed surface in single-pane mode when primary surface changes
+    private func updateSinglePaneSurface() {
+        guard let tmuxManager = viewModel?.tmuxManager,
+              let newPrimarySurface = tmuxManager.primarySurface else {
+            logger.warning("🔄 No primary surface available for single-pane update")
+            return
+        }
+        
+        // Check if we're already showing this surface
+        if surfaceView === newPrimarySurface {
+            logger.debug("🔄 Already showing correct primary surface")
+            return
+        }
+        
+        logger.info("🔄 Updating single-pane surface (old != new primary)")
+        
+        // Remove old surface if exists
+        if let oldSurface = surfaceView {
+            oldSurface.removeFromSuperview()
+        }
+        
+        // Add new primary surface
+        newPrimarySurface.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(newPrimarySurface)
+        
+        surfaceTopConstraint = newPrimarySurface.topAnchor.constraint(equalTo: view.topAnchor)
+        surfaceBottomConstraint = newPrimarySurface.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        
+        NSLayoutConstraint.activate([
+            surfaceTopConstraint!,
+            surfaceBottomConstraint!,
+            newPrimarySurface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            newPrimarySurface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        // Update references
+        self.surfaceView = newPrimarySurface
+        viewModel?.surfaceView = newPrimarySurface
+        
+        // Force layout to establish the frame
+        view.layoutIfNeeded()
+        
+        // CRITICAL: Notify surface of its new size after re-parenting
+        // The surface needs to know its size changed to update its Metal rendering
+        newPrimarySurface.sizeDidChange(newPrimarySurface.frame.size)
+        
+        // Make visible and focus
+        newPrimarySurface.isHidden = false
+        newPrimarySurface.focusDidChange(true)
+        _ = newPrimarySurface.becomeFirstResponder()
+        
+        logger.info("🔄 ✅ Updated single-pane surface (frame=\(newPrimarySurface.frame))")
     }
     
     /// Clean up multi-pane mode without requiring a primary surface
@@ -1909,7 +1981,10 @@ class RawTerminalUIViewController: UIViewController {
     
     /// Transition from multi-pane mode back to single surface mode
     private func transitionToSingleSurfaceMode() {
-        guard isMultiPaneMode else { return }
+        guard isMultiPaneMode else { 
+            logger.warning("🔄 transitionToSingleSurfaceMode called but NOT in multi-pane mode!")
+            return 
+        }
         
         logger.info("🔄 Transitioning to single surface mode")
         
@@ -1922,16 +1997,23 @@ class RawTerminalUIViewController: UIViewController {
             return
         }
         
-        // Remove the primary surface from multi-pane view hierarchy BEFORE
-        // destroying the hosting controller
-        primarySurface.removeFromSuperview()
+        logger.info("🔄 Got primarySurface: \(primarySurface), current superview: \(String(describing: primarySurface.superview))")
         
-        // Clean up the multi-pane hosting controller
+        // Clean up the multi-pane hosting controller FIRST
+        // This destroys the SwiftUI view that contains the surface
         cleanupMultiPaneMode()
+        
+        // Now the surface should have no superview (SwiftUI container is gone)
+        // If it still has a superview, remove it
+        if primarySurface.superview != nil {
+            logger.info("🔄 Surface still has superview after cleanup, removing")
+            primarySurface.removeFromSuperview()
+        }
         
         // Re-add primary surface to our view hierarchy
         primarySurface.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(primarySurface)
+        view.bringSubviewToFront(primarySurface)  // Ensure it's on top
         
         surfaceTopConstraint = primarySurface.topAnchor.constraint(equalTo: view.topAnchor)
         surfaceBottomConstraint = primarySurface.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -1947,13 +2029,22 @@ class RawTerminalUIViewController: UIViewController {
         self.surfaceView = primarySurface
         viewModel?.surfaceView = primarySurface
         
+        // Force layout to establish the frame
+        view.layoutIfNeeded()
+        
+        logger.info("🔄 Surface frame after layout: \(primarySurface.frame)")
+        
+        // CRITICAL: Notify surface of its new size after re-parenting
+        // The surface needs to know its size changed to update its Metal rendering
+        primarySurface.sizeDidChange(primarySurface.frame.size)
+        
         // Restore focus
         primarySurface.isHidden = false
         primarySurface.focusDidChange(true)
         let becameFirstResponder = primarySurface.becomeFirstResponder()
         
         // isMultiPaneMode already set to false by cleanupMultiPaneMode()
-        logger.info("🔄 ✅ Transitioned to single surface mode (becameFirstResponder=\(becameFirstResponder))")
+        logger.info("🔄 ✅ Transitioned to single surface mode (becameFirstResponder=\(becameFirstResponder), frame=\(primarySurface.frame))")
     }
     
     override func viewWillDisappear(_ animated: Bool) {

@@ -78,6 +78,17 @@ struct TmuxMultiPaneView: View {
                     handleSizeChange(geometry.size)
                 }
             }
+            .onChange(of: sessionManager.isConnected) { _, isConnected in
+                // When (re)connected, force a resize to ensure tmux has correct dimensions
+                if isConnected {
+                    logger.info("📐 Session (re)connected, forcing resize")
+                    lastSentSize = .zero  // Force resize to be sent
+                    // Delay slightly to ensure tmux is ready to receive commands
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        handleSizeChange(geometry.size)
+                    }
+                }
+            }
             .onAppear {
                 // Send initial size when view appears
                 logger.info("📐 TmuxMultiPaneView appeared, size: \(Int(geometry.size.width))x\(Int(geometry.size.height))")
