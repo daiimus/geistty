@@ -133,6 +133,16 @@ class TmuxSessionManager: ObservableObject {
     func controlModeActivated() {
         isConnected = true
         
+        // Reset resize tracking state on (re)connection
+        // This ensures we send fresh dimensions to tmux for existing sessions
+        lastResizeCols = 0
+        lastResizeRows = 0
+        lastRefreshSize = nil
+        resizeDebounceTask?.cancel()
+        resizeDebounceTask = nil
+        
+        logger.info("✅ Control mode activated, resize state reset")
+        
         // Now that we have proper command routing, we can safely query state
         // The responses will be routed to our callbacks, not mixed with session restore
         refreshState()
@@ -163,6 +173,18 @@ class TmuxSessionManager: ObservableObject {
         lastResizeCols = 0
         lastResizeRows = 0
         lastRefreshSize = nil
+        
+        // CRITICAL: Clear surface state to ensure fresh surfaces on reconnect
+        // Old surfaces may be in bad state and won't properly report cell size
+        for (paneId, surface) in paneSurfaces {
+            // Clear callbacks to break retain cycles
+            surface.onResize = nil
+            surface.onCellSizeChanged = nil
+            logger.debug("Cleaned up surface for pane \(paneId)")
+        }
+        paneSurfaces.removeAll()
+        primarySurface = nil
+        primaryCellSize = .zero
     }
     
     // MARK: - State Queries
@@ -360,13 +382,30 @@ class TmuxSessionManager: ObservableObject {
         if let window = windows[windowId] {
             for paneId in window.paneIds {
                 panes.removeValue(forKey: paneId)
-                removeSurface(for: paneId)
+                
+                // Check if this pane has the primary surface and clear it
+                if paneSurfaces[paneId] === primarySurface {
+                    logger.info("🗑️ Clearing primarySurface (was in closed window)")
+                    primarySurface = nil
+                    primaryCellSize = .zero
+                }
+                
+                // Remove surface with paneActuallyClosed=true so %0 can be removed
+                removeSurface(for: paneId, paneActuallyClosed: true)
+                
+                // Clean up buffer state for this pane
+                awaitingHistoryRestore.remove(paneId)
+                historyRestoreBuffer.removeValue(forKey: paneId)
+                pendingHistoryContent.removeValue(forKey: paneId)
+                pendingOutput.removeValue(forKey: paneId)
+                restoredPanes.remove(paneId)
             }
         }
         
         // Remove window and its split tree
         windows.removeValue(forKey: windowId)
         windowSplitTrees.removeValue(forKey: windowId)
+        lastProcessedLayouts.removeValue(forKey: windowId)
         
         // Update session's window list
         if var session = currentSession {
@@ -378,22 +417,41 @@ class TmuxSessionManager: ObservableObject {
             if focusedWindowId == windowId {
                 if let nextWindowId = session.windowIds.first {
                     logger.info("🗑️ Focused window closed, switching to \(nextWindowId)")
-                    focusedWindowId = nextWindowId
                     
-                    // Update current split tree to the new window
-                    if let tree = windowSplitTrees[nextWindowId] {
-                        currentSplitTree = tree
-                        if let firstPaneId = tree.paneIds.first {
-                            focusedPaneId = "%\(firstPaneId)"
-                        }
-                    }
+                    // Use selectWindow which properly handles querying layout,
+                    // creating surfaces, and assigning primarySurface for the new window
+                    selectWindow(nextWindowId)
                 } else {
                     // No windows left - this shouldn't normally happen,
                     // tmux should send %exit when last window closes
                     logger.warning("🗑️ All windows closed but no %exit received")
                     currentSplitTree = TmuxSplitTree()
+                    focusedPaneId = "%0"
+                    focusedWindowId = "@0"
                 }
             }
+        }
+    }
+    
+    /// Reassign primary surface to any available surface
+    private func reassignPrimarySurface() {
+        // Find any available surface to be the new primary
+        if let (paneId, surface) = paneSurfaces.first {
+            logger.info("🔄 Reassigning primarySurface to \(paneId)")
+            primarySurface = surface
+            surface.onCellSizeChanged = { [weak self] cellSize in
+                self?.primaryCellSize = cellSize
+                logger.info("📐 Primary cell size updated: \(Int(cellSize.width))x\(Int(cellSize.height))")
+            }
+            // Manually trigger if cell size is already valid
+            if surface.cellSize.width > 0 && surface.cellSize.height > 0 {
+                primaryCellSize = surface.cellSize
+                logger.info("📐 Primary cell size initialized from reassignment: \(Int(surface.cellSize.width))x\(Int(surface.cellSize.height))")
+            }
+        } else {
+            logger.warning("🔄 No surfaces available to reassign as primary")
+            primarySurface = nil
+            primaryCellSize = .zero
         }
     }
     
@@ -514,6 +572,10 @@ class TmuxSessionManager: ObservableObject {
             
             for paneId in removedPaneIds {
                 logger.info("📐 🗑️ Pane \(paneId) was closed, cleaning up surface")
+                
+                // Check if this was our primary surface BEFORE removing
+                let wasPrimarySurface = paneSurfaces[paneId] === primarySurface
+                
                 removeSurface(for: paneId, paneActuallyClosed: true)
                 panes.removeValue(forKey: paneId)
                 
@@ -524,19 +586,32 @@ class TmuxSessionManager: ObservableObject {
                 pendingOutput.removeValue(forKey: paneId)
                 restoredPanes.remove(paneId)
                 
-                // If the removed pane was our primary surface, reassign it
-                if paneId == "%0" {
+                // If the removed pane had our primary surface, reassign it
+                if wasPrimarySurface {
+                    logger.info("📐 🔄 Primary surface's pane \(paneId) closed, reassigning...")
+                    primarySurface = nil
+                    primaryCellSize = .zero
+                    
                     // Find the first remaining pane's surface
-                    if let firstRemainingPaneId = newPaneIds.sorted().first,
-                       let remainingSurface = paneSurfaces[firstRemainingPaneId] {
-                        logger.info("📐 🔄 Primary pane %0 closed, reassigning primarySurface to \(firstRemainingPaneId)")
-                        primarySurface = remainingSurface
-                        remainingSurface.onCellSizeChanged = { [weak self] cellSize in
-                            self?.primaryCellSize = cellSize
+                    if let firstRemainingPaneId = newPaneIds.sorted().first {
+                        // Ensure surface exists for the remaining pane
+                        if paneSurfaces[firstRemainingPaneId] == nil {
+                            logger.info("📐 🆕 Creating surface for remaining pane \(firstRemainingPaneId)")
+                            _ = getSurfaceOrCreate(for: firstRemainingPaneId)
                         }
-                        // Manually trigger if cell size is already valid
-                        if remainingSurface.cellSize.width > 0 && remainingSurface.cellSize.height > 0 {
-                            primaryCellSize = remainingSurface.cellSize
+                        
+                        if let remainingSurface = paneSurfaces[firstRemainingPaneId] {
+                            logger.info("📐 🔄 Reassigned primarySurface to \(firstRemainingPaneId)")
+                            primarySurface = remainingSurface
+                            remainingSurface.onCellSizeChanged = { [weak self] cellSize in
+                                self?.primaryCellSize = cellSize
+                            }
+                            // Manually trigger if cell size is already valid
+                            if remainingSurface.cellSize.width > 0 && remainingSurface.cellSize.height > 0 {
+                                primaryCellSize = remainingSurface.cellSize
+                            }
+                        } else {
+                            logger.error("📐 ❌ Failed to get/create surface for \(firstRemainingPaneId)")
                         }
                     }
                 }
@@ -569,24 +644,29 @@ class TmuxSessionManager: ObservableObject {
                 }
             }
             
-            // If we're down to a single pane, update focused pane ID and ensure primarySurface is set
-            if newTree.paneIds.count == 1 {
-                let remainingPaneId = "%\(newTree.paneIds[0])"
-                if focusedPaneId != remainingPaneId {
-                    logger.info("📐 Single pane remaining, updating focus to \(remainingPaneId)")
-                    focusedPaneId = remainingPaneId
-                }
-                // Ensure primarySurface points to the remaining surface
-                if let remainingSurface = paneSurfaces[remainingPaneId], primarySurface !== remainingSurface {
-                    logger.info("📐 🔄 Reassigning primarySurface to remaining pane \(remainingPaneId)")
-                    primarySurface = remainingSurface
-                    remainingSurface.onCellSizeChanged = { [weak self] cellSize in
+            // Ensure primarySurface is valid (might be nil after window close)
+            // Use the first pane in the new tree as primary
+            if primarySurface == nil, let firstPaneId = newTree.paneIds.first {
+                let paneId = "%\(firstPaneId)"
+                if let surface = paneSurfaces[paneId] {
+                    logger.info("📐 🔄 Assigning primarySurface to \(paneId) (was nil)")
+                    primarySurface = surface
+                    surface.onCellSizeChanged = { [weak self] cellSize in
                         self?.primaryCellSize = cellSize
                     }
                     // Manually trigger if cell size is already valid
-                    if remainingSurface.cellSize.width > 0 && remainingSurface.cellSize.height > 0 {
-                        primaryCellSize = remainingSurface.cellSize
+                    if surface.cellSize.width > 0 && surface.cellSize.height > 0 {
+                        primaryCellSize = surface.cellSize
                     }
+                }
+            }
+            
+            // Update focused pane if needed
+            if let firstPaneId = newTree.paneIds.first {
+                let paneIdStr = "%\(firstPaneId)"
+                if focusedPaneId.isEmpty || paneSurfaces[focusedPaneId] == nil {
+                    logger.info("📐 Updating focusedPaneId to \(paneIdStr)")
+                    focusedPaneId = paneIdStr
                 }
             }
         } else {
