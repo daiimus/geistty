@@ -36,12 +36,12 @@ struct TmuxMultiPaneView: View {
     
     var body: some View {
         GeometryReader { geometry in
+            // The split tree view (panes with SwiftUI dividers for visual only)
             TmuxSplitTreeView(
                 tree: sessionManager.currentSplitTree,
                 dividerColor: dividerColor,
                 onResize: { paneId, newRatio in
-                    // For now, don't send resize to tmux - local UI only
-                    // TODO: Implement tmux resize-pane when needed
+                    // Resize is handled by UIKit overlay
                 },
                 onEqualize: {
                     sessionManager.equalizeSplits()
@@ -379,11 +379,15 @@ class GhosttyPaneSurfaceContainerView: UIView {
 /// A UIView container that hosts the TmuxMultiPaneView via UIHostingController.
 ///
 /// This allows embedding the SwiftUI split view into UIKit view hierarchies.
+/// Also adds a UIKit overlay for divider drag handling.
 class TmuxMultiPaneContainerView: UIView {
     private var hostingController: UIHostingController<TmuxMultiPaneView>?
     private weak var parentViewController: UIViewController?
     private var sessionManager: TmuxSessionManager?
     private var splitTreeObserver: AnyCancellable?
+    
+    /// UIKit overlay for divider dragging - added ON TOP of the SwiftUI hosting view
+    private var dividerOverlay: DividerOverlayView?
     
     /// Configure the container with a session manager and parent view controller.
     func configure(sessionManager: TmuxSessionManager, parentViewController: UIViewController) {
@@ -412,12 +416,47 @@ class TmuxMultiPaneContainerView: UIView {
         // Set transparent background
         hosting.view.backgroundColor = .clear
         backgroundColor = .clear
+        
+        // Add divider overlay ON TOP of the SwiftUI view
+        let overlay = DividerOverlayView()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.onDragEnded = { [weak sessionManager] paneId, ratio in
+            sessionManager?.updateSplitRatioAndSync(forPaneId: paneId, ratio: ratio)
+        }
+        addSubview(overlay)
+        self.dividerOverlay = overlay
+        
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+        
+        // Observe split tree changes to update divider positions
+        splitTreeObserver = sessionManager.$currentSplitTree
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] tree in
+                guard let self = self else { return }
+                self.dividerOverlay?.updateDividers(from: tree, containerSize: self.bounds.size)
+            }
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Update divider positions when bounds change
+        if let tree = sessionManager?.currentSplitTree {
+            dividerOverlay?.updateDividers(from: tree, containerSize: bounds.size)
+        }
     }
     
     /// Clean up when the view is removed
     func cleanup() {
         splitTreeObserver?.cancel()
         splitTreeObserver = nil
+        
+        dividerOverlay?.removeFromSuperview()
+        dividerOverlay = nil
         
         hostingController?.willMove(toParent: nil)
         hostingController?.view.removeFromSuperview()
@@ -427,6 +466,198 @@ class TmuxMultiPaneContainerView: UIView {
     
     deinit {
         cleanup()
+    }
+}
+
+// MARK: - DividerOverlayView
+
+/// UIKit view that manages divider hit areas and pan gestures.
+/// This view sits on top of the SwiftUI split view and uses UIPanGestureRecognizer
+/// to handle divider drags, which works reliably with UIKit views underneath.
+class DividerOverlayView: UIView {
+    /// Callback when a divider drag ends - commits the new ratio
+    var onDragEnded: ((Int, Double) -> Void)?
+    
+    /// Current divider views
+    private var dividerViews: [DividerHitAreaView] = []
+    
+    /// Divider hit area size (invisible touch target)
+    private let hitAreaSize: CGFloat = 30
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isUserInteractionEnabled = true
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .clear
+        isUserInteractionEnabled = true
+    }
+    
+    /// Update dividers based on the split tree
+    func updateDividers(from tree: TmuxSplitTree, containerSize: CGSize) {
+        // Remove old dividers
+        dividerViews.forEach { $0.removeFromSuperview() }
+        dividerViews.removeAll()
+        
+        // Create new dividers from tree
+        if let root = tree.root {
+            createDividers(from: root, in: CGRect(origin: .zero, size: containerSize))
+        }
+    }
+    
+    /// Recursively create divider views from the split tree
+    private func createDividers(from node: TmuxSplitTree.Node, in rect: CGRect) {
+        guard case .split(let split) = node else { return }
+        
+        let ratio = CGFloat(split.ratio)
+        let paneId = split.left.leftmostPaneId
+        let dividerView = DividerHitAreaView()
+        dividerView.paneId = paneId
+        dividerView.direction = split.direction == .horizontal ? .horizontal : .vertical
+        dividerView.hitAreaSize = hitAreaSize
+        dividerView.containerRect = rect
+        
+        // Only commit to session manager when drag ends
+        dividerView.onDragEnded = { [weak self] newRatio in
+            self?.onDragEnded?(paneId, Double(newRatio))
+        }
+        
+        // Position divider based on direction and ratio
+        switch split.direction {
+        case .horizontal:
+            let dividerX = rect.origin.x + rect.width * ratio
+            dividerView.frame = CGRect(
+                x: dividerX - hitAreaSize / 2,
+                y: rect.origin.y,
+                width: hitAreaSize,
+                height: rect.height
+            )
+            
+            // Recurse into children
+            let leftRect = CGRect(x: rect.origin.x, y: rect.origin.y,
+                                  width: rect.width * ratio, height: rect.height)
+            let rightRect = CGRect(x: dividerX, y: rect.origin.y,
+                                   width: rect.width * (1 - ratio), height: rect.height)
+            createDividers(from: split.left, in: leftRect)
+            createDividers(from: split.right, in: rightRect)
+            
+        case .vertical:
+            let dividerY = rect.origin.y + rect.height * ratio
+            dividerView.frame = CGRect(
+                x: rect.origin.x,
+                y: dividerY - hitAreaSize / 2,
+                width: rect.width,
+                height: hitAreaSize
+            )
+            
+            // Recurse into children
+            let topRect = CGRect(x: rect.origin.x, y: rect.origin.y,
+                                 width: rect.width, height: rect.height * ratio)
+            let bottomRect = CGRect(x: rect.origin.x, y: dividerY,
+                                    width: rect.width, height: rect.height * (1 - ratio))
+            createDividers(from: split.left, in: topRect)
+            createDividers(from: split.right, in: bottomRect)
+        }
+        
+        addSubview(dividerView)
+        dividerViews.append(dividerView)
+    }
+    
+    /// Only respond to touches on divider areas - pass through everything else
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        for divider in dividerViews {
+            if divider.frame.contains(point) {
+                return divider
+            }
+        }
+        // Return nil to pass through touches to views below
+        return nil
+    }
+}
+
+/// A single divider hit area with pan gesture support
+class DividerHitAreaView: UIView {
+    var paneId: Int = 0
+    var direction: SplitViewDirection = .horizontal
+    var hitAreaSize: CGFloat = 30
+    var containerRect: CGRect = .zero
+    
+    /// Called during drag with the new ratio (for fluid visual feedback)
+    var onDragChanged: ((CGFloat) -> Void)?
+    
+    /// Called when drag ends with the final ratio (to commit to tmux)
+    var onDragEnded: ((CGFloat) -> Void)?
+    
+    private var panGesture: UIPanGestureRecognizer!
+    private var initialCenter: CGPoint = .zero
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupGesture()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupGesture()
+    }
+    
+    private func setupGesture() {
+        // Invisible hit area (was red for debugging)
+        backgroundColor = .clear
+        
+        panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        addGestureRecognizer(panGesture)
+    }
+    
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let minRatio: CGFloat = 0.1
+        let maxRatio: CGFloat = 0.9
+        
+        switch gesture.state {
+        case .began:
+            initialCenter = center
+            
+        case .changed:
+            // Move the divider view directly for fluid feedback
+            let translation = gesture.translation(in: superview)
+            
+            switch direction {
+            case .horizontal:
+                let newX = initialCenter.x + translation.x
+                let minX = containerRect.origin.x + containerRect.width * minRatio
+                let maxX = containerRect.origin.x + containerRect.width * maxRatio
+                center.x = min(max(minX, newX), maxX)
+                
+            case .vertical:
+                let newY = initialCenter.y + translation.y
+                let minY = containerRect.origin.y + containerRect.height * minRatio
+                let maxY = containerRect.origin.y + containerRect.height * maxRatio
+                center.y = min(max(minY, newY), maxY)
+            }
+            
+        case .ended, .cancelled:
+            // Calculate final ratio and commit
+            let location = gesture.location(in: superview)
+            var newRatio: CGFloat
+            
+            switch direction {
+            case .horizontal:
+                let relativeX = location.x - containerRect.origin.x
+                newRatio = relativeX / containerRect.width
+            case .vertical:
+                let relativeY = location.y - containerRect.origin.y
+                newRatio = relativeY / containerRect.height
+            }
+            
+            newRatio = min(max(minRatio, newRatio), maxRatio)
+            onDragEnded?(newRatio)
+            
+        default:
+            break
+        }
     }
 }
 
