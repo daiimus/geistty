@@ -66,7 +66,9 @@ struct TmuxMultiPaneView: View {
             }
             .onChange(of: sessionManager.currentSplitTree.paneIds.count) { _, _ in
                 // When pane count changes (split/close), re-send dimensions
-                logger.info("📐 Pane count changed, triggering resize")
+                // Reset lastSentSize to force a resize command even if geometry didn't change
+                logger.info("📐 Pane count changed, forcing resize")
+                lastSentSize = .zero  // Force resize to be sent
                 handleSizeChange(geometry.size)
             }
             .onChange(of: sessionManager.primaryCellSize) { _, newCellSize in

@@ -45,6 +45,11 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 
+# Test results and screenshots
+test_results/
+Geistty/test_results/
+*.xcresult/
+
 # Code Injection
 iOSInjectionProject/
 
