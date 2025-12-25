@@ -7,6 +7,9 @@
 //
 
 import SwiftUI
+import os
+
+private let logger = os.Logger(subsystem: "com.geistty.app", category: "TmuxSplitView")
 
 // MARK: - SplitViewDirection
 
@@ -89,6 +92,8 @@ struct TmuxSplitView<L: View, R: View>: View {
             let leftRect = leftRect(for: geo.size)
             let rightRect = rightRect(for: geo.size, leftRect: leftRect)
             let dividerPosition = dividerPosition(for: geo.size, leftRect: leftRect)
+            
+            let _ = logger.info("📐 TmuxSplitView layout: total=\(Int(geo.size.width))x\(Int(geo.size.height)), split=\(String(format: "%.3f", split)), left=\(Int(leftRect.width)), right=\(Int(rightRect.width))")
             
             ZStack(alignment: .topLeading) {
                 // Left (or top) view
@@ -287,6 +292,7 @@ private struct TmuxSplitNodeView<PaneContent: View>: View {
             
         case .split(let split):
             let direction: SplitViewDirection = split.direction == .horizontal ? .horizontal : .vertical
+            let _ = logger.info("📐 TmuxSplitNodeView: direction=\(split.direction == .horizontal ? "horizontal" : "vertical"), ratio=\(String(format: "%.3f", split.ratio))")
             
             TmuxSplitView(
                 direction,
