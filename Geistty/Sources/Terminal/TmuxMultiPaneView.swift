@@ -41,7 +41,8 @@ struct TmuxMultiPaneView: View {
                 tree: sessionManager.currentSplitTree,
                 dividerColor: dividerColor,
                 onResize: { paneId, newRatio in
-                    // Resize is handled by UIKit overlay
+                    // TODO: Implement drag-to-resize sync to tmux
+                    // For now, divider drag doesn't persist - tmux controls the layout
                 },
                 onEqualize: {
                     sessionManager.equalizeSplits()
@@ -50,7 +51,9 @@ struct TmuxMultiPaneView: View {
                     sessionManager.toggleZoom(paneId: paneId)
                 },
                 paneContent: { paneId, cols, rows in
-                    TmuxPaneSurfaceView(
+                    // Log dimensions being passed to pane view
+                    let _ = logger.info("📐 paneContent called: pane=\(paneId), dims=\(cols)x\(rows)")
+                    return TmuxPaneSurfaceView(
                         paneId: paneId,
                         cols: cols,
                         rows: rows,
@@ -184,6 +187,8 @@ struct TmuxPaneSurfaceView: View {
                     selectPane()
                 }
             )
+            // Use ID that includes dimensions to force SwiftUI to recognize dimension changes
+            .id("\(paneId)-\(cols)x\(rows)")
             .overlay(
                 // Focus indicator border
                 RoundedRectangle(cornerRadius: 0)
@@ -227,6 +232,7 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
     let onTap: () -> Void
     
     func makeUIView(context: Context) -> GhosttyPaneSurfaceContainerView {
+        logger.info("📐 GhosttyPaneSurfaceWrapper makeUIView: cols=\(cols), rows=\(rows)")
         let container = GhosttyPaneSurfaceContainerView()
         container.surface = surface
         container.targetCols = cols
@@ -238,6 +244,11 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
     }
     
     func updateUIView(_ container: GhosttyPaneSurfaceContainerView, context: Context) {
+        // Log dimension updates for debugging
+        if container.targetCols != cols || container.targetRows != rows {
+            logger.info("📐 GhosttyPaneSurfaceWrapper updating pane dimensions: \(container.targetCols)x\(container.targetRows) -> \(cols)x\(rows)")
+        }
+        
         // Update target dimensions if changed
         container.targetCols = cols
         container.targetRows = rows
@@ -313,7 +324,11 @@ class GhosttyPaneSurfaceContainerView: UIView {
                 lastAppliedRows = 0
                 gridSizeRetryCount = 0
                 
-                // Set the grid size after the surface is added
+                // Force layout to establish bounds before setting grid size
+                setNeedsLayout()
+                layoutIfNeeded()
+                
+                // Set the grid size after the surface is added and laid out
                 updateGridSize()
             }
         }
@@ -341,14 +356,20 @@ class GhosttyPaneSurfaceContainerView: UIView {
     private func updateGridSize() {
         guard let surface = surface,
               targetCols > 0,
-              targetRows > 0 else {
+              targetRows > 0,
+              bounds.width > 10,  // Ensure we have valid container bounds
+              bounds.height > 10 else {
+            logger.debug("📐 updateGridSize skipped: surface=\(surface != nil), cols=\(targetCols), rows=\(targetRows), bounds=\(bounds)")
             return
         }
         
         // Skip if we've already applied these dimensions
         if targetCols == lastAppliedCols && targetRows == lastAppliedRows {
+            logger.debug("📐 updateGridSize skipped: already applied \(targetCols)x\(targetRows)")
             return
         }
+        
+        logger.info("📐 GhosttyPaneSurfaceContainerView applying grid size: \(targetCols)x\(targetRows) (was: \(lastAppliedCols)x\(lastAppliedRows)), bounds=\(bounds)")
         
         // Tell Ghostty to use the exact grid size
         let success = surface.setExactGridSize(cols: targetCols, rows: targetRows)
@@ -356,9 +377,11 @@ class GhosttyPaneSurfaceContainerView: UIView {
             lastAppliedCols = targetCols
             lastAppliedRows = targetRows
             gridSizeRetryCount = 0  // Reset retry counter on success
+            logger.info("📐 ✅ Grid size applied successfully: \(targetCols)x\(targetRows)")
         } else {
             // Cell size not available yet - retry with limited attempts
             gridSizeRetryCount += 1
+            logger.info("📐 ⏳ Grid size application failed (attempt \(gridSizeRetryCount)/\(maxGridSizeRetries))")
             if gridSizeRetryCount <= maxGridSizeRetries {
                 DispatchQueue.main.async { [weak self] in
                     self?.setNeedsLayout()
