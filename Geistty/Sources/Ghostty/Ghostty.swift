@@ -62,26 +62,31 @@ enum Ghostty {
 
 // MARK: - Simple Logger (since os.Logger requires iOS 14+)
 
+import os
+
+// MARK: - Simple Logger wrapper around os.Logger
+
 struct Logger {
-    let subsystem: String
-    let category: String
+    private let osLogger: os.Logger
+    
+    init(subsystem: String, category: String) {
+        osLogger = os.Logger(subsystem: subsystem, category: category)
+    }
     
     func info(_ message: String) {
-        print("[\(category)] INFO: \(message)")
+        osLogger.info("\(message, privacy: .public)")
     }
     
     func warning(_ message: String) {
-        print("[\(category)] WARNING: \(message)")
+        osLogger.warning("\(message, privacy: .public)")
     }
     
     func error(_ message: String) {
-        print("[\(category)] ERROR: \(message)")
+        osLogger.error("\(message, privacy: .public)")
     }
     
     func debug(_ message: String) {
-        #if DEBUG
-        print("[\(category)] DEBUG: \(message)")
-        #endif
+        osLogger.debug("\(message, privacy: .public)")
     }
 }
 
@@ -2839,6 +2844,7 @@ extension Ghostty {
                   let size = surfaceSize,
                   size.cell_width_px > 0,
                   size.cell_height_px > 0 else {
+                logger.info("📐 setExactGridSize(\(cols)x\(rows)) FAILED - no valid surface/cell size")
                 return false
             }
             
@@ -2847,7 +2853,7 @@ extension Ghostty {
             let exactWidthPx = UInt32(cols) * size.cell_width_px
             let exactHeightPx = UInt32(rows) * size.cell_height_px
             
-            logger.debug("📐 Setting exact grid size: \(cols)x\(rows) = \(exactWidthPx)x\(exactHeightPx)px (cell: \(size.cell_width_px)x\(size.cell_height_px))")
+            logger.info("📐 setExactGridSize: \(cols)x\(rows) = \(exactWidthPx)x\(exactHeightPx)px (cell: \(size.cell_width_px)x\(size.cell_height_px))")
             
             // Mark that we're using explicit grid sizing - prevents layoutSubviews from overriding
             usesExactGridSize = true

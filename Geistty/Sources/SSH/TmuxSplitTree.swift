@@ -7,6 +7,9 @@
 //
 
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.geistty.app", category: "TmuxSplitTree")
 
 // MARK: - TmuxSplitTree
 
@@ -161,9 +164,11 @@ struct TmuxSplitTree: Equatable {
                 if direction == .horizontal {
                     let totalWidth = Double(children[0].width + children[1].width)
                     ratio = totalWidth > 0 ? Double(children[0].width) / totalWidth : 0.5
+                    logger.info("📐 Split ratio: left=\(children[0].width) right=\(children[1].width) total=\(Int(totalWidth)) ratio=\(String(format: "%.3f", ratio))")
                 } else {
                     let totalHeight = Double(children[0].height + children[1].height)
                     ratio = totalHeight > 0 ? Double(children[0].height) / totalHeight : 0.5
+                    logger.info("📐 Split ratio: top=\(children[0].height) bottom=\(children[1].height) total=\(Int(totalHeight)) ratio=\(String(format: "%.3f", ratio))")
                 }
                 
                 return .split(Node.Split(

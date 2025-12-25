@@ -1261,11 +1261,16 @@ class TmuxSessionManager: ObservableObject {
     /// Update a split ratio and sync to tmux
     /// Called when the user finishes dragging a divider.
     func updateSplitRatioAndSync(forPaneId paneId: Int, ratio: Double) {
+        logger.info("📐 updateSplitRatioAndSync called: pane=\(paneId), ratio=\(String(format: "%.3f", ratio))")
+        
         // First update local state
         updateSplitRatio(forPaneId: paneId, ratio: ratio)
         
         // Then send resize-pane to tmux
-        guard let client = controlClient, let write = writeToSSH else { return }
+        guard let client = controlClient, let write = writeToSSH else {
+            logger.warning("⚠️ No tmux client or write function - cannot sync resize")
+            return
+        }
         
         // Find the split that contains this pane to determine direction and calculate size
         guard let splitInfo = findSplitContainingWithSize(paneId: paneId) else {
@@ -1298,13 +1303,18 @@ class TmuxSessionManager: ObservableObject {
     
     /// Find the split node that contains the given pane ID and return its direction and total size
     private func findSplitContainingWithSize(paneId: Int) -> (direction: TmuxSplitTree.Direction, ratio: Double, totalSize: Int)? {
-        guard let root = currentSplitTree.root else { return nil }
+        guard let root = currentSplitTree.root else {
+            logger.warning("⚠️ No root node in currentSplitTree")
+            return nil
+        }
         
         // Get the total window size first
         guard let size = lastRefreshSize else {
             logger.warning("⚠️ No lastRefreshSize available for split calculation")
             return nil
         }
+        
+        logger.info("📐 findSplitContainingWithSize: paneId=\(paneId), lastRefreshSize=\(size.cols)x\(size.rows)")
         
         return findSplitContainingWithSizeHelper(node: root, paneId: paneId, totalCols: size.cols, totalRows: size.rows)
     }
