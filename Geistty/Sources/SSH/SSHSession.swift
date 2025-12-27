@@ -42,6 +42,16 @@ class SSHSession: ObservableObject, Identifiable {
     private(set) var port: Int = 22
     private(set) var username: String = ""
     
+    // Stored credentials for reconnect (in memory only, never persisted)
+    private var storedPassword: String?
+    private var storedProfile: ConnectionProfile?
+    private var storedCredential: SSHCredential?
+    
+    // Reconnection state
+    @Published private(set) var isReconnecting: Bool = false
+    private var reconnectAttempts: Int = 0
+    private let maxReconnectAttempts: Int = 3
+    
     // tmux options
     private var useTmux: Bool = false
     private var tmuxSessionName: String?
@@ -84,6 +94,11 @@ class SSHSession: ObservableObject, Identifiable {
         self.tmuxSessionName = tmuxSessionName
         self.tmuxMode = useTmux ? .controlMode : .none
         
+        // Store password for reconnect (in memory only)
+        self.storedPassword = password
+        self.storedProfile = nil
+        self.storedCredential = nil
+        
         connection = SSHConnection(host: host, port: port, username: username)
         connection?.delegate = self
         
@@ -94,6 +109,9 @@ class SSHSession: ObservableObject, Identifiable {
         try await connection?.connect()
         try await connection?.authenticatePassword(password)
         try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        
+        // Reset reconnect attempts on successful connection
+        reconnectAttempts = 0
         
         // Initialize control client if using control mode
         if tmuxMode == .controlMode {
@@ -144,6 +162,11 @@ class SSHSession: ObservableObject, Identifiable {
         // Enable control mode by default for testing
         self.tmuxMode = profile.useTmux ? .controlMode : .none
         
+        // Store profile and credential for reconnect (in memory only)
+        self.storedProfile = profile
+        self.storedCredential = credential
+        self.storedPassword = nil
+        
         connection = SSHConnection(host: profile.host, port: profile.port, username: profile.username)
         connection?.delegate = self
         
@@ -173,6 +196,9 @@ class SSHSession: ObservableObject, Identifiable {
         }
         
         try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        
+        // Reset reconnect attempts on successful connection
+        reconnectAttempts = 0
         
         // Mark profile as recently connected
         ConnectionProfileManager.shared.markConnected(profile)
@@ -379,9 +405,25 @@ class SSHSession: ObservableObject, Identifiable {
         connection?.disconnect()
         connection = nil
         state = .disconnected
+        
+        // Clear stored credentials on explicit disconnect
+        storedPassword = nil
+        storedProfile = nil
+        storedCredential = nil
     }
     
-    // MARK: - App Lifecycle (Pause Mode)
+    // MARK: - App Lifecycle & Auto-Reconnect
+    
+    /// Check if the connection is alive
+    var isConnectionAlive: Bool {
+        guard let conn = connection else { return false }
+        return conn.state != .disconnected
+    }
+    
+    /// Check if we have stored credentials for reconnect
+    var canReconnect: Bool {
+        return storedPassword != nil || (storedProfile != nil && storedCredential != nil)
+    }
     
     /// Called when the app is about to go to background.
     /// In tmux control mode, this resumes paused panes to prevent
@@ -394,15 +436,145 @@ class SSHSession: ObservableObject, Identifiable {
     }
     
     /// Called when the app becomes active again.
-    /// In tmux control mode, this resumes any paused panes.
+    /// Checks connection health and auto-reconnects if needed.
     func appDidBecomeActive() {
-        guard controlModeActive, let client = tmuxControlClient else { return }
-        logger.info("App became active, resuming paused panes")
+        logger.info("🔄 App became active, checking connection health...")
         
-        // Resume all paused panes
-        client.resumeAllPausedPanes(via: { [weak self] command in
-            self?.connection?.write(command)
-        })
+        // If already reconnecting, don't start another attempt
+        guard !isReconnecting else {
+            logger.info("🔄 Already reconnecting, skipping")
+            return
+        }
+        
+        // If connection is alive and tmux is active, just resume paused panes
+        if isConnectionAlive, controlModeActive, let client = tmuxControlClient {
+            logger.info("🔄 Connection alive, resuming paused panes")
+            client.resumeAllPausedPanes(via: { [weak self] command in
+                self?.connection?.write(command)
+            })
+            return
+        }
+        
+        // Connection is dead - attempt to reconnect if we have credentials
+        if !isConnectionAlive && canReconnect {
+            logger.info("🔄 Connection dead, attempting auto-reconnect...")
+            Task {
+                await attemptReconnect()
+            }
+        } else if !isConnectionAlive {
+            logger.warning("🔄 Connection dead but no stored credentials for reconnect")
+            // Notify session manager of connection loss
+            tmuxSessionManager?.controlModeExited(reason: "Connection lost")
+        }
+    }
+    
+    /// Attempt to reconnect to the SSH server
+    private func attemptReconnect() async {
+        guard !isReconnecting else { return }
+        guard reconnectAttempts < maxReconnectAttempts else {
+            logger.error("🔄 Max reconnect attempts (\(maxReconnectAttempts)) reached")
+            tmuxSessionManager?.controlModeExited(reason: "Reconnect failed after \(maxReconnectAttempts) attempts")
+            return
+        }
+        
+        isReconnecting = true
+        reconnectAttempts += 1
+        logger.info("🔄 Reconnect attempt \(reconnectAttempts)/\(maxReconnectAttempts)")
+        
+        // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
+        controlModeActive = false
+        tmuxControlClient?.reset()
+        tmuxControlClient = nil
+        connection?.disconnect()
+        connection = nil
+        
+        do {
+            // Reconnect using stored credentials
+            if let profile = storedProfile, let credential = storedCredential {
+                try await reconnectWithProfile(profile, credential: credential)
+            } else if let password = storedPassword {
+                try await reconnectWithPassword(password)
+            }
+            
+            // Success!
+            isReconnecting = false
+            reconnectAttempts = 0
+            logger.info("🔄 ✅ Reconnect successful!")
+            
+        } catch {
+            logger.error("🔄 Reconnect failed: \(error.localizedDescription)")
+            isReconnecting = false
+            
+            // Retry after delay if attempts remaining
+            if reconnectAttempts < maxReconnectAttempts {
+                logger.info("🔄 Retrying in 2 seconds...")
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await attemptReconnect()
+            } else {
+                tmuxSessionManager?.controlModeExited(reason: "Reconnect failed: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Reconnect using stored password
+    private func reconnectWithPassword(_ password: String) async throws {
+        connection = SSHConnection(host: host, port: port, username: username)
+        connection?.delegate = self
+        
+        #if DEBUG
+        connection?.enableTracing = true
+        #endif
+        
+        try await connection?.connect()
+        try await connection?.authenticatePassword(password)
+        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        
+        // Re-setup tmux control mode
+        if tmuxMode == .controlMode {
+            setupTmuxControlClient()
+        }
+        
+        // Re-attach to tmux session
+        injectTerminalSetup()
+    }
+    
+    /// Reconnect using stored profile and credential
+    private func reconnectWithProfile(_ profile: ConnectionProfile, credential: SSHCredential) async throws {
+        connection = SSHConnection(host: profile.host, port: profile.port, username: profile.username)
+        connection?.delegate = self
+        
+        #if DEBUG
+        connection?.enableTracing = true
+        #endif
+        
+        try await connection?.connect()
+        
+        // Authenticate based on credential type
+        switch credential.authType {
+        case .password(let password):
+            try await connection?.authenticatePassword(password)
+            
+        case .privateKey(let path, let passphrase):
+            try await connection?.authenticateKey(privateKeyPath: path, passphrase: passphrase)
+            
+        case .privateKeyData(let keyData, let passphrase):
+            let tempPath = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ghostty_temp_key_\(UUID().uuidString)")
+            try keyData.write(to: tempPath)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempPath.path)
+            defer { try? FileManager.default.removeItem(at: tempPath) }
+            try await connection?.authenticateKey(privateKeyPath: tempPath.path, passphrase: passphrase)
+        }
+        
+        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        
+        // Re-setup tmux control mode
+        if tmuxMode == .controlMode {
+            setupTmuxControlClient()
+        }
+        
+        // Re-attach to tmux session
+        injectTerminalSetup()
     }
     
     // Internal method to handle received data, called from connection delegate
