@@ -29,15 +29,27 @@ The result is a native iOS app with:
 - ✅ Complete xterm-256color/truecolor support
 - ✅ Text selection via long-press + drag
 - ✅ Copy/paste with system clipboard integration
-- ✅ Scrollback buffer
+- ✅ Scrollback buffer with search (Cmd+F)
 - ✅ Mouse tracking for terminal apps (vim, tmux, etc.)
 - ✅ Two-finger scroll and trackpad support
+
+### tmux Integration
+- ✅ Native tmux Control Mode (-CC) support
+- ✅ Multi-pane layouts with real-time sync
+- ✅ Per-pane output routing and input
+- ✅ Window tabs with switching (Cmd+1-9)
+- ✅ Ghostty-style keyboard shortcuts:
+  - Split: Cmd+D (right), Cmd+Shift+D (down)
+  - Navigate: Cmd+[ / ], Cmd+Option+Arrows
+  - Zoom: Cmd+Shift+Enter
+  - Equalize: Cmd+Ctrl+=
+- ✅ Window rename (Cmd+Shift+R, double-tap, context menu)
 
 ### Keyboard
 - ✅ Full hardware keyboard support (iPad Magic Keyboard, external keyboards)
 - ✅ Arrow keys, function keys (F1-F12), Home/End/PageUp/PageDown
 - ✅ Modifier keys (Ctrl+C, Ctrl+D, Ctrl+Z, etc.)
-- ✅ On-screen keyboard with accessory bar (Esc, Ctrl toggle, arrows)
+- ✅ On-screen keyboard with accessory bar (Esc, Ctrl toggle, arrows, Tab)
 - ✅ Keyboard resize handling with animated terminal resize
 
 ### Connections
@@ -48,12 +60,16 @@ The result is a native iOS app with:
 - ✅ Quick Connect
 - ✅ Favorites and recent connections
 - ✅ Secure credential storage (iOS Keychain)
+- ✅ Auto-reconnect on app resume (credentials stored in memory only)
+- ✅ Disconnect detection with overlay and reconnect option (Cmd+R)
 
 ### Settings
-- ✅ Font size adjustment
+- ✅ Font size adjustment (Cmd+0/+/-)
+- ✅ Theme/color scheme selection (18 bundled themes)
+- ✅ Font family selection (Departure Mono, SF Mono, Menlo, Courier)
+- ✅ Config file support (ghostty.conf)
 - ✅ Auto-hiding chrome (header/toolbar)
 - ✅ Haptic feedback toggle
-- ✅ SSH keep-alive configuration
 
 ## Architecture
 
@@ -200,18 +216,26 @@ surfaceView.onWrite = { data in
 
 ## Roadmap
 
+### Recently Completed
+- ✅ tmux Control Mode with multi-pane layouts
+- ✅ Ghostty-style keyboard shortcuts
+- ✅ Auto-reconnect on app resume
+- ✅ Disconnect detection and reconnect UI
+- ✅ Window rename support
+- ✅ Search in scrollback (Cmd+F)
+- ✅ Theme and font customization
+
 ### Planned Features
-- [ ] Multiple terminal sessions (tabs/split view)
+- [ ] iPadOS Scene integration (each pane as native window)
 - [ ] SFTP file browser with Files.app integration
 - [ ] iCloud sync for connection profiles
-- [ ] 1Password / iCloud Keychain integration
+- [ ] Multiple SSH connections in unified tab bar
 - [ ] Mosh protocol support
 - [ ] Port forwarding
 - [ ] Snippet library (saved commands)
-- [ ] Split View / Stage Manager support
+- [ ] Split View / Stage Manager optimization
 
 ### Known Issues
-- Font settings UI exists but doesn't yet apply to Ghostty config
 - Secure Enclave key storage is stubbed but not fully implemented
 
 ## Dependencies

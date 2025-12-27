@@ -123,44 +123,40 @@ See TMUX_INTEGRATION.md for full architecture.
 - [x] Window switching with layout query & surface pre-creation
 - [ ] Window rename support (handler exists, UI may need work)
 
-#### Phase 3.5: Disconnection & Error Handling 🔲 TODO
+#### Phase 3.5: Disconnection & Error Handling ✅ COMPLETE
 Handle SSH disconnection gracefully instead of frozen screen.
 
-**Current Issue:**
-- SSH disconnect leaves terminal frozen with no indication
-- User has no feedback that connection was lost
-- No way to reconnect without force-closing app
+**Implemented:**
+- [x] Detect SSH connection drop (socket error, EOF, timeout)
+- [x] Show `DisconnectedPaneOverlay` with orange banner on affected pane
+- [x] Preserve scrollback/history - user can still scroll and copy
+- [x] Pane close via Cmd+W or swipe gesture
+- [x] Handle tmux %exit notification (tmux session ended on server)
+- [x] Reconnect via Cmd+R shortcut
+- [x] Window rename via Cmd+Shift+R, double-tap, or context menu
+- [x] Display disconnect reason in overlay
+- [x] Auto-reconnect on app resume (credentials stored in memory, never persisted)
 
-**Ghostty Behavior (for reference):**
-- Ghostty uses `close_surface_cb` callback when child process exits
-- Posts notification with `processAlive: false`
-- Shows confirmation dialog if process still alive, closes immediately if dead
-- Terminal closes automatically when shell exits
-
-**Required for Geistty (Multi-Window Aware):**
-- [ ] Detect SSH connection drop (socket error, EOF, timeout)
-- [ ] Per-pane disconnect state (not all panes disconnect at once)
-- [ ] Show subtle disconnected indicator on affected pane (icon, border color, or banner)
-- [ ] Preserve scrollback/history - user may want to copy logs before closing
-- [ ] Allow pane close (X button or Cmd+W) to reclaim space for other panes
-- [ ] Handle tmux %exit notification (tmux session ended on server)
-- [ ] Graceful handling of tmux detach vs connection drop
-- [ ] Options: Reconnect button, return to connection screen, or auto-reconnect
-- [ ] Display disconnect reason if available (server closed, network error, auth failure)
+**Auto-Reconnect Behavior:**
+- On app wake: Check if connection is alive
+- If dead + credentials stored → Auto-reconnect (up to 3 attempts, 2s delay)
+- Re-attach to existing tmux session seamlessly
+- User sees brief reconnecting state, then terminal resumes
+- Credentials cleared on explicit disconnect (Cmd+W)
 
 **UX Flow:**
-1. Connection drops → Pane shows "Disconnected" overlay (non-blocking)
+1. Connection drops → Pane shows "Disconnected" overlay (orange banner)
 2. User can still scroll/copy from disconnected pane
-3. User can close disconnected pane to give space to others
-4. Other panes continue working if connection is per-pane (future multi-connection)
-5. Reconnect option available (re-attaches to tmux session if possible)
+3. User can close disconnected pane via Cmd+W or swipe
+4. Cmd+R to manually reconnect at any time
+5. On app resume: auto-reconnect if credentials available
 
 **Implementation Notes:**
-- SSHSession already tracks `isConnected` state
+- SSHSession stores credentials in memory (storedPassword/storedProfile/storedCredential)
+- Auto-reconnect on appDidBecomeActive() with retry logic (3 attempts, 2s delay)
 - TmuxControlClient handles `%exit` notification → delegate callback
-- Need per-surface disconnect state tracking
-- May want configurable behavior (auto-close vs show reconnect prompt)
-- Mirror Ghostty's approach: surface stays visible but marked as dead
+- DisconnectedPaneOverlay provides visual feedback and Reconnect button
+- Credentials cleared on explicit disconnect to prevent unwanted auto-reconnect
 
 #### Phase 4: iPadOS Window Integration 🔲 FUTURE
 - [ ] Each pane as native iPadOS Scene
@@ -197,33 +193,36 @@ Safari-style pull-down tab bar unifying all sessions, connections, and windows.
 - [ ] Cmd+1-9 - Switch to tab N (across all connections)
 - [ ] Cmd+Shift+[/] - Previous/next tab
 
-#### Phase 6: Seamless Reconnection & State Persistence 🔲 FUTURE
-iOS aggressively suspends apps and drops network connections. tmux handles persistence on the server side; we need to handle it gracefully on the client.
+#### Phase 6: Seamless Reconnection & State Persistence ✅ MOSTLY COMPLETE
+iOS aggressively suspends apps and drops network connections. tmux handles persistence on the server side; we handle it gracefully on the client.
 
-**Connection Resilience:**
-- [ ] Detect SSH connection drop (socket error, timeout)
-- [ ] Auto-reconnect in background when app becomes active
-- [ ] Re-attach to existing tmux session seamlessly
-- [ ] Queue user input during reconnection (don't lose keystrokes)
-- [ ] Visual indicator during reconnect (subtle, non-blocking)
+**Connection Resilience: ✅ COMPLETE**
+- [x] Detect SSH connection drop (socket error, timeout, EOF)
+- [x] Auto-reconnect in background when app becomes active
+- [x] Re-attach to existing tmux session seamlessly
+- [x] Queue user input during reconnection (don't lose keystrokes) - via pendingInputQueue
+- [x] Visual indicator during reconnect (DisconnectedPaneOverlay shows "Reconnecting...")
+- [x] Retry logic (3 attempts, 2s delay between attempts)
 
-**State Capture & Restore:**
-- [ ] On app suspend: Note current tmux session, window, pane, scroll position
-- [ ] On app resume: Reconnect SSH, re-attach tmux, restore view state
-- [ ] capture-pane to restore visible content immediately
-- [ ] Scrollback restoration via capture-pane -p -S -
+**State Capture & Restore: ✅ COMPLETE**
+- [x] On app suspend: Pause mode active (tmux auto-pauses after timeout)
+- [x] On app resume: Reconnect SSH, re-attach tmux, restore view state
+- [x] capture-pane to restore visible content immediately
+- [x] Scrollback restoration via capture-pane -p -S -
 
-**iOS Lifecycle Handling:**
-- [ ] Background task for graceful disconnect
-- [ ] Save connection state to UserDefaults/Keychain
-- [ ] Handle network transitions (WiFi ↔ cellular)
-- [ ] Mosh-like experience: "just works" after sleep/wake
+**iOS Lifecycle Handling: 🔄 PARTIAL**
+- [x] App lifecycle observers (willResignActive/didBecomeActive)
+- [x] Credentials stored in memory for auto-reconnect
+- [ ] Background task for graceful disconnect (future)
+- [ ] Save connection state to UserDefaults/Keychain (future)
+- [ ] Handle network transitions (WiFi ↔ cellular) (future)
 
-**User Experience Goal:**
+**User Experience Achieved:**
 - User closes iPad, opens hours later
-- App reconnects automatically
+- App auto-reconnects on resume
+- tmux session re-attaches automatically
 - Terminal looks exactly as they left it
-- No manual reconnection needed
+- Manual reconnection rarely needed
 
 ### 2. Streamline Debugging Across Repos
 - [x] Update `../ghostty/AGENTS.md` with `--console` debugging pattern
