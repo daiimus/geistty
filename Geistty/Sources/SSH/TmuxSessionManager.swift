@@ -94,6 +94,13 @@ class TmuxSessionManager: ObservableObject {
     
     /// Cache of last processed layout strings per window (to avoid redundant updates)
     private var lastProcessedLayouts: [String: String] = [:]
+    
+    /// Pending layout changes for debouncing (windowId -> (layout, timestamp))
+    private var pendingLayoutChanges: [String: (layout: String, windowIndex: Int)] = [:]
+    
+    /// Debounce task for layout changes to prevent UI thrashing
+    private var layoutDebounceTask: Task<Void, Never>?
+    
     /// Buffer for output received before surfaces are created
     /// This is essential for session restore which arrives before surface factory is configured
     private var pendingOutput: [String: [Data]] = [:]
@@ -167,9 +174,12 @@ class TmuxSessionManager: ObservableObject {
         pendingHistoryContent.removeAll()
         pendingOutput.removeAll()
         
-        // HIGH FIX: Cancel resize debounce task to prevent crash after cleanup
+        // Cancel debounce tasks to prevent crashes after cleanup
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
+        layoutDebounceTask?.cancel()
+        layoutDebounceTask = nil
+        pendingLayoutChanges.removeAll()
         lastResizeCols = 0
         lastResizeRows = 0
         lastRefreshSize = nil
@@ -512,7 +522,8 @@ class TmuxSessionManager: ObservableObject {
         }
     }
     
-    /// Handle layout changed notification
+    /// Handle layout changed notification with debouncing
+    /// Rapid layout changes are coalesced to prevent UI thrashing
     func handleLayoutChanged(windowId: String, windowIndex: Int, layout: String) {
         // Strip trailing markers like " *" (active window) or " -" (last window)
         var cleanLayout = layout
@@ -526,35 +537,61 @@ class TmuxSessionManager: ObservableObject {
             logger.debug("📐 Skipping duplicate layout for \(windowId)")
             return
         }
-        lastProcessedLayouts[windowId] = cleanLayout
         
-        logger.info("📐 Layout changed: \(windowId) [\(windowIndex)] layout=\(cleanLayout.prefix(80))...")
+        // Store pending layout change for this window
+        pendingLayoutChanges[windowId] = (cleanLayout, windowIndex)
+        
+        // Cancel existing debounce task
+        layoutDebounceTask?.cancel()
+        
+        // Debounce: wait 30ms for rapid changes to settle before updating UI
+        layoutDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 30_000_000)  // 30ms
+            guard !Task.isCancelled, let self = self else { return }
+            
+            await MainActor.run {
+                // Process all pending layout changes
+                let changes = self.pendingLayoutChanges
+                self.pendingLayoutChanges.removeAll()
+                
+                for (windowId, change) in changes {
+                    self.processLayoutChange(windowId: windowId, windowIndex: change.windowIndex, layout: change.layout)
+                }
+            }
+        }
+    }
+    
+    /// Process a layout change (called after debounce)
+    private func processLayoutChange(windowId: String, windowIndex: Int, layout: String) {
+        lastProcessedLayouts[windowId] = layout
+        
+        logger.info("📐 Layout changed: \(windowId) [\(windowIndex)] layout=\(layout.prefix(80))...")
         
         // Update window info if we have it
         if var window = windows[windowId] {
-            window.layout = cleanLayout
+            window.layout = layout
             window.index = windowIndex
             windows[windowId] = window
         } else {
             // Create window entry if it doesn't exist yet
             var window = TmuxWindow(id: windowId, index: windowIndex, name: "window-\(windowIndex)", sessionId: currentSession?.id ?? "$0")
-            window.layout = cleanLayout
+            window.layout = layout
             windows[windowId] = window
             logger.info("📐 Created window entry for \(windowId)")
         }
         
         // Parse layout and update split tree
-        if let parsedLayout = try? TmuxLayout.parseWithChecksum(cleanLayout) {
+        if let parsedLayout = try? TmuxLayout.parseWithChecksum(layout) {
             logger.info("📐 Parsed layout: \(parsedLayout.width)x\(parsedLayout.height) content=\(parsedLayout.content)")
             updatePanePositions(from: parsedLayout, in: windowId)
             updateSplitTree(from: parsedLayout, for: windowId)
-        } else if let parsedLayout = try? TmuxLayout.parse(String(cleanLayout.dropFirst(5))) {
+        } else if let parsedLayout = try? TmuxLayout.parse(String(layout.dropFirst(5))) {
             // Try parsing without checksum (skip "XXXX," prefix)
             logger.info("📐 Parsed layout (no checksum): \(parsedLayout.width)x\(parsedLayout.height) content=\(parsedLayout.content)")
             updatePanePositions(from: parsedLayout, in: windowId)
             updateSplitTree(from: parsedLayout, for: windowId)
         } else {
-            logger.error("📐 Failed to parse layout: \(cleanLayout)")
+            logger.error("📐 Failed to parse layout: \(layout)")
         }
     }
     
@@ -1245,9 +1282,28 @@ class TmuxSessionManager: ObservableObject {
     }
     
     /// Equalize all splits in the current window
+    /// Detects the root split direction and uses the appropriate layout
     func equalizeSplits() {
         guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("select-layout even-horizontal", via: write)
+        
+        // Determine layout based on root split direction
+        let layout: String
+        if case .split(let split) = currentSplitTree.root {
+            // Use direction-appropriate layout, or tiled for complex trees
+            if split.left.leafCount > 1 || split.right.leafCount > 1 {
+                // Complex nested tree - use tiled for even distribution
+                layout = "tiled"
+            } else {
+                // Simple two-pane split - use direction-specific layout
+                layout = split.direction == .horizontal ? "even-horizontal" : "even-vertical"
+            }
+        } else {
+            // Single pane or empty - default to tiled
+            layout = "tiled"
+        }
+        
+        logger.info("📐 Equalizing splits with layout: \(layout)")
+        client.sendCommandFireAndForget("select-layout \(layout)", via: write)
     }
     
     /// Update a split ratio locally (for UI drag feedback)
@@ -1258,7 +1314,33 @@ class TmuxSessionManager: ObservableObject {
         windowSplitTrees[focusedWindowId] = currentSplitTree
     }
     
-    /// Update a split ratio and sync to tmux
+    /// Sync a split ratio to tmux (called after drag settles)
+    /// This sends the resize-pane command to tmux.
+    func syncSplitRatioToTmux(forPaneId paneId: Int, ratio: Double) {
+        guard let client = controlClient, let write = writeToSSH else {
+            logger.warning("⚠️ No tmux client or write function - cannot sync resize")
+            return
+        }
+        
+        // Find the split that contains this pane
+        guard let splitInfo = findSplitContainingWithSize(paneId: paneId) else {
+            logger.warning("⚠️ Could not find split containing %\(paneId)")
+            return
+        }
+        
+        // Calculate target size in cells (account for 1 cell divider)
+        let availableSize = splitInfo.totalSize - 1
+        let newSize = max(1, Int(Double(availableSize) * ratio))
+        
+        // Use resize-pane with -x (width) for horizontal, -y (height) for vertical
+        let sizeFlag = splitInfo.direction == .horizontal ? "-x" : "-y"
+        let command = "resize-pane -t %\(paneId) \(sizeFlag) \(newSize)"
+        
+        logger.info("📐 Syncing resize to tmux: \(command)")
+        client.sendCommandFireAndForget(command, via: write)
+    }
+    
+    /// Update a split ratio and sync to tmux (legacy - use syncSplitRatioToTmux instead)
     /// Called when the user finishes dragging a divider.
     func updateSplitRatioAndSync(forPaneId paneId: Int, ratio: Double) {
         logger.info("📐 updateSplitRatioAndSync called: pane=\(paneId), ratio=\(String(format: "%.3f", ratio))")
@@ -1523,9 +1605,12 @@ class TmuxSessionManager: ObservableObject {
     
     /// Clean up all state
     func cleanup() {
-        // HIGH FIX: Cancel resize debounce task to prevent crash after cleanup
+        // Cancel debounce tasks to prevent crashes after cleanup
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
+        layoutDebounceTask?.cancel()
+        layoutDebounceTask = nil
+        pendingLayoutChanges.removeAll()
         
         // Remove all surfaces
         for paneId in paneSurfaces.keys {
