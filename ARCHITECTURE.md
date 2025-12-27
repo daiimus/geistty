@@ -441,3 +441,52 @@ Key error scenarios:
 - Host key verification via known_hosts
 - Key material never leaves Secure Enclave (when using hardware keys)
 - Passwords encrypted in Keychain
+- Reconnect credentials stored in memory only (cleared on explicit disconnect)
+
+## Auto-Reconnect System
+
+When iOS suspends and resumes the app, SSH connections may be dropped. The system handles this transparently:
+
+```
+┌─────────────────┐
+│  App Becomes    │
+│    Active       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐    alive     ┌─────────────────┐
+│  Check if       │─────────────►│  Resume Paused  │
+│  Connection     │              │  Panes (tmux)   │
+│  Alive?         │              └─────────────────┘
+└────────┬────────┘
+         │ dead
+         ▼
+┌─────────────────┐    no        ┌─────────────────┐
+│  Have Stored    │─────────────►│  Notify User    │
+│  Credentials?   │              │  (Disconnected) │
+└────────┬────────┘              └─────────────────┘
+         │ yes
+         ▼
+┌─────────────────┐              ┌─────────────────┐
+│  Reconnect      │──success────►│  Re-attach to   │
+│  (up to 3x)     │              │  tmux Session   │
+└────────┬────────┘              └─────────────────┘
+         │ fail
+         ▼
+┌─────────────────┐
+│  Show Error     │
+│  (Can Retry)    │
+└─────────────────┘
+```
+
+**Key Properties in SSHSession:**
+- `storedPassword` / `storedProfile` / `storedCredential` - Credentials for reconnect
+- `isReconnecting` - Prevents concurrent reconnect attempts
+- `reconnectAttempts` / `maxReconnectAttempts` - Retry control (default: 3 attempts)
+
+**Behavior:**
+- Credentials stored in memory on successful connect
+- Cleared on explicit disconnect (Cmd+W) to prevent unwanted reconnect
+- Auto-reconnect uses 2-second delay between attempts
+- Re-attaches to existing tmux session via `tmux -CC new-session -A -s <name>`
+
