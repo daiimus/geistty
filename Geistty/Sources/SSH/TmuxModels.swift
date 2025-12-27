@@ -150,6 +150,52 @@ enum TmuxQueryFormat {
     static let panes = "#{window_id} #{pane_id} #{pane_width} #{pane_height} #{pane_active} #{cursor_x} #{cursor_y} #{pane_in_mode} #{alternate_on}"
 }
 
+// MARK: - ID Validation
+
+/// Validates and parses tmux identifiers
+enum TmuxId {
+    /// Validate a session ID (format: $N where N is a number)
+    static func isValidSessionId(_ id: String) -> Bool {
+        guard id.hasPrefix("$"), id.count > 1 else { return false }
+        return Int(id.dropFirst()) != nil
+    }
+    
+    /// Validate a window ID (format: @N where N is a number)
+    static func isValidWindowId(_ id: String) -> Bool {
+        guard id.hasPrefix("@"), id.count > 1 else { return false }
+        return Int(id.dropFirst()) != nil
+    }
+    
+    /// Validate a pane ID (format: %N where N is a number)
+    static func isValidPaneId(_ id: String) -> Bool {
+        guard id.hasPrefix("%"), id.count > 1 else { return false }
+        return Int(id.dropFirst()) != nil
+    }
+    
+    /// Extract numeric ID from pane ID string (e.g., "%5" -> 5)
+    static func numericPaneId(_ id: String) -> Int? {
+        guard isValidPaneId(id) else { return nil }
+        return Int(id.dropFirst())
+    }
+    
+    /// Create pane ID string from numeric ID (e.g., 5 -> "%5")
+    static func paneIdString(_ numericId: Int) -> String {
+        "%\(numericId)"
+    }
+    
+    /// Extract numeric ID from window ID string (e.g., "@3" -> 3)
+    static func numericWindowId(_ id: String) -> Int? {
+        guard isValidWindowId(id) else { return nil }
+        return Int(id.dropFirst())
+    }
+    
+    /// Extract numeric ID from session ID string (e.g., "$0" -> 0)
+    static func numericSessionId(_ id: String) -> Int? {
+        guard isValidSessionId(id) else { return nil }
+        return Int(id.dropFirst())
+    }
+}
+
 // MARK: - Response Parsing
 
 extension TmuxSession {
