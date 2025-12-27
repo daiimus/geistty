@@ -2222,7 +2222,53 @@ extension RawTerminalUIViewController: Ghostty.ShortcutDelegate {
             // On iOS, new window means new tmux window (tab)
             tmuxManager.newWindow()
             return true
+            
+        // MARK: - Connection Management
+        case .reconnect:
+            // Post notification for reconnect (handled by ContentView)
+            NotificationCenter.default.post(name: .terminalReconnect, object: nil)
+            return true
+            
+        case .disconnect:
+            // Post notification for disconnect
+            NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
+            return true
+            
+        // MARK: - Window Operations
+        case .renameWindow:
+            // Show rename dialog
+            showRenameWindowDialog(tmuxManager: tmuxManager)
+            return true
         }
+    }
+    
+    /// Show a dialog to rename the current tmux window
+    private func showRenameWindowDialog(tmuxManager: TmuxSessionManager) {
+        let alert = UIAlertController(
+            title: "Rename Window",
+            message: "Enter a new name for the tmux window",
+            preferredStyle: .alert
+        )
+        
+        // Get current window name
+        let currentName = tmuxManager.windows[tmuxManager.focusedWindowId]?.name ?? ""
+        
+        alert.addTextField { textField in
+            textField.text = currentName
+            textField.placeholder = "Window name"
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
+            textField.clearButtonMode = .whileEditing
+        }
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Rename", style: .default) { [weak tmuxManager] _ in
+            if let newName = alert.textFields?.first?.text, !newName.isEmpty {
+                tmuxManager?.renameWindow(newName)
+            }
+        })
+        
+        present(alert, animated: true)
     }
 }
 
