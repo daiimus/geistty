@@ -558,8 +558,8 @@ extension SSHSession: TmuxControlClientDelegate {
         controlModeActive = false
         tmuxControlClient?.reset()
         
-        // Notify session manager
-        tmuxSessionManager?.controlModeExited()
+        // Notify session manager with reason
+        tmuxSessionManager?.controlModeExited(reason: reason)
         
         // Notify delegate - this will typically trigger disconnect handling
         // The SSH connection is still open, but tmux has terminated

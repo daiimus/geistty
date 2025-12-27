@@ -12,6 +12,62 @@ import Combine
 
 private let logger = Logger(subsystem: "com.geistty", category: "TmuxSession")
 
+// MARK: - Pane Restore State
+
+/// State machine for pane history restore process
+/// This ensures proper sequencing: surface created -> history requested -> history received -> live output flushed
+enum PaneRestoreState: Equatable {
+    /// Initial state - pane exists but no surface yet
+    case awaitingSurface
+    
+    /// Surface created, history request sent, awaiting response
+    /// Live output is buffered during this phase
+    case awaitingHistory(bufferedOutput: [Data])
+    
+    /// History received and fed to surface, live output flushed
+    /// Pane is now fully operational
+    case restored
+    
+    /// Check if we should buffer live output
+    var shouldBufferOutput: Bool {
+        if case .awaitingHistory = self { return true }
+        return false
+    }
+    
+    /// Append output to buffer (only valid in awaitingHistory state)
+    mutating func appendBufferedOutput(_ data: Data) {
+        if case .awaitingHistory(var buffered) = self {
+            buffered.append(data)
+            self = .awaitingHistory(bufferedOutput: buffered)
+        }
+    }
+    
+    /// Get buffered output (only valid in awaitingHistory state)
+    var bufferedOutput: [Data] {
+        if case .awaitingHistory(let buffered) = self {
+            return buffered
+        }
+        return []
+    }
+}
+
+// MARK: - Connection State
+
+/// Connection state for the tmux session
+enum TmuxConnectionState: Equatable {
+    /// Not connected to SSH/tmux
+    case disconnected
+    
+    /// SSH connected, tmux control mode activating
+    case connecting
+    
+    /// Fully connected and operational
+    case connected
+    
+    /// Connection lost, may attempt reconnect
+    case connectionLost(reason: String?)
+}
+
 /// Manages the mapping between tmux server state and Geistty UI
 @MainActor
 class TmuxSessionManager: ObservableObject {
@@ -36,8 +92,11 @@ class TmuxSessionManager: ObservableObject {
     /// Currently focused window ID
     @Published private(set) var focusedWindowId: String = "@0"
     
-    /// Connection state
+    /// Connection state (legacy bool for compatibility)
     @Published private(set) var isConnected: Bool = false
+    
+    /// Detailed connection state
+    @Published private(set) var connectionState: TmuxConnectionState = .disconnected
     
     /// Current split tree for the focused window (for UI rendering)
     @Published private(set) var currentSplitTree: TmuxSplitTree = TmuxSplitTree()
@@ -59,19 +118,17 @@ class TmuxSessionManager: ObservableObject {
     /// This is updated when the surface reports its cell size
     @Published private(set) var primaryCellSize: CGSize = .zero
     
-    /// Panes that have had their history restored (to avoid duplicate restores)
-    private var restoredPanes: Set<String> = []
+    // MARK: - Pane Restore State Machine
     
-    /// Panes awaiting history restore - live output is buffered until history arrives
-    /// This prevents the race condition where live output arrives before capture-pane response
-    private var awaitingHistoryRestore: Set<String> = []
+    /// State machine for each pane's history restore process
+    /// This replaces the multiple buffer dictionaries with a single source of truth
+    private var paneRestoreStates: [String: PaneRestoreState] = [:]
     
-    /// Buffer for live output received while awaiting history restore
-    /// This is separate from pendingOutput (which is for pre-surface output)
-    private var historyRestoreBuffer: [String: [Data]] = [:]
+    /// Buffer for output received before surfaces are created (pre-factory configuration)
+    /// This is separate from the restore state machine - used only during initial connection
+    private var pendingOutput: [String: [Data]] = [:]
     
     /// Buffer for history content received before surface was created
-    /// This is fed to the surface when it's created
     private var pendingHistoryContent: [String: String] = [:]
 
     /// Surface creation factory (injected before activation)
@@ -100,10 +157,6 @@ class TmuxSessionManager: ObservableObject {
     
     /// Debounce task for layout changes to prevent UI thrashing
     private var layoutDebounceTask: Task<Void, Never>?
-    
-    /// Buffer for output received before surfaces are created
-    /// This is essential for session restore which arrives before surface factory is configured
-    private var pendingOutput: [String: [Data]] = [:]
     
     // MARK: - Control Client
     
@@ -139,6 +192,7 @@ class TmuxSessionManager: ObservableObject {
     /// Called when control mode becomes active
     func controlModeActivated() {
         isConnected = true
+        connectionState = .connected
         
         // Reset resize tracking state on (re)connection
         // This ensures we send fresh dimensions to tmux for existing sessions
@@ -156,21 +210,23 @@ class TmuxSessionManager: ObservableObject {
     }
     
     /// Called when control mode exits
-    func controlModeExited() {
-        logger.info("🔌 Control mode exited, cleaning up state")
+    func controlModeExited(reason: String? = nil) {
+        logger.info("🔌 Control mode exited, cleaning up state. Reason: \(reason ?? "unknown")")
+        
+        // Update connection state
         isConnected = false
+        connectionState = reason != nil ? .connectionLost(reason: reason) : .disconnected
+        
         currentSession = nil
         sessions.removeAll()
         windows.removeAll()
         panes.removeAll()
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
-        restoredPanes.removeAll()
         lastProcessedLayouts.removeAll()
         
-        // HIGH FIX: Clear buffer state to prevent memory leaks on reconnect
-        awaitingHistoryRestore.removeAll()
-        historyRestoreBuffer.removeAll()
+        // Clear pane restore state machine
+        paneRestoreStates.removeAll()
         pendingHistoryContent.removeAll()
         pendingOutput.removeAll()
         
@@ -404,11 +460,9 @@ class TmuxSessionManager: ObservableObject {
                 removeSurface(for: paneId, paneActuallyClosed: true)
                 
                 // Clean up buffer state for this pane
-                awaitingHistoryRestore.remove(paneId)
-                historyRestoreBuffer.removeValue(forKey: paneId)
+                paneRestoreStates.removeValue(forKey: paneId)
                 pendingHistoryContent.removeValue(forKey: paneId)
                 pendingOutput.removeValue(forKey: paneId)
-                restoredPanes.remove(paneId)
             }
         }
         
@@ -616,41 +670,14 @@ class TmuxSessionManager: ObservableObject {
                 removeSurface(for: paneId, paneActuallyClosed: true)
                 panes.removeValue(forKey: paneId)
                 
-                // HIGH FIX: Clear history restore buffers to prevent memory leak
-                awaitingHistoryRestore.remove(paneId)
-                historyRestoreBuffer.removeValue(forKey: paneId)
+                // Clear pane restore state to prevent memory leak
+                paneRestoreStates.removeValue(forKey: paneId)
                 pendingHistoryContent.removeValue(forKey: paneId)
                 pendingOutput.removeValue(forKey: paneId)
-                restoredPanes.remove(paneId)
                 
-                // If the removed pane had our primary surface, reassign it
+                // If the removed pane had our primary surface, reassign it atomically
                 if wasPrimarySurface {
-                    logger.info("📐 🔄 Primary surface's pane \(paneId) closed, reassigning...")
-                    primarySurface = nil
-                    primaryCellSize = .zero
-                    
-                    // Find the first remaining pane's surface
-                    if let firstRemainingPaneId = newPaneIds.sorted().first {
-                        // Ensure surface exists for the remaining pane
-                        if paneSurfaces[firstRemainingPaneId] == nil {
-                            logger.info("📐 🆕 Creating surface for remaining pane \(firstRemainingPaneId)")
-                            _ = getSurfaceOrCreate(for: firstRemainingPaneId)
-                        }
-                        
-                        if let remainingSurface = paneSurfaces[firstRemainingPaneId] {
-                            logger.info("📐 🔄 Reassigned primarySurface to \(firstRemainingPaneId)")
-                            primarySurface = remainingSurface
-                            remainingSurface.onCellSizeChanged = { [weak self] cellSize in
-                                self?.primaryCellSize = cellSize
-                            }
-                            // Manually trigger if cell size is already valid
-                            if remainingSurface.cellSize.width > 0 && remainingSurface.cellSize.height > 0 {
-                                primaryCellSize = remainingSurface.cellSize
-                            }
-                        } else {
-                            logger.error("📐 ❌ Failed to get/create surface for \(firstRemainingPaneId)")
-                        }
-                    }
+                    reassignPrimarySurface(excludingPaneId: paneId, fromPaneIds: newPaneIds)
                 }
             }
             
@@ -763,16 +790,17 @@ class TmuxSessionManager: ObservableObject {
     // MARK: - Pane Output Routing
     
     /// Route pane output to the appropriate Ghostty surface
+    /// Uses state machine to ensure proper sequencing with history restore
     func routeOutput(_ data: Data, to paneId: String) {
-        // If this pane is awaiting history restore, buffer the live output
-        // This prevents the race condition where live output arrives before capture-pane response
-        if awaitingHistoryRestore.contains(paneId) {
-            if historyRestoreBuffer[paneId] == nil {
-                historyRestoreBuffer[paneId] = []
+        // Check pane restore state
+        if let state = paneRestoreStates[paneId] {
+            if state.shouldBufferOutput {
+                // Buffer output while awaiting history restore
+                paneRestoreStates[paneId]?.appendBufferedOutput(data)
+                logger.debug("📜 Buffering live output for pane \(paneId) awaiting history: \(data.count) bytes")
+                return
             }
-            historyRestoreBuffer[paneId]?.append(data)
-            logger.debug("📜 Buffering live output for pane \(paneId) awaiting history restore: \(data.count) bytes")
-            return
+            // State is .restored - proceed normally
         }
         
         // Get existing surface or create one if factory is available
@@ -862,43 +890,73 @@ class TmuxSessionManager: ObservableObject {
         
         // If this is %0, also set as primary surface and wire up cell size callback
         if paneId == "%0" {
-            primarySurface = surface
-            surface.onCellSizeChanged = { [weak self] cellSize in
-                self?.primaryCellSize = cellSize
-                logger.info("📐 Primary cell size updated: \(Int(cellSize.width))x\(Int(cellSize.height))")
-            }
-            // CRITICAL: Manually trigger if cell size is already valid
-            // The callback won't fire via didSet if the value was set before the callback was assigned
-            if surface.cellSize.width > 0 && surface.cellSize.height > 0 {
-                primaryCellSize = surface.cellSize
-                logger.info("📐 Primary cell size initialized: \(Int(surface.cellSize.width))x\(Int(surface.cellSize.height))")
-            }
+            assignPrimarySurface(surface, forPaneId: paneId)
         }
         
         logger.info("Created Ghostty surface for pane \(paneId)")
         
-        // Check if there's buffered history content for this pane
-        // This happens when history restore completed before the surface was created
+        // Handle history restore based on pane state
+        handleSurfaceCreatedForRestore(surface, paneId: paneId)
+        
+        return surface
+    }
+    
+    /// Assign a surface as the primary surface (atomic operation)
+    /// This ensures cell size callbacks are properly wired up without gaps
+    private func assignPrimarySurface(_ surface: Ghostty.SurfaceView, forPaneId paneId: String) {
+        // Clear old callback first
+        primarySurface?.onCellSizeChanged = nil
+        
+        // Assign new primary surface
+        primarySurface = surface
+        
+        // Wire up cell size callback IMMEDIATELY
+        surface.onCellSizeChanged = { [weak self] cellSize in
+            self?.primaryCellSize = cellSize
+            logger.info("📐 Primary cell size updated: \(Int(cellSize.width))x\(Int(cellSize.height))")
+        }
+        
+        // CRITICAL: Manually trigger if cell size is already valid
+        // The callback won't fire via didSet if the value was set before the callback was assigned
+        if surface.cellSize.width > 0 && surface.cellSize.height > 0 {
+            primaryCellSize = surface.cellSize
+            logger.info("📐 Primary cell size initialized from \(paneId): \(Int(surface.cellSize.width))x\(Int(surface.cellSize.height))")
+        } else {
+            // Reset to zero so UI knows we're waiting for cell size
+            primaryCellSize = .zero
+            logger.info("📐 Primary surface assigned to \(paneId), awaiting cell size")
+        }
+    }
+    
+    /// Handle surface creation in context of history restore state machine
+    private func handleSurfaceCreatedForRestore(_ surface: Ghostty.SurfaceView, paneId: String) {
+        let currentState = paneRestoreStates[paneId]
+        
+        // Check if there's buffered history content for this pane (history arrived before surface)
         if let historyContent = pendingHistoryContent.removeValue(forKey: paneId) {
             logger.info("📜 Feeding buffered history content to new surface for pane \(paneId): \(historyContent.count) chars")
             feedHistoryToSurface(surface, content: historyContent, paneId: paneId)
             
-            // Also flush any live output that was buffered during history restore
-            if let buffered = historyRestoreBuffer.removeValue(forKey: paneId), !buffered.isEmpty {
+            // Flush any buffered live output that arrived during history restore
+            if let state = currentState, case .awaitingHistory(let buffered) = state, !buffered.isEmpty {
                 logger.info("📜 Flushing \(buffered.count) buffered live output chunks for pane \(paneId)")
                 for data in buffered {
                     surface.feedData(data)
                 }
             }
             
-            // Flush any pre-surface output (now that history is done)
+            // Flush any pre-surface output
             if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
                 logger.info("🔄 Flushing \(pending.count) pre-surface chunks for pane \(paneId)")
                 for data in pending {
                     surface.feedData(data)
                 }
             }
-        } else if restoredPanes.contains(paneId) {
+            
+            // Mark as restored
+            paneRestoreStates[paneId] = .restored
+            
+        } else if currentState == .restored {
             // History was already restored for this pane (e.g., surface recreated)
             // Safe to flush pending output directly
             if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
@@ -908,29 +966,26 @@ class TmuxSessionManager: ObservableObject {
                 }
             }
         } else {
-            // History restore hasn't happened yet - move pendingOutput to historyRestoreBuffer
-            // so it gets flushed AFTER history content
+            // History restore hasn't happened yet - move pendingOutput to state buffer
+            var buffered: [Data] = []
             if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
                 logger.info("📜 Moving \(pending.count) pre-surface chunks to history restore buffer for pane \(paneId)")
-                if historyRestoreBuffer[paneId] == nil {
-                    historyRestoreBuffer[paneId] = []
-                }
-                // Prepend to buffer (this output arrived before any historyRestoreBuffer entries)
-                historyRestoreBuffer[paneId] = pending + (historyRestoreBuffer[paneId] ?? [])
+                buffered = pending
             }
             
-            // Now start history restore - this will mark pane as awaiting
-            restorePaneHistoryIfNeeded(paneId: paneId)
+            // Now start history restore
+            startHistoryRestore(paneId: paneId, withBuffer: buffered)
         }
-        
-        return surface
     }
     
-    /// Restore scrollback history for a pane if not already restored
-    private func restorePaneHistoryIfNeeded(paneId: String) {
-        guard !restoredPanes.contains(paneId) else {
-            logger.debug("📜 Pane \(paneId) history already restored, skipping")
-            return
+    /// Start history restore for a pane
+    private func startHistoryRestore(paneId: String, withBuffer existingBuffer: [Data] = []) {
+        // Check if already restoring or restored
+        if let state = paneRestoreStates[paneId] {
+            if state == .restored || state.shouldBufferOutput {
+                logger.debug("📜 Pane \(paneId) already in restore process, skipping")
+                return
+            }
         }
         
         guard let client = controlClient, let write = writeToSSH else {
@@ -939,25 +994,35 @@ class TmuxSessionManager: ObservableObject {
         }
         
         logger.info("📜 Restoring scrollback history for pane \(paneId)")
-        restoredPanes.insert(paneId)
         
-        // Mark pane as awaiting history - live output will be buffered until history arrives
-        awaitingHistoryRestore.insert(paneId)
+        // Transition to awaiting history state with any existing buffered data
+        paneRestoreStates[paneId] = .awaitingHistory(bufferedOutput: existingBuffer)
         
         client.restorePaneHistory(paneId: paneId, via: write)
+    }
+    
+    /// Legacy method for compatibility - wraps startHistoryRestore
+    private func restorePaneHistoryIfNeeded(paneId: String) {
+        startHistoryRestore(paneId: paneId)
     }
     
     /// Called when history restore is complete for a pane
     /// Flushes any buffered live output that arrived during the restore
     func historyRestoreComplete(for paneId: String, content: String) {
-        // Remove from awaiting set
-        awaitingHistoryRestore.remove(paneId)
+        // Get the buffered output from state machine before transitioning
+        let bufferedOutput: [Data]
+        if let state = paneRestoreStates[paneId], case .awaitingHistory(let buffered) = state {
+            bufferedOutput = buffered
+        } else {
+            bufferedOutput = []
+        }
         
         // Try to get or create the surface
         guard let surface = getSurfaceOrCreate(for: paneId) else {
             // Surface not available yet - buffer the history for when surface is created
             logger.info("📜 History restore complete but no surface for \(paneId) - buffering content (\(content.count) chars)")
             pendingHistoryContent[paneId] = content
+            // Keep the state as awaitingHistory so buffered output is preserved
             return
         }
         
@@ -965,12 +1030,16 @@ class TmuxSessionManager: ObservableObject {
         feedHistoryToSurface(surface, content: content, paneId: paneId)
         
         // Flush any live output that was buffered during history restore
-        if let buffered = historyRestoreBuffer.removeValue(forKey: paneId), !buffered.isEmpty {
-            logger.info("📜 Flushing \(buffered.count) buffered live output chunks for pane \(paneId)")
-            for data in buffered {
+        if !bufferedOutput.isEmpty {
+            logger.info("📜 Flushing \(bufferedOutput.count) buffered live output chunks for pane \(paneId)")
+            for data in bufferedOutput {
                 surface.feedData(data)
             }
         }
+        
+        // Transition to restored state
+        paneRestoreStates[paneId] = .restored
+        logger.info("📜 ✅ Pane \(paneId) history restore complete")
     }
     
     /// Feed captured history content to a surface
@@ -1066,6 +1135,41 @@ class TmuxSessionManager: ObservableObject {
             surface.onCellSizeChanged = nil
             logger.info("Removed Ghostty surface for pane \(paneId) (paneActuallyClosed=\(paneActuallyClosed))")
         }
+    }
+    
+    /// Reassign primary surface when the current primary pane is closed
+    /// This is an atomic operation that avoids gaps in cell size callbacks
+    private func reassignPrimarySurface(excludingPaneId closedPaneId: String, fromPaneIds remainingPaneIds: Set<String>) {
+        logger.info("📐 🔄 Primary surface's pane \(closedPaneId) closed, reassigning...")
+        
+        // Sort to get deterministic ordering (lowest numeric ID first)
+        let sortedPaneIds = remainingPaneIds.sorted()
+        
+        guard let firstRemainingPaneId = sortedPaneIds.first else {
+            // No remaining panes - clear primary surface
+            primarySurface?.onCellSizeChanged = nil
+            primarySurface = nil
+            primaryCellSize = .zero
+            logger.info("📐 No remaining panes, primary surface cleared")
+            return
+        }
+        
+        // Ensure surface exists for the remaining pane
+        if paneSurfaces[firstRemainingPaneId] == nil {
+            logger.info("📐 🆕 Creating surface for remaining pane \(firstRemainingPaneId)")
+            _ = getSurfaceOrCreate(for: firstRemainingPaneId)
+        }
+        
+        guard let remainingSurface = paneSurfaces[firstRemainingPaneId] else {
+            logger.error("📐 ❌ Failed to get/create surface for \(firstRemainingPaneId)")
+            primarySurface = nil
+            primaryCellSize = .zero
+            return
+        }
+        
+        // Use the atomic assignment helper
+        assignPrimarySurface(remainingSurface, forPaneId: firstRemainingPaneId)
+        logger.info("📐 🔄 Reassigned primarySurface to \(firstRemainingPaneId)")
     }
     
     /// Get all active surfaces
@@ -1617,12 +1721,10 @@ class TmuxSessionManager: ObservableObject {
             removeSurface(for: paneId)
         }
         
-        // Clear all buffer state
-        awaitingHistoryRestore.removeAll()
-        historyRestoreBuffer.removeAll()
+        // Clear pane restore state machine
+        paneRestoreStates.removeAll()
         pendingHistoryContent.removeAll()
         pendingOutput.removeAll()
-        restoredPanes.removeAll()
         
         sessions.removeAll()
         windows.removeAll()
@@ -1632,6 +1734,7 @@ class TmuxSessionManager: ObservableObject {
         currentSplitTree = TmuxSplitTree()
         currentSession = nil
         isConnected = false
+        connectionState = .disconnected
         
         // Reset resize tracking
         lastResizeCols = 0
