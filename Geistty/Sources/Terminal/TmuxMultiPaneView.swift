@@ -34,6 +34,9 @@ struct TmuxMultiPaneView: View {
     /// Track last sent dimensions to avoid redundant resize commands
     @State private var lastSentSize: CGSize = .zero
     
+    /// Debounce task for divider resize sync
+    @State private var resizeSyncTask: Task<Void, Never>?
+    
     var body: some View {
         GeometryReader { geometry in
             // The split tree view (panes with SwiftUI dividers for visual only)
@@ -41,8 +44,20 @@ struct TmuxMultiPaneView: View {
                 tree: sessionManager.currentSplitTree,
                 dividerColor: dividerColor,
                 onResize: { paneId, newRatio in
-                    // TODO: Implement drag-to-resize sync to tmux
-                    // For now, divider drag doesn't persist - tmux controls the layout
+                    // Update local tree immediately for smooth drag feedback
+                    sessionManager.updateSplitRatio(forPaneId: paneId, ratio: newRatio)
+                    
+                    // Debounce the sync to tmux to avoid command flooding
+                    resizeSyncTask?.cancel()
+                    resizeSyncTask = Task {
+                        // Wait 150ms for drag to settle before syncing
+                        try? await Task.sleep(nanoseconds: 150_000_000)
+                        guard !Task.isCancelled else { return }
+                        
+                        await MainActor.run {
+                            sessionManager.syncSplitRatioToTmux(forPaneId: paneId, ratio: newRatio)
+                        }
+                    }
                 },
                 onEqualize: {
                     sessionManager.equalizeSplits()
@@ -299,7 +314,10 @@ class GhosttyPaneSurfaceContainerView: UIView {
     
     /// Retry counter to prevent infinite layout loops
     private var gridSizeRetryCount: Int = 0
-    private let maxGridSizeRetries: Int = 3
+    private let maxGridSizeRetries: Int = 5
+    
+    /// Delayed retry task for grid size application
+    private var gridSizeRetryTask: DispatchWorkItem?
     
     var surface: Ghostty.SurfaceView? {
         didSet {
@@ -377,17 +395,28 @@ class GhosttyPaneSurfaceContainerView: UIView {
             lastAppliedCols = targetCols
             lastAppliedRows = targetRows
             gridSizeRetryCount = 0  // Reset retry counter on success
+            gridSizeRetryTask?.cancel()
+            gridSizeRetryTask = nil
             logger.info("📐 ✅ Grid size applied successfully: \(targetCols)x\(targetRows)")
         } else {
-            // Cell size not available yet - retry with limited attempts
+            // Cell size not available yet - retry with exponential backoff
             gridSizeRetryCount += 1
             logger.info("📐 ⏳ Grid size application failed (attempt \(gridSizeRetryCount)/\(maxGridSizeRetries))")
+            
             if gridSizeRetryCount <= maxGridSizeRetries {
-                DispatchQueue.main.async { [weak self] in
+                // Cancel any pending retry
+                gridSizeRetryTask?.cancel()
+                
+                // Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms
+                let delayMs = 50 * (1 << (gridSizeRetryCount - 1))
+                let workItem = DispatchWorkItem { [weak self] in
                     self?.setNeedsLayout()
                 }
+                gridSizeRetryTask = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: workItem)
+            } else {
+                logger.warning("📐 ⚠️ Grid size application exhausted retries, giving up")
             }
-            // After max retries, give up - cell size will be set when surface is ready
         }
     }
     
