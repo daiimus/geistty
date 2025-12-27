@@ -189,6 +189,18 @@ struct TmuxPaneSurfaceView: View {
         sessionManager.focusedPaneId == "%\(paneId)"
     }
     
+    /// Whether the connection is lost
+    private var isConnectionLost: Bool {
+        if case .connectionLost = sessionManager.connectionState { return true }
+        return false
+    }
+    
+    /// Disconnect reason if available
+    private var disconnectReason: String? {
+        if case .connectionLost(let reason) = sessionManager.connectionState { return reason }
+        return nil
+    }
+    
     var body: some View {
         // Get or create the surface for this pane
         if let surface = sessionManager.getSurface(forNumericId: paneId) {
@@ -208,6 +220,13 @@ struct TmuxPaneSurfaceView: View {
                 // Focus indicator border
                 RoundedRectangle(cornerRadius: 0)
                     .stroke(isFocused ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 2)
+            )
+            .overlay(
+                // Connection lost overlay - subtle, non-blocking
+                DisconnectedPaneOverlay(
+                    isVisible: isConnectionLost,
+                    reason: disconnectReason
+                )
             )
         } else {
             // Surface not available yet - show placeholder
@@ -830,6 +849,55 @@ class DividerHitAreaView: UIView {
             
         default:
             break
+        }
+    }
+}
+
+// MARK: - Disconnected Pane Overlay
+
+/// Overlay shown on panes when connection is lost
+/// Non-blocking - user can still scroll and copy text
+struct DisconnectedPaneOverlay: View {
+    let isVisible: Bool
+    let reason: String?
+    
+    var body: some View {
+        if isVisible {
+            VStack {
+                // Top banner with disconnect indicator
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 12, weight: .semibold))
+                    
+                    Text("Disconnected")
+                        .font(.system(size: 12, weight: .medium))
+                    
+                    if let reason = reason {
+                        Text("• \(reason)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.7))
+                            .lineLimit(1)
+                    }
+                    
+                    Spacer()
+                    
+                    // Keyboard shortcut hint
+                    Text("⌘R to reconnect")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    Color.orange.opacity(0.85)
+                        .blur(radius: 0.5)
+                )
+                .foregroundColor(.white)
+                
+                Spacer()
+            }
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(.easeInOut(duration: 0.3), value: isVisible)
         }
     }
 }

@@ -1001,11 +1001,6 @@ class TmuxSessionManager: ObservableObject {
         client.restorePaneHistory(paneId: paneId, via: write)
     }
     
-    /// Legacy method for compatibility - wraps startHistoryRestore
-    private func restorePaneHistoryIfNeeded(paneId: String) {
-        startHistoryRestore(paneId: paneId)
-    }
-    
     /// Called when history restore is complete for a pane
     /// Flushes any buffered live output that arrived during the restore
     func historyRestoreComplete(for paneId: String, content: String) {
@@ -1205,7 +1200,17 @@ class TmuxSessionManager: ObservableObject {
     /// Rename current window
     func renameWindow(_ name: String) {
         guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("rename-window '\(name)'", via: write)
+        // Escape single quotes in name to prevent command injection
+        let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
+        client.sendCommandFireAndForget("rename-window '\(safeName)'", via: write)
+    }
+    
+    /// Rename a specific window by ID
+    func renameWindow(windowId: String, name: String) {
+        guard let client = controlClient, let write = writeToSSH else { return }
+        // Escape single quotes in name to prevent command injection
+        let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
+        client.sendCommandFireAndForget("rename-window -t '\(windowId)' '\(safeName)'", via: write)
     }
     
     /// Select a window by ID

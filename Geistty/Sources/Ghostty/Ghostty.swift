@@ -48,6 +48,13 @@ enum Ghostty {
         case nextTab            // Cmd+Shift+]
         case gotoTab(Int)       // Cmd+1-8
         case lastTab            // Cmd+9
+        
+        // Connection management
+        case reconnect          // Cmd+R
+        case disconnect         // Cmd+W (close without reconnect)
+        
+        // Window operations
+        case renameWindow       // Cmd+Shift+R or ,
     }
     
     /// Delegate protocol for handling app-level keyboard shortcuts
@@ -2247,6 +2254,22 @@ extension Ghostty {
                     else if char == "w" && hasShift && !hasOption {
                         // Cmd+Shift+W - Close current tmux window
                         action = .closeWindow
+                    }
+                    
+                    // Connection management
+                    else if char == "r" && !hasShift && !hasOption {
+                        // Cmd+R - Reconnect to SSH/tmux
+                        action = .reconnect
+                    }
+                    
+                    // Window rename
+                    else if char == "r" && hasShift && !hasOption {
+                        // Cmd+Shift+R - Rename tmux window
+                        action = .renameWindow
+                    } else if char == "," && !hasShift && !hasOption {
+                        // Cmd+, - Also rename window (common convention)
+                        // Note: This might conflict with system preferences
+                        // action = .renameWindow
                     }
                     
                     // If we have an action, try to handle it

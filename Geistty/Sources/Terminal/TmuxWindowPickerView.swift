@@ -14,6 +14,9 @@ private let logger = Logger(subsystem: "com.geistty", category: "TmuxWindowPicke
 struct TmuxWindowPickerView: View {
     @ObservedObject var sessionManager: TmuxSessionManager
     
+    /// Callback when rename is requested (window ID, current name)
+    var onRenameRequested: ((String, String) -> Void)?
+    
     /// Height of the window picker bar
     private let barHeight: CGFloat = 36
     
@@ -38,6 +41,9 @@ struct TmuxWindowPickerView: View {
                             },
                             onClose: {
                                 closeWindow(window)
+                            },
+                            onRename: {
+                                onRenameRequested?(window.id, window.name)
                             }
                         )
                         .id(window.id)
@@ -88,6 +94,7 @@ private struct WindowTab: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onRename: () -> Void
     
     /// Tab background colors
     private var backgroundColor: Color {
@@ -146,8 +153,26 @@ private struct WindowTab: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
         )
-        .onTapGesture {
+        .onTapGesture(count: 2) {
+            // Double-tap to rename
+            onRename()
+        }
+        .onTapGesture(count: 1) {
+            // Single tap to select
             onSelect()
+        }
+        .contextMenu {
+            Button {
+                onRename()
+            } label: {
+                Label("Rename Window", systemImage: "pencil")
+            }
+            
+            Button(role: .destructive) {
+                onClose()
+            } label: {
+                Label("Close Window", systemImage: "xmark")
+            }
         }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
