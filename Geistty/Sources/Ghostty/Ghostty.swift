@@ -211,31 +211,9 @@ extension Ghostty {
         
         /// Map user-friendly font names to Ghostty-compatible names
         /// Ghostty uses CoreText font family names (not PostScript names)
+        /// NOTE: Implementation now in FontMapping.swift
         static func mapFontFamily(_ fontFamily: String) -> String {
-            switch fontFamily {
-            case "Departure Mono":
-                return "Departure Mono"
-            case "JetBrains Mono":
-                return "JetBrains Mono"
-            case "Fira Code":
-                return "Fira Code"
-            case "Hack":
-                return "Hack"
-            case "Source Code Pro":
-                return "Source Code Pro"
-            case "IBM Plex Mono":
-                return "IBM Plex Mono"
-            case "Inconsolata":
-                return "Inconsolata"
-            case "SF Mono":
-                return "SF Mono"
-            case "Menlo":
-                return "Menlo"
-            case "Courier New":
-                return "Courier New"
-            default:
-                return fontFamily
-            }
+            FontMapping.toGhostty(fontFamily)
         }
         
         /// Create a new config with the current user preferences

@@ -150,16 +150,17 @@ class KeychainManager {
     
     // MARK: - SSH Key Storage
     
-    /// Save an SSH private key to the Keychain
+    /// Save an SSH private key PEM data to the Keychain
+    /// Note: We store raw PEM data as generic password, not as kSecClassKey,
+    /// because kSecClassKey expects specific cryptographic formats and may corrupt PEM text.
     func saveSSHKey(_ privateKey: Data, name: String, useSecureEnclave: Bool = false) throws {
-        let tag = "com.geistty.key.\(name)"
+        let account = "ssh-key:\(name)"
         
         var query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: tag.data(using: .utf8)!,
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecValueData as String: privateKey,
-            kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
-            kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
         
@@ -167,12 +168,19 @@ class KeychainManager {
             query[kSecAttrAccessGroup as String] = group
         }
         
-        // Delete existing key with same name
-        let deleteQuery: [String: Any] = [
+        // Delete existing key with same name (both old and new format)
+        let deleteQueryOld: [String: Any] = [
             kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: tag.data(using: .utf8)!
+            kSecAttrApplicationTag as String: "com.geistty.key.\(name)".data(using: .utf8)!
         ]
-        SecItemDelete(deleteQuery as CFDictionary)
+        SecItemDelete(deleteQueryOld as CFDictionary)
+        
+        let deleteQueryNew: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(deleteQueryNew as CFDictionary)
         
         let status = SecItemAdd(query as CFDictionary, nil)
         
@@ -183,19 +191,42 @@ class KeychainManager {
         logger.info("💾 Saved SSH key: \(name)")
     }
     
-    /// Retrieve an SSH private key from the Keychain
+    /// Retrieve an SSH private key PEM data from the Keychain
     func getSSHKey(name: String) throws -> Data {
-        let tag = "com.geistty.key.\(name)"
+        let account = "ssh-key:\(name)"
         
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: tag.data(using: .utf8)!,
+        // Try new format first (generic password)
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        var status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        if status == errSecSuccess {
+            logger.info("🔑 Retrieved key '\(name)' from NEW format (kSecClassGenericPassword)")
+        }
+        
+        // Fallback to old format (kSecClassKey) for migration
+        // WARNING: Old format likely corrupted non-RSA keys!
+        if status == errSecItemNotFound {
+            logger.warning("⚠️ Key '\(name)' not found in new format, trying OLD format (may be corrupted!)")
+            let tag = "com.geistty.key.\(name)"
+            let oldQuery: [String: Any] = [
+                kSecClass as String: kSecClassKey,
+                kSecAttrApplicationTag as String: tag.data(using: .utf8)!,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+            status = SecItemCopyMatching(oldQuery as CFDictionary, &result)
+            if status == errSecSuccess {
+                logger.error("❌ Key '\(name)' retrieved from OLD format - THIS KEY IS LIKELY CORRUPTED! Delete and re-import.")
+            }
+        }
         
         guard status == errSecSuccess else {
             if status == errSecItemNotFound {
@@ -213,50 +244,70 @@ class KeychainManager {
     
     /// Delete an SSH key
     func deleteSSHKey(name: String) throws {
-        let tag = "com.geistty.key.\(name)"
+        let account = "ssh-key:\(name)"
         
-        let query: [String: Any] = [
+        // Delete new format
+        let queryNew: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(queryNew as CFDictionary)
+        
+        // Also delete old format for migration
+        let tag = "com.geistty.key.\(name)"
+        let queryOld: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: tag.data(using: .utf8)!
         ]
+        let status = SecItemDelete(queryOld as CFDictionary)
         
-        let status = SecItemDelete(query as CFDictionary)
-        
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(status)
-        }
-        
+        // Consider success if either was deleted or not found
         logger.info("🗑️ Deleted SSH key: \(name)")
     }
     
     /// List all saved SSH key names
     func listSSHKeys() -> [String] {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: "com.geistty.key.".data(using: .utf8)!,
+        var keyNames: Set<String> = []
+        
+        // Query new format (generic password with ssh-key: prefix)
+        let queryNew: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
             kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
         ]
         
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
-        guard status == errSecSuccess,
-              let items = result as? [[String: Any]] else {
-            return []
+        var resultNew: AnyObject?
+        if SecItemCopyMatching(queryNew as CFDictionary, &resultNew) == errSecSuccess,
+           let items = resultNew as? [[String: Any]] {
+            for item in items {
+                if let account = item[kSecAttrAccount as String] as? String,
+                   account.hasPrefix("ssh-key:") {
+                    keyNames.insert(String(account.dropFirst("ssh-key:".count)))
+                }
+            }
         }
         
-        return items.compactMap { item in
-            guard let tagData = item[kSecAttrApplicationTag as String] as? Data,
-                  let tag = String(data: tagData, encoding: .utf8) else {
-                return nil
+        // Also query old format for migration
+        let queryOld: [String: Any] = [
+            kSecClass as String: kSecClassKey,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        
+        var resultOld: AnyObject?
+        if SecItemCopyMatching(queryOld as CFDictionary, &resultOld) == errSecSuccess,
+           let items = resultOld as? [[String: Any]] {
+            for item in items {
+                if let tagData = item[kSecAttrApplicationTag as String] as? Data,
+                   let tag = String(data: tagData, encoding: .utf8),
+                   tag.hasPrefix("com.geistty.key.") {
+                    keyNames.insert(String(tag.dropFirst("com.geistty.key.".count)))
+                }
             }
-            // Extract key name from tag
-            let prefix = "com.geistty.key."
-            if tag.hasPrefix(prefix) {
-                return String(tag.dropFirst(prefix.count))
-            }
-            return nil
         }
+        
+        return Array(keyNames).sorted()
     }
 }

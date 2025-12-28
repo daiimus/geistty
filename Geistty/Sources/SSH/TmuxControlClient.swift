@@ -1307,34 +1307,6 @@ class TmuxControlClient {
         }
     }
     
-    /// Parse pane state from list-panes -F response
-    /// Expected format: "cursor_x,cursor_y,width,height,alternate_on"
-    /// Example: "5,10,80,24,0"
-    private func parsePaneState(_ content: String) -> PaneState? {
-        // Take first line (there may be trailing newline)
-        let line = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parts = line.split(separator: ",")
-        
-        guard parts.count >= 5,
-              let cursorX = Int(parts[0]),
-              let cursorY = Int(parts[1]),
-              let width = Int(parts[2]),
-              let height = Int(parts[3]) else {
-            return nil
-        }
-        
-        // alternate_on is "0" or "1"
-        let isAlternate = parts[4] == "1"
-        
-        return PaneState(
-            cursorX: cursorX,
-            cursorY: cursorY,
-            width: width,
-            height: height,
-            isAlternateScreen: isAlternate
-        )
-    }
-    
     // MARK: - Pause Mode (iOS App Lifecycle)
     
     /// Enable pause mode for flow control (tmux 3.2+).
