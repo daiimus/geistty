@@ -84,7 +84,7 @@ The result is a native iOS app with:
 │           │                                ▼                    │
 │  ┌──────────────────┐          ┌─────────────────────────────┐  │
 │  │   SSHSession     │◄────────►│   Ghostty.SurfaceView       │  │
-│  │   (libssh2)      │  Data    │   (UIView + Metal + Input)  │  │
+│  │  (SwiftNIO-SSH)  │  Data    │   (UIView + Metal + Input)  │  │
 │  └──────────────────┘  Flow    └─────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    GhosttyKit.xcframework                       │
@@ -174,8 +174,8 @@ geistty/
 │       │   ├── SFTPClient.swift
 │       │   └── SFTPBrowserView.swift
 │       ├── SSH/
-│       │   ├── SSHConnection.swift   # libssh2 wrapper
-│       │   └── SSHSession.swift      # High-level session manager
+│       │   ├── NIOSSHConnection.swift # SwiftNIO-SSH wrapper
+│       │   └── SSHSession.swift       # High-level session manager
 │       ├── Terminal/
 │       │   └── TerminalContainerView.swift
 │       └── UI/
@@ -243,16 +243,13 @@ surfaceView.onWrite = { data in
 | Dependency | License | Purpose |
 |------------|---------|---------|
 | [Ghostty](https://github.com/ghostty-org/ghostty) | MIT | Terminal emulation engine |
-| [CSSH](https://github.com/AparokshaUI/CSSH) | BSD | libssh2 Swift package |
-| [Departure Mono](https://departuremono.com/) | OFL | Default terminal font |
-
-## Acknowledgments
+| [SwiftNIO-SSH](https://github.com/daiimus/swift-nio-ssh) | Apache 2.0 | Pure Swift SSH (fork with RSA) |
 
 - [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza - Pure Swift terminal emulator, referenced for iOS terminal patterns
 - [SwiftTermApp](https://github.com/migueldeicaza/SwiftTermApp) - Sample SSH terminal app, referenced for SSH integration approach
 - [libxev](https://github.com/Cloudef/libxev) - Cross-platform event loop used by Ghostty (iOS fork maintained separately)
 - [Departure Mono](https://departuremono.com/) by Helena Zhang - Beautiful monospace font for terminals
-- [libssh2](https://libssh2.org/) - The SSH library powering our connections (via DimaRU's [Libssh2Prebuild](https://github.com/DimaRU/Libssh2Prebuild))
+- [SwiftNIO-SSH](https://github.com/apple/swift-nio-ssh) by Apple - Pure Swift SSH implementation (we maintain a [fork with RSA support](https://github.com/daiimus/swift-nio-ssh))
 
 ## License
 
