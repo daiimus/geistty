@@ -545,7 +545,7 @@ class SSHSession: ObservableObject, Identifiable {
             // Connect session manager to control client
             client.sessionManager = manager
             manager.setup(controlClient: client) { [weak self] command in
-                self?.connection?.write(command)
+                self?.writeControlCommand(command)
             }
         }
     }
@@ -609,7 +609,9 @@ class SSHSession: ObservableObject, Identifiable {
         let command = tmuxControlClient?.makeAttachCommand(session: sessionName) ?? "exec tmux -CC new-session -A -s \(sessionName)\n"
         logger.info("Attaching to tmux in control mode: \(sessionName)")
         // Write directly to connection - don't go through self.write() which would queue it!
-        connection?.write(command)
+        if let data = command.data(using: .utf8) {
+            writeControlCommand(data)
+        }
     }
     
     // MARK: - tmux Integration
@@ -656,12 +658,13 @@ class SSHSession: ObservableObject, Identifiable {
         // Also notify tmux if in control mode
         if controlModeActive, let client = tmuxControlClient {
             client.resize(cols: cols, rows: rows) { [weak self] command in
-                self?.connection?.write(command)
+                self?.writeControlCommand(command)
             }
         }
     }
     
     /// Write data to the SSH channel
+    /// Uses async write internally but queues on failure for resilience
     func write(_ data: Data) {
         if let str = String(data: data, encoding: .utf8) {
             logger.debug("SSHSession.write: \(data.count) bytes: \(str.prefix(20))")
@@ -681,7 +684,7 @@ class SSHSession: ObservableObject, Identifiable {
         // has completed its initial %begin/%end handshake and is ready for commands.
         if let client = tmuxControlClient, client.isActive {
             client.sendKeys(data) { [weak self] command in
-                self?.connection?.write(command)
+                self?.performWrite(command, originalData: data)
             }
             return
         }
@@ -696,15 +699,50 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        connection?.write(data)
+        performWrite(data, originalData: data)
+    }
+    
+    /// Perform the actual write with error handling
+    /// - Parameters:
+    ///   - command: The data to write (may be tmux-wrapped command)
+    ///   - originalData: The original user input (for queueing on failure)
+    private func performWrite(_ command: Data, originalData: Data) {
+        guard let connection = connection else {
+            logger.warning("⚠️ No connection for write, queueing")
+            pendingInputQueue.append(originalData)
+            updatePendingInputDisplay()
+            return
+        }
+        
+        Task {
+            do {
+                try await connection.writeAsync(command)
+                // Success! If we were stale, NIOSSHConnection will mark us healthy
+            } catch {
+                // Write failed - queue the ORIGINAL data (not the tmux command)
+                logger.error("❌ Write failed: \(error.localizedDescription) - queueing input")
+                await MainActor.run {
+                    self.pendingInputQueue.append(originalData)
+                    self.updatePendingInputDisplay()
+                    
+                    // Update health state if not already dead
+                    if self.connectionHealth.isHealthy || self.connectionHealth != .dead(reason: error.localizedDescription) {
+                        self.connectionHealth = .dead(reason: error.localizedDescription)
+                        self.delegate?.sshSession(self, healthDidChange: self.connectionHealth)
+                    }
+                }
+            }
+        }
     }
     
     /// Write string to the SSH channel
     func write(_ string: String) {
         logger.debug("SSHSession.write(string): \(string.prefix(20))")
         
+        guard let data = string.data(using: .utf8) else { return }
+        
         // Check connection health first
-        if !connectionHealth.isHealthy, let data = string.data(using: .utf8) {
+        if !connectionHealth.isHealthy {
             logger.debug("Connection unhealthy, queueing string input")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
@@ -713,22 +751,22 @@ class SSHSession: ObservableObject, Identifiable {
         
         // In control mode, user input must go through send-keys command
         // Use tmuxControlClient.isActive to ensure tmux is ready for commands
-        if let client = tmuxControlClient, client.isActive, let data = string.data(using: .utf8) {
+        if let client = tmuxControlClient, client.isActive {
             client.sendKeys(data) { [weak self] command in
-                self?.connection?.write(command)
+                self?.performWrite(command, originalData: data)
             }
             return
         }
         
         // Queue string input too if in control mode but not yet active
-        if tmuxMode == .controlMode, let data = string.data(using: .utf8) {
+        if tmuxMode == .controlMode {
             logger.debug("Control mode pending, queueing string input: \(data.count) bytes")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
             return
         }
         
-        connection?.write(string)
+        performWrite(data, originalData: data)
     }
     
     /// Update the visual display of pending input using preedit
@@ -741,6 +779,40 @@ class SSHSession: ObservableObject, Identifiable {
         
         logger.info("📝 updatePendingInputDisplay: '\(displayText)' tmuxSessionManager=\(tmuxSessionManager != nil)")
         tmuxSessionManager?.displayPendingInput(displayText)
+    }
+    
+    /// Write a control command (not user input) to the connection
+    /// Control commands don't get queued on failure - they're ephemeral
+    /// - Parameter command: The command data to write
+    private func writeControlCommand(_ command: Data) {
+        guard let connection = connection else { return }
+        
+        Task {
+            do {
+                try await connection.writeAsync(command)
+            } catch {
+                // Control commands failing is expected if connection is dead
+                // The connection will handle marking itself as dead
+                logger.warning("⚠️ Control command write failed: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Convenience overload for string commands
+    private func writeControlCommand(_ command: String) {
+        guard let data = command.data(using: .utf8) else { return }
+        writeControlCommand(data)
+    }
+    
+    /// Convenience overload for performWrite with string command
+    private func performWrite(_ command: String, originalData: Data) {
+        guard let data = command.data(using: .utf8) else {
+            // Fall back to queueing if conversion fails
+            pendingInputQueue.append(originalData)
+            updatePendingInputDisplay()
+            return
+        }
+        performWrite(data, originalData: originalData)
     }
     
     /// Disconnect the session
@@ -799,7 +871,7 @@ class SSHSession: ObservableObject, Identifiable {
         if isConnectionAlive, controlModeActive, let client = tmuxControlClient {
             logger.info("🔄 Connection alive, resuming paused panes")
             client.resumeAllPausedPanes(via: { [weak self] command in
-                self?.connection?.write(command)
+                self?.writeControlCommand(command)
             })
             return
         }
@@ -966,10 +1038,10 @@ extension SSHSession: NIOSSHConnectionDelegate {
                 for data in self.pendingInputQueue {
                     if let client = self.tmuxControlClient, client.isActive {
                         client.sendKeys(data) { [weak self] command in
-                            self?.connection?.write(command)
+                            self?.performWrite(command, originalData: data)
                         }
                     } else {
-                        self.connection?.write(data)
+                        self.performWrite(data, originalData: data)
                     }
                 }
                 self.pendingInputQueue.removeAll()
@@ -1009,7 +1081,7 @@ extension SSHSession: TmuxControlClientDelegate {
             
             for data in pendingInputQueue {
                 client.sendKeys(data) { [weak self] command in
-                    self?.connection?.write(command)
+                    self?.performWrite(command, originalData: data)
                 }
             }
             pendingInputQueue.removeAll()
@@ -1021,7 +1093,7 @@ extension SSHSession: TmuxControlClientDelegate {
         // Enable pause mode for iOS app lifecycle handling (tmux 3.2+)
         // This buffers output when the app is backgrounded
         client.enablePauseMode(pauseAfter: 1) { [weak self] command in
-            self?.connection?.write(command)
+            self?.writeControlCommand(command)
         }
     }
     
