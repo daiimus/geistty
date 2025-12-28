@@ -3,9 +3,13 @@
 //  Geistty
 //
 //  High-level SSH session wrapper for SwiftUI usage
+//  Uses SwiftNIO-SSH with Network.framework for native iOS network monitoring
 //
 
 import Foundation
+import NIOSSH
+import Crypto
+@_spi(CryptoExtras) import _CryptoExtras
 import os
 
 private let logger = Logger(subsystem: "com.geistty", category: "SSHSession")
@@ -15,6 +19,12 @@ protocol SSHSessionDelegate: AnyObject {
     func sshSessionDidConnect(_ session: SSHSession)
     func sshSession(_ session: SSHSession, didReceiveData data: Data)
     func sshSession(_ session: SSHSession, didDisconnectWithError error: Error?)
+    func sshSession(_ session: SSHSession, healthDidChange health: ConnectionHealth)
+}
+
+// Default implementation for optional delegate methods
+extension SSHSessionDelegate {
+    func sshSession(_ session: SSHSession, healthDidChange health: ConnectionHealth) {}
 }
 
 /// tmux integration mode
@@ -26,7 +36,24 @@ enum TmuxMode {
     case controlMode
 }
 
-/// Represents an SSH session - wraps SSHConnection for SwiftUI usage
+/// SSH session errors
+enum SSHSessionError: LocalizedError {
+    case notConnected
+    case notInTmux
+    case tmuxExited(reason: String?)
+    case invalidKey(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .notConnected: return "Not connected"
+        case .notInTmux: return "Not in tmux session"
+        case .tmuxExited(let reason): return "tmux exited: \(reason ?? "unknown")"
+        case .invalidKey(let msg): return "Invalid SSH key: \(msg)"
+        }
+    }
+}
+
+/// Represents an SSH session - wraps NIOSSHConnection for SwiftUI usage
 @MainActor
 class SSHSession: ObservableObject, Identifiable {
     let id = UUID()
@@ -35,7 +62,7 @@ class SSHSession: ObservableObject, Identifiable {
     weak var delegate: SSHSessionDelegate?
     
     // Connection
-    private var connection: SSHConnection?
+    private var connection: NIOSSHConnection?
     
     // Connection parameters (stored after connect)
     private(set) var host: String = ""
@@ -43,7 +70,7 @@ class SSHSession: ObservableObject, Identifiable {
     private(set) var username: String = ""
     
     // Stored credentials for reconnect (in memory only, never persisted)
-    private var storedPassword: String?
+    private var storedAuthMethod: SSHAuthMethod?
     private var storedProfile: ConnectionProfile?
     private var storedCredential: SSHCredential?
     
@@ -72,8 +99,11 @@ class SSHSession: ObservableObject, Identifiable {
     private var pendingInputQueue: [Data] = []
     
     // State
-    @Published var state: SSHState = .disconnected
+    @Published var state: NIOSSHState = .disconnected
     @Published var lastError: Error?
+    
+    /// Connection health - reflects network path monitoring from NIOSSHConnection
+    @Published private(set) var connectionHealth: ConnectionHealth = .healthy
     
     // Terminal dimensions
     private var terminalCols: Int = 80
@@ -85,6 +115,8 @@ class SSHSession: ObservableObject, Identifiable {
     /// Note: xterm-ghostty would be ideal but most servers don't have the terminfo
     private static let termType = "xterm-256color"
     
+    // MARK: - Connect Methods
+    
     /// Connect to the SSH server with password authentication
     func connect(host: String, port: Int, username: String, password: String, useTmux: Bool = false, tmuxSessionName: String? = nil) async throws {
         self.host = host
@@ -94,21 +126,18 @@ class SSHSession: ObservableObject, Identifiable {
         self.tmuxSessionName = tmuxSessionName
         self.tmuxMode = useTmux ? .controlMode : .none
         
-        // Store password for reconnect (in memory only)
-        self.storedPassword = password
+        // Store auth method for reconnect (in memory only)
+        self.storedAuthMethod = .password(password)
         self.storedProfile = nil
         self.storedCredential = nil
         
-        connection = SSHConnection(host: host, port: port, username: username)
-        connection?.delegate = self
+        let conn = NIOSSHConnection(host: host, port: port, username: username)
+        conn.cols = terminalCols
+        conn.rows = terminalRows
+        conn.delegate = self
+        connection = conn
         
-        #if DEBUG
-        connection?.enableTracing = true
-        #endif
-        
-        try await connection?.connect()
-        try await connection?.authenticatePassword(password)
-        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        try await conn.connect(password: password)
         
         // Reset reconnect attempts on successful connection
         reconnectAttempts = 0
@@ -131,16 +160,22 @@ class SSHSession: ObservableObject, Identifiable {
         self.tmuxSessionName = tmuxSessionName
         self.tmuxMode = useTmux ? .controlMode : .none
         
-        connection = SSHConnection(host: host, port: port, username: username)
-        connection?.delegate = self
+        // Load and parse the private key
+        let keyData = try Data(contentsOf: URL(fileURLWithPath: privateKeyPath))
+        let privateKey = try parsePrivateKey(keyData, passphrase: passphrase)
         
-        #if DEBUG
-        connection?.enableTracing = true
-        #endif
+        // Store auth method for reconnect
+        self.storedAuthMethod = .publicKey(privateKey: privateKey)
+        self.storedProfile = nil
+        self.storedCredential = nil
         
-        try await connection?.connect()
-        try await connection?.authenticateKey(privateKeyPath: privateKeyPath, passphrase: passphrase)
-        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        let conn = NIOSSHConnection(host: host, port: port, username: username)
+        conn.cols = terminalCols
+        conn.rows = terminalRows
+        conn.delegate = self
+        connection = conn
+        
+        try await conn.connect(authMethod: .publicKey(privateKey: privateKey))
         
         // Initialize control client if using control mode
         if tmuxMode == .controlMode {
@@ -165,37 +200,18 @@ class SSHSession: ObservableObject, Identifiable {
         // Store profile and credential for reconnect (in memory only)
         self.storedProfile = profile
         self.storedCredential = credential
-        self.storedPassword = nil
         
-        connection = SSHConnection(host: profile.host, port: profile.port, username: profile.username)
-        connection?.delegate = self
+        let conn = NIOSSHConnection(host: profile.host, port: profile.port, username: profile.username)
+        conn.cols = terminalCols
+        conn.rows = terminalRows
+        conn.delegate = self
+        connection = conn
         
-        #if DEBUG
-        connection?.enableTracing = true
-        #endif
+        // Build auth method from credential
+        let authMethod = try buildAuthMethod(from: credential)
+        self.storedAuthMethod = authMethod
         
-        try await connection?.connect()
-        
-        // Authenticate based on credential type
-        switch credential.authType {
-        case .password(let password):
-            try await connection?.authenticatePassword(password)
-            
-        case .privateKey(let path, let passphrase):
-            try await connection?.authenticateKey(privateKeyPath: path, passphrase: passphrase)
-            
-        case .privateKeyData(let keyData, let passphrase):
-            // Write key data to temp file for libssh2
-            let tempPath = FileManager.default.temporaryDirectory
-                .appendingPathComponent("ghostty_temp_key_\(UUID().uuidString)")
-            try keyData.write(to: tempPath)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempPath.path)
-            defer { try? FileManager.default.removeItem(at: tempPath) }
-            
-            try await connection?.authenticateKey(privateKeyPath: tempPath.path, passphrase: passphrase)
-        }
-        
-        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        try await conn.connect(authMethod: authMethod)
         
         // Reset reconnect attempts on successful connection
         reconnectAttempts = 0
@@ -210,6 +226,75 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Inject shell initialization for best terminal experience
         injectTerminalSetup()
+    }
+    
+    // MARK: - Key Parsing
+    
+    /// Parse a private key from PEM data
+    private func parsePrivateKey(_ data: Data, passphrase: String?) throws -> NIOSSHPrivateKey {
+        guard let pemString = String(data: data, encoding: .utf8) else {
+            throw SSHSessionError.invalidKey("Unable to read key as UTF-8")
+        }
+        
+        // Encrypted keys require passphrase handling
+        if pemString.contains("ENCRYPTED") && passphrase == nil {
+            throw SSHSessionError.invalidKey("Key is encrypted but no passphrase provided")
+        }
+        
+        // Try RSA first (most common for cloud providers)
+        if pemString.contains("RSA PRIVATE KEY") || pemString.contains("BEGIN PRIVATE KEY") {
+            do {
+                // Use swift-crypto's _RSA for PEM parsing
+                let rsaKey = try _RSA.Signing.PrivateKey(pemRepresentation: pemString)
+                return NIOSSHPrivateKey(rsaKey: rsaKey)
+            } catch {
+                logger.warning("RSA key parsing failed: \(error.localizedDescription)")
+                throw SSHSessionError.invalidKey("Failed to parse RSA key: \(error.localizedDescription)")
+            }
+        }
+        
+        // Try ECDSA
+        if pemString.contains("EC PRIVATE KEY") {
+            // Try P-256 first (most common)
+            if let p256Key = try? P256.Signing.PrivateKey(pemRepresentation: pemString) {
+                return NIOSSHPrivateKey(p256Key: p256Key)
+            }
+            // Try P-384
+            if let p384Key = try? P384.Signing.PrivateKey(pemRepresentation: pemString) {
+                return NIOSSHPrivateKey(p384Key: p384Key)
+            }
+            // Try P-521
+            if let p521Key = try? P521.Signing.PrivateKey(pemRepresentation: pemString) {
+                return NIOSSHPrivateKey(p521Key: p521Key)
+            }
+            throw SSHSessionError.invalidKey("ECDSA key curve not supported")
+        }
+        
+        // Try Ed25519
+        if pemString.contains("OPENSSH PRIVATE KEY") {
+            // OpenSSH format may contain Ed25519 - need to parse manually
+            // For now, point users to PEM conversion
+            throw SSHSessionError.invalidKey("OpenSSH format Ed25519 keys require conversion to PEM. Use: ssh-keygen -p -m PEM -f <keyfile>")
+        }
+        
+        throw SSHSessionError.invalidKey("Unsupported key format. Supported: RSA, ECDSA (P-256/384/521) in PEM format")
+    }
+    
+    /// Build an SSHAuthMethod from an SSHCredential
+    private func buildAuthMethod(from credential: SSHCredential) throws -> SSHAuthMethod {
+        switch credential.authType {
+        case .password(let password):
+            return .password(password)
+            
+        case .privateKey(let path, let passphrase):
+            let keyData = try Data(contentsOf: URL(fileURLWithPath: path))
+            let privateKey = try parsePrivateKey(keyData, passphrase: passphrase)
+            return .publicKey(privateKey: privateKey)
+            
+        case .privateKeyData(let keyData, let passphrase):
+            let privateKey = try parsePrivateKey(keyData, passphrase: passphrase)
+            return .publicKey(privateKey: privateKey)
+        }
     }
     
     // MARK: - tmux Control Mode Setup
@@ -312,13 +397,13 @@ class SSHSession: ObservableObject, Identifiable {
         logger.debug("captureTmuxPane: Called, tmuxMode=\(String(describing: self.tmuxMode))")
         guard useTmux else {
             logger.warning("captureTmuxPane: Not in tmux session")
-            completion(.failure(SSHError.notInTmux))
+            completion(.failure(SSHSessionError.notInTmux))
             return
         }
         
         guard tmuxMode == .controlMode, let client = tmuxControlClient else {
             logger.error("captureTmuxPane: Control mode not active")
-            completion(.failure(SSHError.channelError("tmux control mode not active")))
+            completion(.failure(NIOSSHError.channelError("tmux control mode not active")))
             return
         }
         
@@ -348,6 +433,14 @@ class SSHSession: ObservableObject, Identifiable {
             logger.debug("SSHSession.write: \(data.count) bytes: \(str.prefix(20))")
         }
         
+        // Check connection health - if stale/dead, queue instead of sending
+        if !connectionHealth.isHealthy {
+            logger.debug("Connection unhealthy (\(String(describing: connectionHealth))), queueing \(data.count) bytes of input")
+            pendingInputQueue.append(data)
+            updatePendingInputDisplay()
+            return
+        }
+        
         // In control mode, user input must go through send-keys command
         // Raw characters would be interpreted as tmux control commands!
         // Use tmuxControlClient.isActive (not controlModeActive) to ensure tmux
@@ -365,6 +458,7 @@ class SSHSession: ObservableObject, Identifiable {
             // Either control client doesn't exist yet, or it exists but isn't active
             logger.debug("Control mode pending (isActive=\(tmuxControlClient?.isActive ?? false)), queueing \(data.count) bytes of input")
             pendingInputQueue.append(data)
+            updatePendingInputDisplay()
             return
         }
         
@@ -374,6 +468,14 @@ class SSHSession: ObservableObject, Identifiable {
     /// Write string to the SSH channel
     func write(_ string: String) {
         logger.debug("SSHSession.write(string): \(string.prefix(20))")
+        
+        // Check connection health first
+        if !connectionHealth.isHealthy, let data = string.data(using: .utf8) {
+            logger.debug("Connection unhealthy, queueing string input")
+            pendingInputQueue.append(data)
+            updatePendingInputDisplay()
+            return
+        }
         
         // In control mode, user input must go through send-keys command
         // Use tmuxControlClient.isActive to ensure tmux is ready for commands
@@ -388,10 +490,23 @@ class SSHSession: ObservableObject, Identifiable {
         if tmuxMode == .controlMode, let data = string.data(using: .utf8) {
             logger.debug("Control mode pending, queueing string input: \(data.count) bytes")
             pendingInputQueue.append(data)
+            updatePendingInputDisplay()
             return
         }
         
         connection?.write(string)
+    }
+    
+    /// Update the visual display of pending input using preedit
+    private func updatePendingInputDisplay() {
+        // Build a displayable string from the queue (filter out control chars)
+        let displayText = pendingInputQueue
+            .compactMap { String(data: $0, encoding: .utf8) }
+            .joined()
+            .filter { !$0.isASCII || $0.asciiValue! >= 32 || $0 == "\n" || $0 == "\t" }
+        
+        logger.info("📝 updatePendingInputDisplay: '\(displayText)' tmuxSessionManager=\(tmuxSessionManager != nil)")
+        tmuxSessionManager?.displayPendingInput(displayText)
     }
     
     /// Disconnect the session
@@ -407,7 +522,7 @@ class SSHSession: ObservableObject, Identifiable {
         state = .disconnected
         
         // Clear stored credentials on explicit disconnect
-        storedPassword = nil
+        storedAuthMethod = nil
         storedProfile = nil
         storedCredential = nil
     }
@@ -422,7 +537,7 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Check if we have stored credentials for reconnect
     var canReconnect: Bool {
-        return storedPassword != nil || (storedProfile != nil && storedCredential != nil)
+        return storedAuthMethod != nil
     }
     
     /// Called when the app is about to go to background.
@@ -489,12 +604,12 @@ class SSHSession: ObservableObject, Identifiable {
         connection = nil
         
         do {
-            // Reconnect using stored credentials
-            if let profile = storedProfile, let credential = storedCredential {
-                try await reconnectWithProfile(profile, credential: credential)
-            } else if let password = storedPassword {
-                try await reconnectWithPassword(password)
+            // Reconnect using stored auth method
+            guard let authMethod = storedAuthMethod else {
+                throw SSHSessionError.notConnected
             }
+            
+            try await reconnectWithAuth(authMethod)
             
             // Success!
             isReconnecting = false
@@ -516,57 +631,15 @@ class SSHSession: ObservableObject, Identifiable {
         }
     }
     
-    /// Reconnect using stored password
-    private func reconnectWithPassword(_ password: String) async throws {
-        connection = SSHConnection(host: host, port: port, username: username)
-        connection?.delegate = self
+    /// Reconnect using stored auth method
+    private func reconnectWithAuth(_ authMethod: SSHAuthMethod) async throws {
+        let conn = NIOSSHConnection(host: host, port: port, username: username)
+        conn.cols = terminalCols
+        conn.rows = terminalRows
+        conn.delegate = self
+        connection = conn
         
-        #if DEBUG
-        connection?.enableTracing = true
-        #endif
-        
-        try await connection?.connect()
-        try await connection?.authenticatePassword(password)
-        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
-        
-        // Re-setup tmux control mode
-        if tmuxMode == .controlMode {
-            setupTmuxControlClient()
-        }
-        
-        // Re-attach to tmux session
-        injectTerminalSetup()
-    }
-    
-    /// Reconnect using stored profile and credential
-    private func reconnectWithProfile(_ profile: ConnectionProfile, credential: SSHCredential) async throws {
-        connection = SSHConnection(host: profile.host, port: profile.port, username: profile.username)
-        connection?.delegate = self
-        
-        #if DEBUG
-        connection?.enableTracing = true
-        #endif
-        
-        try await connection?.connect()
-        
-        // Authenticate based on credential type
-        switch credential.authType {
-        case .password(let password):
-            try await connection?.authenticatePassword(password)
-            
-        case .privateKey(let path, let passphrase):
-            try await connection?.authenticateKey(privateKeyPath: path, passphrase: passphrase)
-            
-        case .privateKeyData(let keyData, let passphrase):
-            let tempPath = FileManager.default.temporaryDirectory
-                .appendingPathComponent("ghostty_temp_key_\(UUID().uuidString)")
-            try keyData.write(to: tempPath)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempPath.path)
-            defer { try? FileManager.default.removeItem(at: tempPath) }
-            try await connection?.authenticateKey(privateKeyPath: tempPath.path, passphrase: passphrase)
-        }
-        
-        try await connection?.openShell(term: Self.termType, cols: terminalCols, rows: terminalRows)
+        try await conn.connect(authMethod: authMethod)
         
         // Re-setup tmux control mode
         if tmuxMode == .controlMode {
@@ -605,23 +678,23 @@ class SSHSession: ObservableObject, Identifiable {
     }
 }
 
-// MARK: - SSHConnectionDelegate
+// MARK: - NIOSSHConnectionDelegate
 
-extension SSHSession: SSHConnectionDelegate {
-    nonisolated func connectionDidConnect(_ connection: SSHConnection) {
+extension SSHSession: NIOSSHConnectionDelegate {
+    nonisolated func connectionDidConnect(_ connection: NIOSSHConnection) {
         Task { @MainActor in
             self.state = .connected
         }
     }
     
-    nonisolated func connectionDidAuthenticate(_ connection: SSHConnection) {
+    nonisolated func connectionDidAuthenticate(_ connection: NIOSSHConnection) {
         Task { @MainActor in
             self.state = .authenticated
             self.delegate?.sshSessionDidConnect(self)
         }
     }
     
-    nonisolated func connectionDidFailAuthentication(_ connection: SSHConnection, error: Error) {
+    nonisolated func connectionDidFailAuthentication(_ connection: NIOSSHConnection, error: Error) {
         Task { @MainActor in
             self.lastError = error
             self.state = .disconnected
@@ -629,7 +702,7 @@ extension SSHSession: SSHConnectionDelegate {
         }
     }
     
-    nonisolated func connectionDidClose(_ connection: SSHConnection, error: Error?) {
+    nonisolated func connectionDidClose(_ connection: NIOSSHConnection, error: Error?) {
         Task { @MainActor in
             self.lastError = error
             self.state = .disconnected
@@ -637,9 +710,36 @@ extension SSHSession: SSHConnectionDelegate {
         }
     }
     
-    nonisolated func connection(_ connection: SSHConnection, didReceiveData data: Data) {
+    nonisolated func connection(_ connection: NIOSSHConnection, didReceiveData data: Data) {
         Task { @MainActor in
             self.handleReceivedData(data)
+        }
+    }
+    
+    nonisolated func connection(_ connection: NIOSSHConnection, healthDidChange health: ConnectionHealth) {
+        Task { @MainActor in
+            self.connectionHealth = health
+            logger.info("🔌 Connection health changed: \(String(describing: health))")
+            
+            // Notify delegate
+            self.delegate?.sshSession(self, healthDidChange: health)
+            
+            // If connection became healthy again and we have pending input, flush it
+            if health.isHealthy && !self.pendingInputQueue.isEmpty {
+                logger.info("🔌 Connection healthy, flushing \(self.pendingInputQueue.count) queued inputs")
+                self.tmuxSessionManager?.clearPendingInputDisplay()
+                
+                for data in self.pendingInputQueue {
+                    if let client = self.tmuxControlClient, client.isActive {
+                        client.sendKeys(data) { [weak self] command in
+                            self?.connection?.write(command)
+                        }
+                    } else {
+                        self.connection?.write(data)
+                    }
+                }
+                self.pendingInputQueue.removeAll()
+            }
         }
     }
 }
@@ -669,6 +769,10 @@ extension SSHSession: TmuxControlClientDelegate {
         // Flush any queued input that came in before control mode was ready
         if !pendingInputQueue.isEmpty {
             logger.info("Flushing \(self.pendingInputQueue.count) queued input chunks")
+            
+            // Clear the pending input display before flushing
+            tmuxSessionManager?.clearPendingInputDisplay()
+            
             for data in pendingInputQueue {
                 client.sendKeys(data) { [weak self] command in
                     self?.connection?.write(command)
@@ -735,6 +839,6 @@ extension SSHSession: TmuxControlClientDelegate {
         
         // Notify delegate - this will typically trigger disconnect handling
         // The SSH connection is still open, but tmux has terminated
-        delegate?.sshSession(self, didDisconnectWithError: SSHError.tmuxExited(reason: reason))
+        delegate?.sshSession(self, didDisconnectWithError: SSHSessionError.tmuxExited(reason: reason))
     }
 }

@@ -426,7 +426,7 @@ class TerminalViewModel: ObservableObject {
     /// - Parameter completion: Called with the captured content or error
     func captureTmuxPane(completion: @escaping (Result<String, Error>) -> Void) {
         guard let session = sshSession else {
-            completion(.failure(SSHError.notConnected))
+            completion(.failure(NIOSSHError.notConnected))
             return
         }
         session.captureTmuxPane(completion: completion)

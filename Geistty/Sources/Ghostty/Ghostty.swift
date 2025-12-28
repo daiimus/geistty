@@ -2496,6 +2496,22 @@ extension Ghostty {
             feedData(data)
         }
         
+        /// Set preedit (composition preview) text at cursor position
+        /// This shows temporary text that renders inverted (fg/bg swapped)
+        /// Pass empty string or nil to clear the preedit
+        func setPreedit(_ text: String?) {
+            guard let surface = surface else { return }
+            
+            if let text = text, !text.isEmpty {
+                text.withCString { ptr in
+                    ghostty_surface_preedit(surface, ptr, UInt(text.utf8.count))
+                }
+            } else {
+                // Clear preedit by passing empty
+                ghostty_surface_preedit(surface, nil, 0)
+            }
+        }
+        
         /// Send text input to the terminal (user typing -> SSH)
         /// This uses ghostty_surface_text which sends input TO the subprocess/external source
         func sendInput(_ text: String) {
