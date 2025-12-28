@@ -68,47 +68,31 @@ SOFTWARE.
 
 ## SSH Library
 
-### libssh2 (via CSSH)
-- **License**: BSD 3-Clause
-- **Copyright**: © 2004-2007 Sara Golemon, © 2005,2006 Mikhail Gusarov, © 2006-2007 The Written Word, Inc., © 2007 Eli Fant, © 2009-2023 Daniel Stenberg, © Simon Josefsson
-- **Source**: https://libssh2.org/
+### SwiftNIO-SSH
+- **License**: Apache License 2.0
+- **Copyright**: © Apple Inc.
+- **Source**: https://github.com/apple/swift-nio-ssh
+- **Fork used**: https://github.com/daiimus/swift-nio-ssh (adds RSA key support)
 
 ```
-Copyright (c) 2004-2007 Sara Golemon <sarag@libssh2.org>
-Copyright (c) 2005,2006 Mikhail Gusarov <dottedmag@dottedmag.net>
-Copyright (c) 2006-2007 The Written Word, Inc.
-Copyright (c) 2007 Eli Fant <elifantu@mail.ru>
-Copyright (c) 2009-2023 Daniel Stenberg
-Copyright (C) Simon Josefsson
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
 
-All rights reserved.
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
+       http://www.apache.org/licenses/LICENSE-2.0
 
-1. Redistributions of source code must retain the above copyright notice,
-   this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of any contributors
-   may be used to endorse or promote products derived from this software
-   without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
-LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-POSSIBILITY OF SUCH DAMAGE.
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
 ```
+
+> **Note:** libssh2 was previously used but replaced with SwiftNIO-SSH in Dec 2024.
 
 ---
 
@@ -241,7 +225,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 |-----------|---------|
 | Ghostty | MIT |
 | libxev | MIT |
-| libssh2 | BSD 3-Clause |
+| SwiftNIO-SSH | Apache 2.0 |
 | Departure Mono | SIL OFL 1.1 |
 | JetBrains Mono | SIL OFL 1.1 |
 | Fira Code | SIL OFL 1.1 |

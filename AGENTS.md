@@ -8,7 +8,7 @@ Geistty is an iOS SSH terminal app built on top of Ghostty's terminal emulator. 
 
 ## Development Philosophy
 
-We're open to bleeding-edge solutions, but **favor approaches that align with the coding style and architectural patterns established by Ghostty's creator (Mitchell Hashimoto) and contributors**, as well as those of the libraries we modify (libxev, libssh2). When in doubt, look at how similar problems are solved in the upstream codebases.
+We're open to bleeding-edge solutions, but **favor approaches that align with the coding style and architectural patterns established by Ghostty's creator (Mitchell Hashimoto) and contributors**, as well as those of the libraries we modify (libxev, SwiftNIO-SSH). When in doubt, look at how similar problems are solved in the upstream codebases.
 
 ## Repository Structure
 
@@ -63,8 +63,11 @@ Geistty/
 ## Key Files
 
 - `Sources/Ghostty/Ghostty.swift` - Main Ghostty integration, Config, App, Surface
+- `Sources/Ghostty/FontMapping.swift` - Centralized font name mapping (GUI ↔ Ghostty/CoreText)
 - `Sources/Terminal/TerminalContainerView.swift` - Terminal session UI
-- `Sources/SSH/SSHConnection.swift` - Low-level SSH connection using libssh2
+- `Sources/Terminal/ShakeDetector.swift` - Shake gesture detection for "shake to clear"
+- `Sources/Terminal/KeyTableIndicatorView.swift` - Vim-style key table indicator
+- `Sources/SSH/NIOSSHConnection.swift` - SwiftNIO-SSH connection with Network.framework
 - `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux integration, data flow
 - `Sources/SSH/TmuxControlClient.swift` - tmux Control Mode (-CC) protocol client
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
@@ -122,7 +125,7 @@ Live font updates use `ghostty_surface_update_config()` with a new config.
 
 - **Ghostty** - Terminal emulator (custom fork with External backend)
 - **libxev** - Event loop (custom fork with iOS kqueue support)
-- **libssh2** - SSH protocol (via Libssh2Prebuild Swift Package)
+- **SwiftNIO-SSH** - SSH protocol (via daiimus/swift-nio-ssh fork with RSA support)
 
 ## tmux Integration
 
@@ -189,7 +192,7 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 1. **No PTY on iOS** - Use External backend, not Exec backend
 2. **Metal Renderer** - iOS uses Metal, not OpenGL
 3. **CoreText Fonts** - Font discovery via CoreText on iOS
-4. **Module Map Naming** - GhosttyKit uses `GhosttyKit.modulemap` to avoid conflicts with CSSH's `module.modulemap`
+4. **Module Map Naming** - GhosttyKit uses `GhosttyKit.modulemap` (renamed from `module.modulemap`)
 
 ## Do NOT
 
@@ -203,33 +206,34 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 | Decision | Why |
 |----------|-----|
 | External Backend | iOS sandboxing prevents fork/exec/PTY |
+| SwiftNIO-SSH | Pure Swift, Network.framework integration, native async/await |
 | tmux Control Mode | Proper protocol integration; Geistty owns scrollback buffer |
 | capture-pane for search | Alternate screen mode (tmux, vim) has 0 scrollback by design in terminal emulators |
 | libxev fork | iOS uses `kevent`, not `kevent64` |
-| Custom module.modulemap name | Avoids conflicts with CSSH's module.modulemap |
+| Custom module.modulemap name | Renamed to avoid Xcode module conflicts |
 
 ## Data Flow
 
 ### Regular Mode
 ```
-SSH Server → SSHConnection (libssh2) → SSHSession → Ghostty.Surface.writeOutput()
-                                                  ↓
-                                           Terminal UI (Metal)
-                                                  ↓
-User Input → Ghostty write callback → SSHSession → SSHConnection.write()
+SSH Server → NIOSSHConnection (SwiftNIO-SSH) → SSHSession → Ghostty.Surface.writeOutput()
+                                                         ↓
+                                                  Terminal UI (Metal)
+                                                         ↓
+User Input → Ghostty write callback → SSHSession → NIOSSHConnection.write()
 ```
 
 ### Control Mode (tmux -CC)
 ```
-SSH Server → SSHConnection → SSHSession → TmuxControlClient.parse()
-                                                  ↓
-                                         Parse %output messages
-                                                  ↓
-                               Decode octal escapes → Ghostty.Surface.writeOutput()
-                                                  ↓
-                                           Terminal UI (Metal)
-                                                  ↓
-User Input → Ghostty write callback → SSHSession → SSHConnection.write()
+SSH Server → NIOSSHConnection → SSHSession → TmuxControlClient.parse()
+                                                   ↓
+                                          Parse %output messages
+                                                   ↓
+                                Decode octal escapes → Ghostty.Surface.writeOutput()
+                                                   ↓
+                                            Terminal UI (Metal)
+                                                   ↓
+User Input → Ghostty write callback → SSHSession → NIOSSHConnection.write()
 ```
 
 ## Common Pitfalls
@@ -258,35 +262,18 @@ logger.error("Error: \(error.localizedDescription)")
 logger.debug("Debug details: \(someValue)")
 ```
 
-Existing categories: `Ghostty`, `Terminal`, `SSHConnection`, `SSHSession`, `SFTP`, `SFTPBrowser`, `SSHKey`, `Credentials`, `Keychain`, `libssh2`
+Existing categories: `Ghostty`, `Terminal`, `NIOSSHConnection`, `SSHSession`, `SFTP`, `SFTPBrowser`, `SSHKey`, `Credentials`, `Keychain`
 
-### libssh2 Protocol Tracing
+### SwiftNIO-SSH Debugging
 
-For low-level SSH debugging, enable libssh2's built-in tracing:
+SwiftNIO-SSH provides structured logging via SwiftLog. For protocol-level debugging:
 
 ```swift
-// Before connecting, enable tracing
-connection.enableTracing = true
-connection.traceCategories = LIBSSH2_TRACE_AUTH | LIBSSH2_TRACE_KEX | LIBSSH2_TRACE_ERROR
-
-// Or enable all categories
-connection.traceCategories = ~0
-
-await connection.connect()
+// Enable verbose logging in NIOSSHConnection
+// Logs go to os.Logger category "NIOSSHConnection"
 ```
 
-Trace output goes to os.Logger category `libssh2`. Available categories:
-- `LIBSSH2_TRACE_TRANS` (1<<1) - Transport layer (noisy)
-- `LIBSSH2_TRACE_KEX` (1<<2) - Key exchange ✅ default
-- `LIBSSH2_TRACE_AUTH` (1<<3) - Authentication ✅ default
-- `LIBSSH2_TRACE_CONN` (1<<4) - Connection layer (very noisy)
-- `LIBSSH2_TRACE_SCP` (1<<5) - SCP operations
-- `LIBSSH2_TRACE_SFTP` (1<<6) - SFTP operations ✅ default
-- `LIBSSH2_TRACE_ERROR` (1<<7) - Errors ✅ default
-- `LIBSSH2_TRACE_PUBLICKEY` (1<<8) - Public key auth ✅ default
-- `LIBSSH2_TRACE_SOCKET` (1<<9) - Socket layer (noisy)
-
-**Note:** This requires the debug-enabled libssh2 build from `daiimus/Libssh2Prebuild`.
+Network.framework path monitoring logs use the 📡 emoji prefix for easy filtering.
 
 ### Viewing Device Logs
 Stream logs from a connected device in real-time using `--console`:
@@ -340,6 +327,6 @@ xcrun devicectl device process launch --device <device-id> --console com.geistty
 - `libxev-ios` (daiimus/libxev-ios)
   - iOS kqueue support (uses kevent instead of kevent64)
 
-- `Libssh2Prebuild` (daiimus/Libssh2Prebuild)
-  - Fork with debug tracing enabled (`--enable-debug`)
-  - Enables `libssh2_trace()` API for protocol-level debugging
+- `swift-nio-ssh` (daiimus/swift-nio-ssh, branch: add-rsa-support)
+  - Fork with RSA key support added
+  - Pure Swift SSH implementation with Network.framework integration

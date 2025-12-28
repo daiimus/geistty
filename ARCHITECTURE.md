@@ -29,12 +29,12 @@ This document details the technical architecture of the Ghostty iOS SSH Terminal
 │  ┌────────────────────────┐      ┌─────────────────────────────────┐│
 │  │     SSHSession         │      │   Ghostty.SurfaceView           ││
 │  │  ┌──────────────────┐  │      │  ┌───────────────────────────┐  ││
-│  │  │  SSHConnection   │  │      │  │  UIView + CAMetalLayer    │  ││
-│  │  │  (libssh2)       │  │      │  │  + UIKeyInput             │  ││
+│  │  │ NIOSSHConnection │  │      │  │  UIView + CAMetalLayer    │  ││
+│  │  │ (SwiftNIO-SSH)   │  │      │  │  + UIKeyInput             │  ││
 │  │  └────────┬─────────┘  │      │  └───────────────────────────┘  ││
 │  └───────────┼────────────┘      │              │                  ││
 │              │                   │              │                  ││
-│              │ read loop         │   feedData() │ onWrite callback ││
+│              │ async read        │   feedData() │ onWrite callback ││
 │              ▼                   │              ▼                  ││
 │  ┌───────────────────────────────┴──────────────────────────────┐  ││
 │  │                    Data Flow                                  │  ││
@@ -180,59 +180,43 @@ struct SurfaceConfiguration {
 }
 ```
 
-### 3. SSH Layer (SSHConnection.swift)
+### 3. SSH Layer (NIOSSHConnection.swift)
+
+The SSH layer uses SwiftNIO-SSH with NIOTransportServices for native Network.framework integration:
 
 ```swift
-class SSHConnection {
-    private var socket: Int32 = -1
-    private var session: OpaquePointer?  // LIBSSH2_SESSION*
-    private var channel: OpaquePointer?  // LIBSSH2_CHANNEL*
+class NIOSSHConnection {
+    private let eventLoop: NIOTSEventLoopGroup  // Network.framework-backed
+    private var channel: Channel?               // SwiftNIO channel
+    private let pathMonitor: NWPathMonitor      // Connection health
     
-    func connect(host: String, port: Int) {
-        // 1. Create socket and connect
-        socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        Darwin.connect(socket, addr, socklen_t(addr.sa_len))
-        
-        // 2. Create libssh2 session
-        session = libssh2_session_init()
-        libssh2_session_set_blocking(session, 0)  // Non-blocking!
-        
-        // 3. SSH handshake
-        libssh2_session_handshake(session, socket)
-        
-        // 4. Authenticate
-        libssh2_userauth_password_ex(session, user, password)
-    }
-    
-    func openShell(term: String, cols: Int, rows: Int) {
-        // 1. Open channel
-        channel = libssh2_channel_open_session(session)
-        
-        // 2. Request PTY
-        libssh2_channel_request_pty_ex(channel, term, ...)
-        
-        // 3. Start shell
-        libssh2_channel_shell(channel)
-        
-        // 4. Start read loop
-        startReadLoop()
-    }
-    
-    private func startReadLoop() {
-        DispatchQueue.global().async {
-            while self.state == .channelOpen {
-                var buffer = [CChar](repeating: 0, count: 4096)
-                let bytesRead = libssh2_channel_read(channel, &buffer, 4096)
-                
-                if bytesRead > 0 {
-                    let data = Data(bytes: buffer, count: Int(bytesRead))
-                    self.delegate?.sshConnection(self, didReceiveData: data)
-                }
+    func connect(host: String, port: Int, username: String, credential: SSHCredential) async throws {
+        // 1. Bootstrap with NIOTransportServices (Network.framework)
+        let bootstrap = NIOTSConnectionBootstrap(group: eventLoop)
+            .connectTimeout(.seconds(30))
+            .channelInitializer { channel in
+                // Add SSH handlers
+                channel.pipeline.addHandlers([...])
             }
-        }
+        
+        // 2. Connect and authenticate
+        self.channel = try await bootstrap.connect(host: host, port: port).get()
+        
+        // 3. Open shell channel
+        // SwiftNIO-SSH handles protocol negotiation
+    }
+    
+    func write(_ data: Data) async throws {
+        try await channel?.writeAndFlush(data)
     }
 }
 ```
+
+**Key Benefits of SwiftNIO-SSH:**
+- Pure Swift with native async/await
+- Network.framework integration for iOS power management
+- NWPathMonitor for connection health
+- No C memory management
 
 ### 4. Data Flow Integration
 
@@ -354,7 +338,7 @@ The `libghostty-fat.a` static library (~5MB) contains:
 
 | Component | Description |
 |-----------|-------------|
-| **SSH Transport** | libssh2 wrapper for network I/O |
+| **SSH Transport** | SwiftNIO-SSH for network I/O |
 | **UIKeyInput** | iOS keyboard event handling |
 | **Layer Sizing** | IOSurfaceLayer frame management |
 | **Lifecycle** | Surface create/close management |
@@ -385,16 +369,16 @@ The `libghostty-fat.a` static library (~5MB) contains:
 ## Threading Model
 
 - **Main Thread**: UI updates, Metal rendering
-- **SSH Actor**: All libssh2 operations (via `SessionActor`)
-- **Background**: Network I/O via `NWConnection`
+- **NIO Event Loop**: SwiftNIO-SSH operations (via `NIOTSEventLoopGroup`)
+- **Background**: Network I/O via `NWConnection` (Network.framework)
 
-libssh2 is NOT thread-safe, hence the actor pattern from SwiftTermApp.
+SwiftNIO handles thread safety internally via event loops.
 
 ## Memory Management
 
 - `ghostty_surface_t` - Created/freed from Swift, ref counted
-- `LIBSSH2_SESSION*` - Managed by `SessionActor`, freed on disconnect
-- `LIBSSH2_CHANNEL*` - Managed by `Channel`, freed on close
+- `Channel` - SwiftNIO channel, managed by event loop lifecycle
+- `NIOSSHConnection` - Swift class, ARC-managed
 
 ## Platform Considerations
 
