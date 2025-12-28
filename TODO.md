@@ -264,7 +264,7 @@ iOS aggressively suspends apps and drops network connections. tmux handles persi
 - [x] **SSHSession.swift** - Refactored with TmuxMode enum and TmuxControlClient
 - [ ] **Ghostty.swift** - Review and simplify Surface class
 - [ ] **TerminalContainerView.swift** - Extract search UI into separate view
-- [ ] **SSHConnection.swift** - Review error handling consistency
+- [x] **NIOSSHConnection.swift** - Error handling updated with async write + health tracking
 - [x] Remove unused code and commented-out experiments (Dec 2025 cleanup)
 - [ ] Consolidate duplicate logic (font mapping in 3 places)
 - [ ] Add missing documentation comments
