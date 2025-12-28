@@ -60,6 +60,62 @@ triggering correctly.
 
 ---
 
+### 🏗️ Architecture Consideration: Native Swift Dependencies
+
+**Current C Dependencies:**
+| Dependency | Purpose | Lines of Bridging Code |
+|------------|---------|------------------------|
+| libssh2 (via CSSH) | SSH protocol | ~600 lines in SSHConnection.swift |
+| GhosttyKit (Zig/C) | Terminal emulation | ~1200 lines in Ghostty.swift |
+| libxev (Zig) | Event loop for Ghostty | N/A (internal to GhosttyKit) |
+
+**Swift-Native Alternatives:**
+
+1. **SwiftNIO-SSH** (Apple) - Replace libssh2
+   - Pure Swift SSH 2.0 implementation
+   - Built on SwiftNIO async networking
+   - Can use NWConnection underneath → automatic network health callbacks
+   - Repo: https://github.com/apple/swift-nio-ssh
+   
+2. **SwiftTerm** (Miguel de Icaza) - Replace GhosttyKit
+   - Pure Swift terminal emulator
+   - Used by several iOS/macOS SSH apps
+   - No Metal renderer (would need custom rendering layer)
+   - Repo: https://github.com/migueldeicaza/SwiftTerm
+
+**Analysis: SwiftNIO-SSH vs libssh2**
+
+| Aspect | libssh2 | SwiftNIO-SSH |
+|--------|---------|--------------|
+| Maturity | ~20 years, battle-tested | ~4 years, Apple-maintained |
+| Language | C with unsafe bridging | Native Swift |
+| Async model | Blocking + callbacks | SwiftNIO EventLoop / async-await |
+| Network layer | Raw BSD sockets | Can wrap NWConnection |
+| iOS integration | Works but no path monitoring | First-class Network.framework support |
+| Memory safety | Manual C memory management | Swift ARC |
+| Debugging | C stack traces | Swift stack traces |
+
+**Why SwiftNIO-SSH Solves Our Disconnection Problem:**
+
+With `NIOTSEventLoopGroup` (Network.framework transport):
+- ✅ Automatic path change notifications when WiFi drops
+- ✅ Connection viability updates (network unreachable)
+- ✅ Better iOS power management integration
+- ✅ No more "fire and forget" writes - proper async completion handlers
+
+**Migration Effort Estimate:**
+- SSHConnection.swift rewrite: ~2-3 days
+- Testing all auth methods: ~1 day
+- Edge cases and stabilization: ~2-3 days
+- Total: ~1 week focused work
+
+**Decision Pending:** Evaluate after implementing NWPathMonitor workaround. If that solves
+the immediate UX problem, SwiftNIO-SSH migration can be deferred to post-v1.
+
+See [DISCONNECTION_ANALYSIS.md](DISCONNECTION_ANALYSIS.md) for detailed technical analysis.
+
+---
+
 ### 1. tmux Control Mode Integration ✅ COMPLETE
 - [x] Create TmuxControlClient.swift for tmux -CC protocol
 - [x] Implement control message parser (%output, %begin/%end, etc.)

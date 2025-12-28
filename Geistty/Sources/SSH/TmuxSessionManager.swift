@@ -1710,10 +1710,34 @@ class TmuxSessionManager: ObservableObject {
         parsePanesResponse(content)
     }
     
+    // MARK: - Pending Input Visual Feedback
+    
+    /// Display pending input text as preedit (inverted preview) in the focused pane
+    /// This gives visual feedback that keystrokes are being queued during disconnection
+    func displayPendingInput(_ text: String) {
+        logger.info("📝 displayPendingInput: '\(text)' focusedPaneId=\(focusedPaneId) paneSurfaces.keys=\(Array(paneSurfaces.keys))")
+        guard let surface = paneSurfaces[focusedPaneId] else {
+            logger.warning("📝 No surface for focused pane \(focusedPaneId), cannot display pending input")
+            return
+        }
+        
+        logger.info("📝 Calling surface.setPreedit with text: '\(text)'")
+        surface.setPreedit(text.isEmpty ? nil : text)
+    }
+    
+    /// Clear pending input display from terminal
+    func clearPendingInputDisplay() {
+        guard let surface = paneSurfaces[focusedPaneId] else { return }
+        surface.setPreedit(nil)
+    }
+    
     // MARK: - Cleanup
     
     /// Clean up all state
     func cleanup() {
+        // Clear any pending input display
+        clearPendingInputDisplay()
+        
         // Cancel debounce tasks to prevent crashes after cleanup
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil

@@ -17,10 +17,8 @@
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
 		A1000004 /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* SSHSession.swift */; };
-		A1000005 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* SSHConnection.swift */; };
 		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
 		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* DepartureMono-Regular.otf */; };
-		A1000009 /* CSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000001 /* CSSH */; };
 		A1000010 /* Ghostty.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* Ghostty.swift */; };
 		A1000012 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000013 /* GhosttyKit.xcframework */; };
 		A1000013 /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* GhosttyInput.swift */; };
@@ -56,6 +54,9 @@
 		A1000086 /* TmuxSplitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000086 /* TmuxSplitView.swift */; };
 		A1000087 /* TmuxMultiPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000087 /* TmuxMultiPaneView.swift */; };
 		A1000088 /* TmuxWindowPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000088 /* TmuxWindowPickerView.swift */; };
+		A1000090 /* NIOSSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000090 /* NIOSSHConnection.swift */; };
+		A1000091 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000002 /* NIOSSH */; };
+		A1000092 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = AE000003 /* NIOTransportServices */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,7 +94,6 @@
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A2000003 /* TerminalContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalContainerView.swift; sourceTree = "<group>"; };
 		A2000004 /* SSHSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSession.swift; sourceTree = "<group>"; };
-		A2000005 /* SSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnection.swift; sourceTree = "<group>"; };
 		A2000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000007 /* DepartureMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DepartureMono-Regular.otf"; sourceTree = "<group>"; };
 		A2000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -133,6 +133,7 @@
 		A2000086 /* TmuxSplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitView.swift; sourceTree = "<group>"; };
 		A2000087 /* TmuxMultiPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiPaneView.swift; sourceTree = "<group>"; };
 		A2000088 /* TmuxWindowPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowPickerView.swift; sourceTree = "<group>"; };
+		A2000090 /* NIOSSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NIOSSHConnection.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -140,8 +141,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1000009 /* CSSH in Frameworks */,
 				A1000012 /* GhosttyKit.xcframework in Frameworks */,
+				A1000091 /* NIOSSH in Frameworks */,
+				A1000092 /* NIOTransportServices in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -207,7 +209,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000004 /* SSHSession.swift */,
-				A2000005 /* SSHConnection.swift */,
+				A2000090 /* NIOSSHConnection.swift */,
 				A2000081 /* TmuxControlClient.swift */,
 				A2000084 /* TmuxLayout.swift */,
 				A2000082 /* TmuxModels.swift */,
@@ -334,7 +336,8 @@
 			);
 			name = Geistty;
 			packageProductDependencies = (
-				AE000001 /* CSSH */,
+				AE000002 /* NIOSSH */,
+				AE000003 /* NIOTransportServices */,
 			);
 			productName = Geistty;
 			productReference = A2000010 /* Geistty.app */;
@@ -387,7 +390,8 @@
 			);
 			mainGroup = A5000001;
 			packageReferences = (
-				AF000001 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */,
+				AF000002 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
+				AF000003 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */,
 			);
 			productRefGroup = A5000010 /* Products */;
 			projectDirPath = "";
@@ -445,6 +449,7 @@
 				A1000003 /* TerminalContainerView.swift in Sources */,
 				A1000004 /* SSHSession.swift in Sources */,
 				A1000005 /* SSHConnection.swift in Sources */,
+				A1000090 /* NIOSSHConnection.swift in Sources */,
 				A1000081 /* TmuxControlClient.swift in Sources */,
 				A1000084 /* TmuxLayout.swift in Sources */,
 				A1000082 /* TmuxModels.swift in Sources */,
@@ -763,21 +768,34 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		AF000001 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */ = {
+		AF000002 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/daiimus/Libssh2Prebuild";
+			repositoryURL = "https://github.com/daiimus/swift-nio-ssh";
 			requirement = {
-				kind = exactVersion;
-				version = "1.11.0-OpenSSL-1-1-1w-debug";
+				kind = branch;
+				branch = "add-rsa-support";
+			};
+		};
+		AF000003 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-transport-services";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = "1.20.0";
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AE000001 /* CSSH */ = {
+		AE000002 /* NIOSSH */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AF000001 /* XCRemoteSwiftPackageReference "Libssh2Prebuild" */;
-			productName = CSSH;
+			package = AF000002 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			productName = NIOSSH;
+		};
+		AE000003 /* NIOTransportServices */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AF000003 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */;
+			productName = NIOTransportServices;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
