@@ -141,7 +141,7 @@ We are using **v1.2.3** which works with standard Xcode 15/16.
 Once Xcode is installed and configured, continue with:
 1. Build xcframework: `zig build -Demit-xcframework`
 2. Create iOS app project
-3. Integrate SSH library (libssh2)
+3. Add SwiftNIO-SSH package dependency
 4. Bridge SSH I/O to Ghostty surface
 5. Test on Simulator
 6. Deploy to device

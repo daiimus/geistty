@@ -15,9 +15,11 @@
 | Project | URL | Purpose |
 |---------|-----|---------|
 | **Nerd Fonts** | https://github.com/ryanoasis/nerd-fonts | Patched fonts with icons |
-| **libssh2** | https://github.com/libssh2/libssh2 | SSH2 protocol library |
-| **SwiftSH** | https://github.com/nicola-sysmo/SwiftSH | Swift wrapper for libssh2 |
-| **SwiftNIO SSH** | https://github.com/apple/swift-nio-ssh | Pure Swift SSH (alternative) |
+| **SwiftNIO-SSH** | https://github.com/apple/swift-nio-ssh | Pure Swift SSH implementation |
+| **SwiftNIO-SSH (fork)** | https://github.com/daiimus/swift-nio-ssh | Fork with RSA key support |
+| **libxev** | https://github.com/Cloudef/libxev | Event loop (iOS fork required) |
+
+> **Note:** libssh2 was replaced with SwiftNIO-SSH in Dec 2024 for pure Swift async/await support.
 
 ---
 
@@ -29,10 +31,9 @@
 - **GitHub Wiki**: https://github.com/ghostty-org/ghostty/wiki
 - **C API Header**: `include/ghostty.h` in repo
 
-### SSH / libssh2
+### SSH
 
-- **libssh2 API Docs**: https://www.libssh2.org/docs.html
-- **libssh2 Examples**: https://www.libssh2.org/examples/
+- **SwiftNIO-SSH**: https://github.com/apple/swift-nio-ssh
 - **RFC 4253 (SSH Transport)**: https://datatracker.ietf.org/doc/html/rfc4253
 - **RFC 4254 (SSH Connection)**: https://datatracker.ietf.org/doc/html/rfc4254
 
@@ -217,7 +218,7 @@ xcode-select --install
 | Ghostty (libghostty) | MIT | ✅ Yes |
 | SwiftTerm | MIT | ✅ Yes |
 | SwiftTermApp | MIT | ✅ Yes |
-| libssh2 | BSD-3-Clause | ✅ Yes |
+| SwiftNIO-SSH | Apache 2.0 | ✅ Yes |
 | Nerd Fonts | Various (mostly OFL) | ✅ Yes (with attribution) |
 
 All dependencies are compatible with commercial use, requiring only attribution.

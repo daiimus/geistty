@@ -62,7 +62,7 @@ This document provides a comprehensive analysis of the terminal rendering pipeli
 │  │                          SSH/tmux Layer                             │  │
 │  │  ┌─────────────────────────────────────────────────────────────┐   │  │
 │  │  │ SSHSession                                                  │   │  │
-│  │  │  • Manages SSHConnection (libssh2)                          │   │  │
+│  │  │  • Manages NIOSSHConnection (SwiftNIO-SSH)                  │   │  │
 │  │  │  • Handles TmuxControlClient for -CC mode                   │   │  │
 │  │  │  • Routes input through send-keys                           │   │  │
 │  │  └─────────────────────────────────────────────────────────────┘   │  │

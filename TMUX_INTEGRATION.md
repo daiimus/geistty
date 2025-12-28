@@ -52,8 +52,8 @@ Geistty provides a **native Ghostty experience** for iOS/iPadOS that seamlessly 
 │           │                                                         │
 │           ▼                                                         │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │ SSHConnection (EXISTING)                                     │   │
-│  │  - Low-level libssh2 wrapper                                 │   │
+│  │ NIOSSHConnection (EXISTING)                                  │   │
+│  │  - SwiftNIO-SSH wrapper with Network.framework               │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
                               │

@@ -169,15 +169,18 @@ geistty/
 │       │   └── SSHKeyManager.swift
 │       ├── Ghostty/
 │       │   ├── Ghostty.swift         # Swift wrapper for libghostty
-│       │   └── GhosttyTerminalView.swift
-│       ├── SFTP/
-│       │   ├── SFTPClient.swift
-│       │   └── SFTPBrowserView.swift
-│       ├── SSH/
-│       │   ├── NIOSSHConnection.swift # SwiftNIO-SSH wrapper
-│       │   └── SSHSession.swift       # High-level session manager
-│       ├── Terminal/
-│       │   └── TerminalContainerView.swift
+       │   ├── FontMapping.swift     # Centralized font name mapping
+       │   └── GhosttyTerminalView.swift
+       ├── SFTP/
+       │   ├── SFTPClient.swift
+       │   └── SFTPBrowserView.swift
+       ├── SSH/
+       │   ├── NIOSSHConnection.swift # SwiftNIO-SSH wrapper
+       │   └── SSHSession.swift       # High-level session manager
+       ├── Terminal/
+       │   ├── TerminalContainerView.swift
+       │   ├── ShakeDetector.swift    # Shake gesture detection
+       │   └── KeyTableIndicatorView.swift
 │       └── UI/
 │           ├── ConnectionEditorView.swift
 │           ├── ConnectionListView.swift
@@ -241,14 +244,16 @@ surfaceView.onWrite = { data in
 ## Dependencies
 
 | Dependency | License | Purpose |
-|------------|---------|---------|
-| [Ghostty](https://github.com/ghostty-org/ghostty) | MIT | Terminal emulation engine |
-| [SwiftNIO-SSH](https://github.com/daiimus/swift-nio-ssh) | Apache 2.0 | Pure Swift SSH (fork with RSA) |
+|------------|---------|--------|
+| [Ghostty](https://github.com/ghostty-org/ghostty) | MIT | Terminal emulation engine (Zig) |
+| [SwiftNIO-SSH](https://github.com/daiimus/swift-nio-ssh) | Apache 2.0 | Pure Swift SSH (fork with RSA support) |
+| [libxev](https://github.com/Cloudef/libxev) | MIT | Event loop for Ghostty (iOS fork) |
+| [Departure Mono](https://departuremono.com/) | OFL | Beautiful monospace font |
+
+### Acknowledgments
 
 - [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza - Pure Swift terminal emulator, referenced for iOS terminal patterns
 - [SwiftTermApp](https://github.com/migueldeicaza/SwiftTermApp) - Sample SSH terminal app, referenced for SSH integration approach
-- [libxev](https://github.com/Cloudef/libxev) - Cross-platform event loop used by Ghostty (iOS fork maintained separately)
-- [Departure Mono](https://departuremono.com/) by Helena Zhang - Beautiful monospace font for terminals
 - [SwiftNIO-SSH](https://github.com/apple/swift-nio-ssh) by Apple - Pure Swift SSH implementation (we maintain a [fork with RSA support](https://github.com/daiimus/swift-nio-ssh))
 
 ## License
