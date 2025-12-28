@@ -988,12 +988,17 @@ class TmuxSessionManager: ObservableObject {
             }
         }
         
-        guard let client = controlClient, let write = writeToSSH else {
-            logger.warning("📜 Cannot restore pane history - control client or write not available")
+        guard let client = controlClient else {
+            logger.warning("📜 Cannot restore pane history - control client not available")
             return
         }
         
-        logger.info("📜 Restoring scrollback history for pane \(paneId)")
+        guard let write = writeToSSH else {
+            logger.warning("📜 Cannot restore pane history - writeToSSH not configured")
+            return
+        }
+        
+        logger.info("📜 Starting history restore for pane \(paneId)")
         
         // Transition to awaiting history state with any existing buffered data
         paneRestoreStates[paneId] = .awaitingHistory(bufferedOutput: existingBuffer)
