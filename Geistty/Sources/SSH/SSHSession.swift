@@ -117,8 +117,14 @@ class SSHSession: ObservableObject, Identifiable {
     
     // MARK: - Connect Methods
     
-    /// Connect to the SSH server with password authentication
-    func connect(host: String, port: Int, username: String, password: String, useTmux: Bool = false, tmuxSessionName: String? = nil) async throws {
+    /// Common setup before connection
+    private func prepareConnection(
+        host: String,
+        port: Int,
+        username: String,
+        useTmux: Bool,
+        tmuxSessionName: String?
+    ) -> NIOSSHConnection {
         self.host = host
         self.port = port
         self.username = username
@@ -126,19 +132,16 @@ class SSHSession: ObservableObject, Identifiable {
         self.tmuxSessionName = tmuxSessionName
         self.tmuxMode = useTmux ? .controlMode : .none
         
-        // Store auth method for reconnect (in memory only)
-        self.storedAuthMethod = .password(password)
-        self.storedProfile = nil
-        self.storedCredential = nil
-        
         let conn = NIOSSHConnection(host: host, port: port, username: username)
         conn.cols = terminalCols
         conn.rows = terminalRows
         conn.delegate = self
         connection = conn
-        
-        try await conn.connect(password: password)
-        
+        return conn
+    }
+    
+    /// Common setup after successful connection
+    private func finalizeConnection() {
         // Reset reconnect attempts on successful connection
         reconnectAttempts = 0
         
@@ -151,14 +154,28 @@ class SSHSession: ObservableObject, Identifiable {
         injectTerminalSetup()
     }
     
+    /// Connect to the SSH server with password authentication
+    func connect(host: String, port: Int, username: String, password: String, useTmux: Bool = false, tmuxSessionName: String? = nil) async throws {
+        let conn = prepareConnection(
+            host: host, port: port, username: username,
+            useTmux: useTmux, tmuxSessionName: tmuxSessionName
+        )
+        
+        // Store auth method for reconnect (in memory only)
+        self.storedAuthMethod = .password(password)
+        self.storedProfile = nil
+        self.storedCredential = nil
+        
+        try await conn.connect(password: password)
+        finalizeConnection()
+    }
+    
     /// Connect to the SSH server with key-based authentication
     func connectWithKey(host: String, port: Int, username: String, privateKeyPath: String, passphrase: String? = nil, useTmux: Bool = false, tmuxSessionName: String? = nil) async throws {
-        self.host = host
-        self.port = port
-        self.username = username
-        self.useTmux = useTmux
-        self.tmuxSessionName = tmuxSessionName
-        self.tmuxMode = useTmux ? .controlMode : .none
+        let conn = prepareConnection(
+            host: host, port: port, username: username,
+            useTmux: useTmux, tmuxSessionName: tmuxSessionName
+        )
         
         // Load and parse the private key
         let keyData = try Data(contentsOf: URL(fileURLWithPath: privateKeyPath))
@@ -169,43 +186,21 @@ class SSHSession: ObservableObject, Identifiable {
         self.storedProfile = nil
         self.storedCredential = nil
         
-        let conn = NIOSSHConnection(host: host, port: port, username: username)
-        conn.cols = terminalCols
-        conn.rows = terminalRows
-        conn.delegate = self
-        connection = conn
-        
         try await conn.connect(authMethod: .publicKey(privateKey: privateKey))
-        
-        // Initialize control client if using control mode
-        if tmuxMode == .controlMode {
-            setupTmuxControlClient()
-        }
-        
-        // Inject shell initialization for best terminal experience
-        injectTerminalSetup()
+        finalizeConnection()
     }
     
     /// Connect using a saved connection profile and credentials
     /// - Note: Control mode is enabled by default for testing
     func connect(profile: ConnectionProfile, credential: SSHCredential) async throws {
-        self.host = profile.host
-        self.port = profile.port
-        self.username = profile.username
-        self.useTmux = profile.useTmux
-        self.tmuxSessionName = profile.tmuxSessionName
-        // Enable control mode by default for testing
-        self.tmuxMode = profile.useTmux ? .controlMode : .none
+        let conn = prepareConnection(
+            host: profile.host, port: profile.port, username: profile.username,
+            useTmux: profile.useTmux, tmuxSessionName: profile.tmuxSessionName
+        )
         
         // Store profile and credential for reconnect (in memory only)
         self.storedProfile = profile
         self.storedCredential = credential
-        
-        let conn = NIOSSHConnection(host: profile.host, port: profile.port, username: profile.username)
-        conn.cols = terminalCols
-        conn.rows = terminalRows
-        conn.delegate = self
-        connection = conn
         
         // Build auth method from credential
         let authMethod = try buildAuthMethod(from: credential)
@@ -213,19 +208,10 @@ class SSHSession: ObservableObject, Identifiable {
         
         try await conn.connect(authMethod: authMethod)
         
-        // Reset reconnect attempts on successful connection
-        reconnectAttempts = 0
-        
         // Mark profile as recently connected
         ConnectionProfileManager.shared.markConnected(profile)
         
-        // Initialize control client if using control mode
-        if tmuxMode == .controlMode {
-            setupTmuxControlClient()
-        }
-        
-        // Inject shell initialization for best terminal experience
-        injectTerminalSetup()
+        finalizeConnection()
     }
     
     // MARK: - Key Parsing
