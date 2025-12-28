@@ -151,7 +151,7 @@ permissions are required beyond network access.
 
 ## Export Compliance
 
-- **Uses Encryption**: Yes (SSH protocol via libssh2)
+- **Uses Encryption**: Yes (SSH protocol via SwiftNIO-SSH)
 - **Exempt**: Yes - Uses encryption solely for authentication and secure communications
 - **ITSAppUsesNonExemptEncryption**: NO (exempt encryption)
 
