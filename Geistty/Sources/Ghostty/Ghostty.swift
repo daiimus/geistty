@@ -141,6 +141,34 @@ extension Ghostty {
             if FileManager.default.fileExists(atPath: configFilePath.path),
                let content = try? String(contentsOf: configFilePath, encoding: .utf8) {
                 logger.info("📖 Reading config from file: \(configFilePath.path)")
+                
+                // Migration: Fix scrollback-limit = 0 or too small (breaks scrolling)
+                // Old versions used 0 which disables all scrollback
+                // Unit is BYTES, not lines! 50000000 = 50MB
+                if content.contains("scrollback-limit = 0") || content.contains("scrollback-limit = 10000\n") || content.contains("scrollback-limit = 10000000") {
+                    logger.info("🔧 Migrating config: fixing scrollback-limit → 50000000 (50MB)")
+                    var migratedContent = content.replacingOccurrences(
+                        of: "scrollback-limit = 0",
+                        with: "scrollback-limit = 50000000"
+                    )
+                    migratedContent = migratedContent.replacingOccurrences(
+                        of: "scrollback-limit = 10000\n",
+                        with: "scrollback-limit = 50000000\n"
+                    )
+                    migratedContent = migratedContent.replacingOccurrences(
+                        of: "scrollback-limit = 10000000",
+                        with: "scrollback-limit = 50000000"
+                    )
+                    // Save the migrated config
+                    do {
+                        try migratedContent.write(to: configFilePath, atomically: true, encoding: .utf8)
+                        logger.info("✅ Config migrated successfully")
+                    } catch {
+                        logger.error("Failed to save migrated config: \(error)")
+                    }
+                    return migratedContent
+                }
+                
                 return content
             }
             
@@ -194,7 +222,7 @@ extension Ghostty {
             # === Terminal Behavior ===
             window-padding-x = 4
             window-padding-y = 4
-            scrollback-limit = 0
+            scrollback-limit = 50000000
             
             # URL detection
             link-url = true

@@ -1133,7 +1133,7 @@ class TmuxControlClient {
             // Cancel the timeout task
             pending.timeoutTask?.cancel()
             
-            logger.debug("Matched response to command \(pending.localId): \(pending.commandText.prefix(50))")
+            logger.info("📜 Matched response to command \(pending.localId): \(pending.commandText.prefix(50)), content length=\(content.count)")
             
             if success {
                 pending.callback(.success(content))
@@ -1146,9 +1146,9 @@ class TmuxControlClient {
             // No pending command - this is an unsolicited response
             // This happens during initial tmux startup (first %begin/%end)
             if success {
-                logger.debug("Unsolicited response block: cmd=\(block.commandNumber), content length=\(content.count)")
+                logger.info("📜 Unsolicited response block: cmd=\(block.commandNumber), content length=\(content.count)")
             } else {
-                logger.warning("Unsolicited error block: cmd=\(block.commandNumber) - \(content)")
+                logger.warning("📜 Unsolicited error block: cmd=\(block.commandNumber) - \(content)")
             }
         }
     }
@@ -1288,7 +1288,7 @@ class TmuxControlClient {
         // -S -: start from beginning of history (capture all scrollback)
         // Note: We don't use -J (join) as it destroys line breaks
         let captureCommand = "capture-pane -pe -t \(paneId) -S -"
-        logger.info("Capturing pane history: \(captureCommand)")
+        logger.info("📜 Sending capture-pane command for \(paneId): \(captureCommand)")
         
         // Use proper command routing - the response will come back via callback
         sendCommand(captureCommand, via: write) { [weak self] result in
@@ -1296,11 +1296,11 @@ class TmuxControlClient {
             
             switch result {
             case .success(let content):
-                logger.info("Pane history received for \(paneId): \(content.count) chars")
+                logger.info("📜 Pane history received for \(paneId): \(content.count) chars")
                 self.delegate?.tmuxClient(self, didRestoreSession: content, paneId: paneId, paneState: nil)
                 
             case .failure(let error):
-                logger.error("Pane history restore failed for \(paneId): \(error.localizedDescription)")
+                logger.error("📜 Pane history restore failed for \(paneId): \(error.localizedDescription)")
                 // Still notify delegate with empty content so UI can proceed
                 self.delegate?.tmuxClient(self, didRestoreSession: "", paneId: paneId, paneState: nil)
             }
