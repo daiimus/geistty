@@ -86,8 +86,9 @@ class SSHKeyCredentialProvider: CredentialProvider {
             throw SSHKeyError.keyNotFound
         }
         
-        let keyPath = try keyManager.getPrivateKeyPath(name: keyName)
-        return SSHCredential(authType: .privateKey(path: keyPath, passphrase: nil), source: "SSH Key: \(keyName)")
+        // Get key data directly from keychain - no temp files needed for SwiftNIO-SSH
+        let keyData = try keyManager.getPrivateKey(name: keyName)
+        return SSHCredential(authType: .privateKeyData(keyData, passphrase: nil), source: "SSH Key: \(keyName)")
     }
 }
 
