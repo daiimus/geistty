@@ -253,30 +253,8 @@ class ConfigSyncManager: ObservableObject {
     
     /// Reverse map Ghostty font family to GUI display name
     private func reverseMapFontFamily(_ ghosttyFont: String) -> String {
-        switch ghosttyFont {
-        case "Departure Mono", "DepartureMono-Regular":
-            return "Departure Mono"
-        case "JetBrains Mono", "JetBrainsMono-Regular":
-            return "JetBrains Mono"
-        case "Fira Code", "FiraCode-Regular":
-            return "Fira Code"
-        case "Hack", "Hack-Regular":
-            return "Hack"
-        case "Source Code Pro", "SourceCodePro-Regular":
-            return "Source Code Pro"
-        case "IBM Plex Mono", "IBMPlexMono", "IBMPlexMono-Regular":
-            return "IBM Plex Mono"
-        case "Inconsolata", "Inconsolata-Regular":
-            return "Inconsolata"
-        case "SF Mono", "SFMono-Regular":
-            return "SF Mono"
-        case "Menlo", "Menlo-Regular":
-            return "Menlo"
-        case "Courier New", "CourierNewPSMT":
-            return "Courier New"
-        default:
-            return ghosttyFont
-        }
+        // Implementation now in FontMapping.swift
+        FontMapping.fromGhostty(ghosttyFont)
     }
     
     // MARK: - GUI Setting Updates (writes to config file)

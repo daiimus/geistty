@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */; };
+		A10000A0 /* FontMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A0 /* FontMapping.swift */; };
 		B1000001 /* GeisttyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* GeisttyUITests.swift */; };
 		B1000002 /* TmuxPaneUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* TmuxPaneUITests.swift */; };
 		B1000003 /* TmuxSizingDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* TmuxSizingDebugTests.swift */; };
@@ -134,6 +135,7 @@
 		A2000087 /* TmuxMultiPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiPaneView.swift; sourceTree = "<group>"; };
 		A2000088 /* TmuxWindowPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowPickerView.swift; sourceTree = "<group>"; };
 		A2000090 /* NIOSSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NIOSSHConnection.swift; sourceTree = "<group>"; };
+		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -232,6 +234,7 @@
 			children = (
 				A2000011 /* Ghostty.swift */,
 				5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */,
+				A20000A0 /* FontMapping.swift */,
 				A2000014 /* GhosttyInput.swift */,
 				A2000080 /* SurfaceSearchOverlay.swift */,
 			);
@@ -444,6 +447,7 @@
 				A1000002 /* ContentView.swift in Sources */,
 				A1000010 /* Ghostty.swift in Sources */,
 				708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */,
+				A10000A0 /* FontMapping.swift in Sources */,
 				A1000013 /* GhosttyInput.swift in Sources */,
 				A1000080 /* SurfaceSearchOverlay.swift in Sources */,
 				A1000003 /* TerminalContainerView.swift in Sources */,
