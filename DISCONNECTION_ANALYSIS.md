@@ -1,5 +1,10 @@
 # Disconnection Handling Analysis
 
+> **Note (Dec 2024):** Geistty has migrated from libssh2 to SwiftNIO-SSH. Some code examples
+> in this document reference the old libssh2 implementation for historical context. The
+> architecture recommendations (Part 4+) remain relevant and are being implemented with
+> SwiftNIO-SSH's native Network.framework support.
+
 ## Executive Summary
 
 This document provides an in-depth analysis of connection state management in Geistty, examining the current implementation against SSH and tmux protocol standards, identifying gaps, and proposing modern approaches for iOS mobile SSH clients.
@@ -327,9 +332,8 @@ connection.viabilityUpdateHandler = { viable in
 }
 ```
 
-**Limitation:** libssh2 uses raw sockets. Would need to either:
-- Replace libssh2 with SwiftNIO-SSH
-- Add NWPathMonitor for network changes (parallel detection)
+**Status:** ✅ SwiftNIO-SSH migration complete! Now using `NIOTSEventLoopGroup` which wraps
+`NWConnection` and provides native path/viability updates.
 
 ---
 
@@ -560,7 +564,7 @@ Trace through the call chain:
 
 | File | Responsibility |
 |------|----------------|
-| `SSHConnection.swift` | Low-level libssh2 wrapper, read loop, write |
+| `NIOSSHConnection.swift` | SwiftNIO-SSH wrapper, async channel I/O |
 | `SSHSession.swift` | High-level session, credentials, reconnect logic |
 | `TmuxControlClient.swift` | tmux protocol parsing, isActive flag |
 | `TmuxSessionManager.swift` | Multi-pane state, surface routing |
@@ -575,4 +579,4 @@ Trace through the call chain:
 - [tmux Control Mode Wiki](https://github.com/tmux/tmux/wiki/Control-Mode)
 - [Mosh: Mobile Shell](https://mosh.org/)
 - [Apple Network.framework](https://developer.apple.com/documentation/network)
-- [libssh2 Documentation](https://www.libssh2.org/)
+- [SwiftNIO-SSH](https://github.com/apple/swift-nio-ssh) - Pure Swift SSH implementation
