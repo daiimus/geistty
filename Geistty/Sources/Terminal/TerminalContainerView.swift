@@ -665,46 +665,6 @@ struct ToolbarButton: View {
     }
 }
 
-// MARK: - Shake to Clear
-
-/// UIViewController subclass that detects shake gestures
-class ShakeDetectingViewController: UIViewController {
-    var onShake: (() -> Void)?
-    
-    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
-        if motion == .motionShake {
-            // Haptic feedback
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
-            onShake?()
-        }
-    }
-    
-    override var canBecomeFirstResponder: Bool { true }
-}
-
-/// SwiftUI wrapper for shake detection
-struct ShakeDetector: UIViewControllerRepresentable {
-    let onShake: () -> Void
-    
-    func makeUIViewController(context: Context) -> ShakeDetectingViewController {
-        let vc = ShakeDetectingViewController()
-        vc.onShake = onShake
-        return vc
-    }
-    
-    func updateUIViewController(_ uiViewController: ShakeDetectingViewController, context: Context) {
-        uiViewController.onShake = onShake
-    }
-}
-
-/// View modifier for adding shake detection
-extension View {
-    func onShake(perform action: @escaping () -> Void) -> some View {
-        self.background(ShakeDetector(onShake: action))
-    }
-}
-
 // MARK: - Ultra Barebones Mode: Pure UIKit Terminal
 
 /// A UIViewControllerRepresentable that hosts a pure UIKit view controller
@@ -2273,30 +2233,4 @@ extension RawTerminalUIViewController: Ghostty.ShortcutDelegate {
 }
 
 // MARK: - Key Table Indicator View
-
-/// Visual indicator showing when a key table is active (vim-style modal keys)
-struct KeyTableIndicatorView: View {
-    let tableName: String
-    
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "keyboard.badge.ellipsis")
-                .font(.system(size: 12, weight: .medium))
-            
-            Text(tableName.uppercased())
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
-                )
-        )
-        .foregroundStyle(Color.accentColor)
-        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-    }
-}
+// See KeyTableIndicatorView.swift in UI/
