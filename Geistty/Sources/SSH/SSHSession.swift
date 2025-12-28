@@ -785,11 +785,20 @@ class SSHSession: ObservableObject, Identifiable {
     /// Control commands don't get queued on failure - they're ephemeral
     /// - Parameter command: The command data to write
     private func writeControlCommand(_ command: Data) {
-        guard let connection = connection else { return }
+        guard let connection = connection else {
+            logger.warning("⚠️ writeControlCommand called but no connection")
+            return
+        }
+        
+        // Log what we're sending
+        if let str = String(data: command, encoding: .utf8) {
+            logger.info("📤 writeControlCommand: \(str.prefix(100))")
+        }
         
         Task {
             do {
                 try await connection.writeAsync(command)
+                logger.debug("📤 writeControlCommand completed successfully")
             } catch {
                 // Control commands failing is expected if connection is dead
                 // The connection will handle marking itself as dead
@@ -800,6 +809,7 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Convenience overload for string commands
     private func writeControlCommand(_ command: String) {
+        logger.info("📤 writeControlCommand(String): \(command.prefix(100))")
         guard let data = command.data(using: .utf8) else { return }
         writeControlCommand(data)
     }
