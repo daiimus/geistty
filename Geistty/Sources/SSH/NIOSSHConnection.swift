@@ -452,15 +452,34 @@ public class NIOSSHConnection: ObservableObject {
     
     // MARK: - Write
     
-    /// Write data to the channel
+    /// Write data to the channel (fire-and-forget for backwards compatibility)
     public func write(_ data: Data) {
+        Task {
+            do {
+                try await writeAsync(data)
+            } catch {
+                logger.warning("⚠️ Write failed: \(error.localizedDescription)")
+                // Mark connection as dead on write failure
+                await MainActor.run {
+                    if self.health.isHealthy || self.health != .dead(reason: error.localizedDescription) {
+                        self.health = .dead(reason: error.localizedDescription)
+                        self.delegate?.connection(self, healthDidChange: self.health)
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Write data to the channel with async/await error handling
+    /// - Parameter data: The data to write
+    /// - Throws: NIOSSHError if write fails
+    public func writeAsync(_ data: Data) async throws {
         guard state == .channelOpen, let channel = sshChannel else {
             logger.warning("⚠️ Write called but channel not open")
-            return
+            throw NIOSSHError.notConnected
         }
         
-        // If connection is stale, we could queue instead
-        // For now, we still send (it'll fail if TCP is actually dead)
+        // If connection is stale, warn but still try
         if case .stale = health {
             logger.debug("⚠️ Writing to stale connection")
         }
@@ -470,14 +489,37 @@ public class NIOSSHConnection: ObservableObject {
         buffer.writeBytes(data)
         
         let channelData = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
-        channel.writeAndFlush(channelData, promise: nil)
+        
+        // Create promise to track write completion
+        let promise = channel.eventLoop.makePromise(of: Void.self)
+        channel.writeAndFlush(channelData, promise: promise)
+        
+        // Wait for write to complete or fail
+        try await promise.futureResult.get()
+        
+        // Write succeeded - ensure health is marked healthy if it was stale
+        if case .stale = health {
+            await MainActor.run {
+                logger.info("📡 Write succeeded on stale connection - marking healthy")
+                self.health = .healthy
+                self.delegate?.connection(self, healthDidChange: self.health)
+            }
+        }
     }
     
-    /// Write string to channel
+    /// Write string to channel (fire-and-forget for backwards compatibility)
     public func write(_ string: String) {
         if let data = string.data(using: .utf8) {
             write(data)
         }
+    }
+    
+    /// Write string to channel with async/await error handling
+    public func writeAsync(_ string: String) async throws {
+        guard let data = string.data(using: .utf8) else {
+            throw NIOSSHError.channelError("Invalid string encoding")
+        }
+        try await writeAsync(data)
     }
     
     // MARK: - PTY Resize
