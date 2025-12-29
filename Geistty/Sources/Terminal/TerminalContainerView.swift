@@ -99,6 +99,9 @@ class TerminalViewModel: ObservableObject {
     private var connectionStartTime: Date?
     private var durationTimer: Timer?
     
+    /// Buffer for data received before surface is ready
+    private var preSurfaceBuffer: [Data] = []
+    
     /// Reference to the Ghostty surface view
     weak var surfaceView: Ghostty.SurfaceView? {
         didSet {
@@ -109,6 +112,15 @@ class TerminalViewModel: ObservableObject {
             // Sync font size when surfaceView is set and observe changes
             if let surface = surfaceView {
                 currentFontSize = surface.currentFontSize
+                
+                // Flush any buffered data received before surface was ready
+                if !preSurfaceBuffer.isEmpty {
+                    logger.info("📤 Flushing \(preSurfaceBuffer.count) pre-surface data chunks")
+                    for data in preSurfaceBuffer {
+                        surface.feedData(data)
+                    }
+                    preSurfaceBuffer.removeAll()
+                }
                 
                 // Observe font size changes from the surface (e.g., pinch-to-zoom)
                 fontSizeCancellable = surface.$currentFontSize
@@ -267,6 +279,11 @@ class TerminalViewModel: ObservableObject {
             logger.debug("⌨️ sendInput: \(data.count) bytes (binary)")
         }
         sshSession?.write(data)
+    }
+    
+    /// Set the active pane for tmux input routing
+    func setActivePaneId(_ paneId: String) {
+        sshSession?.setActivePaneId(paneId)
     }
     
     func resize(cols: Int, rows: Int) {
@@ -475,7 +492,9 @@ extension TerminalViewModel: SSHSessionDelegate {
                 }
                 surface.feedData(data)
             } else {
-                logger.error("⚠️ Received \(data.count) bytes but surfaceView is nil!")
+                // Buffer data until surface is ready
+                logger.info("📦 Buffering \(data.count) bytes (surface not ready yet)")
+                preSurfaceBuffer.append(data)
             }
         }
     }
@@ -1499,12 +1518,16 @@ class RawTerminalUIViewController: UIViewController {
             return surface
         }
         
-        // Input handler wires surface.onWrite to tmux
+        // Input handler wires surface.onWrite through SSHSession (which routes via TmuxGateway)
         let inputHandler: (Ghostty.SurfaceView, String) -> Void = { [weak self] surface, paneId in
             surface.onWrite = { [weak self] data in
                 Task { @MainActor in
+                    // Update both TmuxSessionManager and SSHSession/Gateway active pane
                     self?.viewModel?.tmuxManager?.setFocusedPane(paneId)
-                    self?.viewModel?.tmuxManager?.sendInput(data, to: paneId)
+                    self?.viewModel?.setActivePaneId(paneId)
+                    // Route through SSHSession.write() which uses TmuxGateway.sendKeys()
+                    // with proper Kitty keyboard protocol translation
+                    self?.viewModel?.sendInput(data)
                 }
             }
         }
@@ -1739,13 +1762,11 @@ class RawTerminalUIViewController: UIViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isConnected in
                 if isConnected {
-                    // Connection established - try to set up tmux support
-                    // Delay slightly to ensure tmux manager is fully initialized
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        self?.setupTmuxSurfaceFactory()
-                        self?.setupSplitTreeObserver()
-                        self?.setupWindowsObserver()
-                    }
+                    // Connection established - set up tmux support immediately
+                    // No delay - surface factory should be ready as soon as possible
+                    self?.setupTmuxSurfaceFactory()
+                    self?.setupSplitTreeObserver()
+                    self?.setupWindowsObserver()
                 }
             }
     }

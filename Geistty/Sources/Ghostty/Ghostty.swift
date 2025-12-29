@@ -777,6 +777,49 @@ extension Ghostty {
                 }
                 return true
                 
+            case GHOSTTY_ACTION_TMUX_STATE_CHANGED:
+                // tmux control mode: windows/panes changed
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let tmuxState = action.action.tmux_state_changed
+                logger.info("🪟 tmux state changed: \(tmuxState.window_count) windows, \(tmuxState.pane_count) panes")
+                
+                // Post notification for TmuxSessionManager to handle
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .tmuxStateChanged,
+                        object: nil,
+                        userInfo: [
+                            "surface": surface,
+                            "windowCount": tmuxState.window_count,
+                            "paneCount": tmuxState.pane_count
+                        ]
+                    )
+                }
+                return true
+                
+            case GHOSTTY_ACTION_TMUX_EXIT:
+                // tmux control mode: exited
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                logger.info("🪟 tmux control mode exited")
+                
+                // Post notification for TmuxSessionManager to handle
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .tmuxExited,
+                        object: nil,
+                        userInfo: ["surface": surface]
+                    )
+                }
+                return true
+                
             default:
                 return false
             }
@@ -2651,6 +2694,47 @@ extension Ghostty {
         func setVisible(_ visible: Bool) {
             guard let surface = surface else { return }
             ghostty_surface_set_occlusion(surface, !visible)
+        }
+        
+        // MARK: - tmux Control Mode API
+        
+        /// Check if the surface is in tmux control mode (has any panes)
+        var isTmuxActive: Bool {
+            guard let surface = surface else { return false }
+            return ghostty_surface_tmux_pane_count(surface) > 0
+        }
+        
+        /// Get the number of tmux panes (0 if not in tmux mode)
+        var tmuxPaneCount: Int {
+            guard let surface = surface else { return 0 }
+            return Int(ghostty_surface_tmux_pane_count(surface))
+        }
+        
+        /// Get the IDs of all tmux panes
+        func getTmuxPaneIds() -> [Int] {
+            guard let surface = surface else { return [] }
+            
+            let count = ghostty_surface_tmux_pane_count(surface)
+            guard count > 0 else { return [] }
+            
+            var paneIds = [UInt](repeating: 0, count: Int(count))
+            let written = ghostty_surface_tmux_pane_ids(surface, &paneIds, count)
+            
+            return paneIds.prefix(Int(written)).map { Int($0) }
+        }
+        
+        /// Set which tmux pane this surface renders
+        /// Returns true if successful, false if pane_id not found or not in tmux mode
+        @discardableResult
+        func setActiveTmuxPane(_ paneId: Int) -> Bool {
+            guard let surface = surface else { return false }
+            return ghostty_surface_tmux_set_active_pane(surface, paneId)
+        }
+        
+        /// Reset to render the main terminal (exit pane-specific view)
+        func resetActiveTmuxPane() {
+            guard let surface = surface else { return }
+            ghostty_surface_tmux_reset_active_pane(surface)
         }
         
         // MARK: - Search

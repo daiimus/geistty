@@ -84,15 +84,26 @@ class SSHSession: ObservableObject, Identifiable {
     private var tmuxSessionName: String?
     private var tmuxMode: TmuxMode = .none
     
-    // tmux Control Mode client (for .controlMode)
-    private var tmuxControlClient: TmuxControlClient?
+    // tmux Control Mode gateway (actor-based, replaces TmuxControlClient)
+    private var tmuxGateway: TmuxGateway?
+    
+    /// Task for consuming tmux gateway events
+    private var gatewayEventTask: Task<Void, Never>?
     
     /// tmux Session Manager for multi-pane state management
     /// Access this to get session/window/pane info and route output to surfaces
     private(set) var tmuxSessionManager: TmuxSessionManager?
     
-    // Whether control mode is actually active (tmux -CC has started)
+    /// Whether control mode is actually active and ready for input
+    /// Set to true when gateway emits .activated event (after first tmux response)
+    /// User input should NOT be sent via sendKeys until this is true
     private var controlModeActive: Bool = false
+    
+    /// Whether SSH data should be routed through the tmux gateway
+    /// Set to true when we first detect control mode protocol messages
+    /// This is separate from controlModeActive because data routing starts
+    /// before the gateway is fully ready to accept user input
+    private var controlModeDataRouting: Bool = false
     
     // Queue of input data waiting to be sent once control mode activates
     // This prevents input from going to tmux's command prompt before the shell is ready
@@ -145,9 +156,9 @@ class SSHSession: ObservableObject, Identifiable {
         // Reset reconnect attempts on successful connection
         reconnectAttempts = 0
         
-        // Initialize control client if using control mode
+        // Initialize gateway if using control mode
         if tmuxMode == .controlMode {
-            setupTmuxControlClient()
+            setupTmuxGateway()
         }
         
         // Inject shell initialization for best terminal experience
@@ -533,21 +544,132 @@ class SSHSession: ObservableObject, Identifiable {
     
     // MARK: - tmux Control Mode Setup
     
-    /// Set up the tmux control mode client
-    private func setupTmuxControlClient() {
-        logger.info("Setting up tmux control mode client")
-        tmuxControlClient = TmuxControlClient()
-        tmuxControlClient?.delegate = self
+    /// Set up the tmux control mode gateway (actor-based)
+    private func setupTmuxGateway() {
+        logger.info("Setting up tmux gateway (actor-based)")
+        
+        // Create the gateway actor
+        let gateway = TmuxGateway()
+        tmuxGateway = gateway
         
         // Set up session manager for multi-pane state tracking
-        tmuxSessionManager = TmuxSessionManager()
-        if let client = tmuxControlClient, let manager = tmuxSessionManager {
-            // Connect session manager to control client
-            client.sessionManager = manager
-            manager.setup(controlClient: client) { [weak self] command in
-                self?.writeControlCommand(command)
+        let manager = TmuxSessionManager()
+        tmuxSessionManager = manager
+        
+        // Connect session manager with sendCommand callback
+        // Note: We bridge via callback pattern since TmuxSessionManager is not yet fully migrated
+        manager.setupWithGateway(
+            sendCommand: { [weak self] command, callback in
+                guard self != nil else { return }
+                Task {
+                    do {
+                        let result = try await gateway.sendCommand(command)
+                        await MainActor.run { callback(.success(result)) }
+                    } catch {
+                        await MainActor.run { callback(.failure(error)) }
+                    }
+                }
+            },
+            write: { [weak self] command in
+                // Dispatch to MainActor since SSHSession is @MainActor isolated
+                Task { @MainActor in
+                    self?.writeControlCommand(command)
+                }
+            }
+        )
+        
+        // CRITICAL: Configure write callback before starting event loop
+        // This ensures sendKeys can work as soon as data arrives
+        Task { [weak self] in
+            await gateway.setWriteCallback { [weak self] command in
+                // Dispatch to MainActor since SSHSession is @MainActor isolated
+                Task { @MainActor in
+                    self?.writeControlCommand(command)
+                }
             }
         }
+        
+        // Start event loop after write callback is queued
+        startGatewayEventLoop(gateway: gateway)
+    }
+    
+    /// Start the async event loop for consuming gateway events
+    private func startGatewayEventLoop(gateway: TmuxGateway) {
+        gatewayEventTask?.cancel()
+        gatewayEventTask = Task { [weak self] in
+            for await event in await gateway.events {
+                guard let self = self else { break }
+                await self.handleGatewayEvent(event)
+            }
+        }
+    }
+    
+    /// Handle a single gateway event
+    @MainActor
+    private func handleGatewayEvent(_ event: TmuxGatewayEvent) {
+        switch event {
+        case .output(let paneId, let data):
+            // Route pane output through session manager
+            if let manager = tmuxSessionManager {
+                manager.routeOutput(data, to: paneId)
+            } else {
+                // Fallback: forward directly to delegate
+                delegate?.sshSession(self, didReceiveData: data)
+            }
+            
+        case .activated:
+            logger.info("🎉 Gateway activated - control mode ready! Setting controlModeActive=true")
+            controlModeActive = true
+            tmuxSessionManager?.controlModeActivated()
+            
+            // Flush queued input
+            flushPendingInput()
+            
+            // Enable pause mode for iOS lifecycle
+            Task {
+                await tmuxGateway?.enablePauseMode(pauseAfter: 1)
+            }
+            
+        case .sessionRestored(let paneId, let content):
+            logger.info("Session restored: \(content.count) chars for \(paneId)")
+            tmuxSessionManager?.historyRestoreComplete(for: paneId, content: content)
+            
+        case .layoutChanged(let windowId, let windowIndex, let layout):
+            tmuxSessionManager?.handleLayoutChanged(windowId: windowId, windowIndex: windowIndex, layout: layout)
+            
+        case .activePaneChanged(let windowId, let paneId):
+            tmuxSessionManager?.handleWindowPaneChanged(windowId: windowId, paneId: paneId)
+            
+        case .windowAdded(let windowId):
+            tmuxSessionManager?.handleWindowAdd(windowId: windowId)
+            
+        case .windowClosed(let windowId):
+            tmuxSessionManager?.handleWindowClose(windowId: windowId)
+            
+        case .sessionChanged(let sessionId, let sessionName):
+            tmuxSessionManager?.handleSessionChanged(sessionId: sessionId, sessionName: sessionName)
+            
+        case .exited(let reason):
+            logger.info("Gateway exited: \(reason ?? "unknown")")
+            controlModeActive = false
+            tmuxSessionManager?.controlModeExited(reason: reason)
+            delegate?.sshSession(self, didDisconnectWithError: SSHSessionError.tmuxExited(reason: reason))
+        }
+    }
+    
+    /// Flush pending input queue after control mode activates
+    private func flushPendingInput() {
+        guard !pendingInputQueue.isEmpty else { return }
+        
+        logger.info("Flushing \(pendingInputQueue.count) queued input chunks")
+        tmuxSessionManager?.clearPendingInputDisplay()
+        
+        for data in pendingInputQueue {
+            Task {
+                await tmuxGateway?.sendKeys(data)
+            }
+        }
+        pendingInputQueue.removeAll()
     }
     
     /// Inject commands to set up the terminal environment
@@ -606,11 +728,21 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Use control mode (-CC) for proper scrollback access
         // exec replaces the shell with tmux
-        let command = tmuxControlClient?.makeAttachCommand(session: sessionName) ?? "exec tmux -CC new-session -A -s \(sessionName)\n"
-        logger.info("Attaching to tmux in control mode: \(sessionName)")
-        // Write directly to connection - don't go through self.write() which would queue it!
-        if let data = command.data(using: .utf8) {
-            writeControlCommand(data)
+        if let gateway = tmuxGateway {
+            Task {
+                let command = await gateway.makeAttachCommand(session: sessionName)
+                if let data = command.data(using: .utf8) {
+                    writeControlCommand(data)
+                }
+            }
+            return
+        } else {
+            let command = "exec tmux -CC new-session -A -s \(sessionName)\n"
+            logger.info("Attaching to tmux in control mode: \(sessionName)")
+            // Write directly to connection - don't go through self.write() which would queue it!
+            if let data = command.data(using: .utf8) {
+                writeControlCommand(data)
+            }
         }
     }
     
@@ -627,7 +759,7 @@ class SSHSession: ObservableObject, Identifiable {
     }
     
     /// Capture the current tmux pane's scrollback content
-    /// Uses control mode's TmuxControlClient for proper protocol-based capture
+    /// Uses TmuxGateway for proper protocol-based capture
     /// - Parameter completion: Called with the captured text or error
     func captureTmuxPane(completion: @escaping (Result<String, Error>) -> Void) {
         logger.debug("captureTmuxPane: Called, tmuxMode=\(String(describing: self.tmuxMode))")
@@ -637,16 +769,21 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        guard tmuxMode == .controlMode, let client = tmuxControlClient else {
+        guard tmuxMode == .controlMode, let gateway = tmuxGateway else {
             logger.error("captureTmuxPane: Control mode not active")
             completion(.failure(NIOSSHError.channelError("tmux control mode not active")))
             return
         }
         
-        logger.info("captureTmuxPane: Using control mode")
-        client.capturePaneContent(via: { [weak self] cmd in
-            self?.write(cmd)
-        }, completion: completion)
+        logger.info("captureTmuxPane: Using gateway")
+        Task {
+            do {
+                let content = try await gateway.capturePane()
+                await MainActor.run { completion(.success(content)) }
+            } catch {
+                await MainActor.run { completion(.failure(error)) }
+            }
+        }
     }
     
     /// Resize the PTY
@@ -656,10 +793,18 @@ class SSHSession: ObservableObject, Identifiable {
         connection?.resizePTY(cols: cols, rows: rows)
         
         // Also notify tmux if in control mode
-        if controlModeActive, let client = tmuxControlClient {
-            client.resize(cols: cols, rows: rows) { [weak self] command in
-                self?.writeControlCommand(command)
+        if controlModeActive, tmuxGateway != nil {
+            Task {
+                await tmuxGateway?.resize(cols: cols, rows: rows)
             }
+        }
+    }
+    
+    /// Set the active pane for input routing in control mode
+    /// - Parameter paneId: The pane ID (e.g., "%0", "%1")
+    func setActivePaneId(_ paneId: String) {
+        Task {
+            await tmuxGateway?.setActivePaneId(paneId)
         }
     }
     
@@ -680,11 +825,11 @@ class SSHSession: ObservableObject, Identifiable {
         
         // In control mode, user input must go through send-keys command
         // Raw characters would be interpreted as tmux control commands!
-        // Use tmuxControlClient.isActive (not controlModeActive) to ensure tmux
-        // has completed its initial %begin/%end handshake and is ready for commands.
-        if let client = tmuxControlClient, client.isActive {
-            client.sendKeys(data) { [weak self] command in
-                self?.performWrite(command, originalData: data)
+        // Use controlModeActive to ensure tmux is ready
+        if controlModeActive, tmuxGateway != nil {
+            logger.info("⌨️ Routing \(data.count) bytes through gateway.sendKeys")
+            Task {
+                await tmuxGateway?.sendKeys(data)
             }
             return
         }
@@ -692,8 +837,8 @@ class SSHSession: ObservableObject, Identifiable {
         // If we're in control mode but tmux isn't ready yet, queue the input
         // This prevents input from being sent before tmux is ready for send-keys
         if tmuxMode == .controlMode {
-            // Either control client doesn't exist yet, or it exists but isn't active
-            logger.debug("Control mode pending (isActive=\(tmuxControlClient?.isActive ?? false)), queueing \(data.count) bytes of input")
+            // Either gateway doesn't exist yet, or control mode isn't active
+            logger.info("⌨️ Control mode pending (controlModeActive=\(controlModeActive), gateway=\(tmuxGateway != nil)), queueing \(data.count) bytes of input")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
             return
@@ -750,10 +895,9 @@ class SSHSession: ObservableObject, Identifiable {
         }
         
         // In control mode, user input must go through send-keys command
-        // Use tmuxControlClient.isActive to ensure tmux is ready for commands
-        if let client = tmuxControlClient, client.isActive {
-            client.sendKeys(data) { [weak self] command in
-                self?.performWrite(command, originalData: data)
+        if controlModeActive, tmuxGateway != nil {
+            Task {
+                await tmuxGateway?.sendKeys(data)
             }
             return
         }
@@ -829,8 +973,12 @@ class SSHSession: ObservableObject, Identifiable {
     func disconnect() {
         controlModeActive = false
         pendingInputQueue.removeAll()
-        tmuxControlClient?.reset()
-        tmuxControlClient = nil
+        gatewayEventTask?.cancel()
+        gatewayEventTask = nil
+        Task {
+            await tmuxGateway?.reset()
+        }
+        tmuxGateway = nil
         tmuxSessionManager?.cleanup()
         tmuxSessionManager = nil
         connection?.disconnect()
@@ -860,8 +1008,8 @@ class SSHSession: ObservableObject, Identifiable {
     /// In tmux control mode, this resumes paused panes to prevent
     /// the pause timeout from triggering unnecessarily.
     func appWillResignActive() {
-        guard controlModeActive, let client = tmuxControlClient else { return }
-        logger.info("App resigning active, pause mode is \(client.isPauseEnabled ? "enabled" : "disabled")")
+        guard controlModeActive, tmuxGateway != nil else { return }
+        logger.info("App resigning active, pause mode enabled")
         // Pause mode is already enabled - tmux will auto-pause after the timeout
         // No additional action needed here
     }
@@ -878,11 +1026,11 @@ class SSHSession: ObservableObject, Identifiable {
         }
         
         // If connection is alive and tmux is active, just resume paused panes
-        if isConnectionAlive, controlModeActive, let client = tmuxControlClient {
+        if isConnectionAlive, controlModeActive, tmuxGateway != nil {
             logger.info("🔄 Connection alive, resuming paused panes")
-            client.resumeAllPausedPanes(via: { [weak self] command in
-                self?.writeControlCommand(command)
-            })
+            Task {
+                await tmuxGateway?.resumeAllPausedPanes()
+            }
             return
         }
         
@@ -914,8 +1062,12 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
         controlModeActive = false
-        tmuxControlClient?.reset()
-        tmuxControlClient = nil
+        gatewayEventTask?.cancel()
+        gatewayEventTask = nil
+        Task {
+            await tmuxGateway?.reset()
+        }
+        tmuxGateway = nil
         connection?.disconnect()
         connection = nil
         
@@ -959,7 +1111,7 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Re-setup tmux control mode
         if tmuxMode == .controlMode {
-            setupTmuxControlClient()
+            setupTmuxGateway()
         }
         
         // Re-attach to tmux session
@@ -968,28 +1120,63 @@ class SSHSession: ObservableObject, Identifiable {
     
     // Internal method to handle received data, called from connection delegate
     fileprivate func handleReceivedData(_ data: Data) {
-        // If control mode is active, route through the control client
-        if controlModeActive, let client = tmuxControlClient {
-            // Control client will parse the data and forward pane output via delegate
-            client.parse(data)
+        // Debug: log what we receive
+        if let str = String(data: data, encoding: .utf8) {
+            logger.info("📥 handleReceivedData: \(data.count) bytes, controlModeDataRouting=\(self.controlModeDataRouting), tmuxMode=\(String(describing: self.tmuxMode))")
+            logger.info("📥 Content preview: \(str.prefix(200))")
+        }
+        
+        // If control mode data routing is active, send through the gateway
+        if controlModeDataRouting, let gateway = tmuxGateway {
+            // Gateway will parse the data and emit events via AsyncStream
+            logger.info("📥 Routing to gateway")
+            Task {
+                await gateway.receive(data)
+            }
             return
         }
         
         // Check if this data contains the start of control mode
-        // tmux -CC sends control messages starting with %
-        if tmuxMode == .controlMode, !controlModeActive {
+        // tmux -CC sends control messages starting with % at line start
+        // Common first messages: %begin, %session-changed, %output, %layout-change
+        if tmuxMode == .controlMode, !controlModeDataRouting {
             if let str = String(data: data, encoding: .utf8) {
-                if str.contains("%begin") || str.contains("%output") || str.contains("%session") {
-                    logger.info("Control mode detected! Activating control client.")
-                    controlModeActive = true
-                    tmuxControlClient?.parse(data)
+                // Check for any tmux control mode message (line starting with %)
+                // Also check raw string contains % near a newline (handles \r\n)
+                let hasControlMessage = str.contains("\n%") || str.contains("\r%") || str.hasPrefix("%")
+                
+                logger.info("📥 Checking for control mode: hasControlMessage=\(hasControlMessage)")
+                
+                if hasControlMessage {
+                    logger.info("✅ Control mode detected! Starting data routing to gateway.")
+                    // Start routing data through the gateway
+                    // NOTE: controlModeActive remains false until gateway emits .activated
+                    // This means user input will be queued until the gateway is fully ready
+                    controlModeDataRouting = true
+                    Task {
+                        await tmuxGateway?.receive(data)
+                    }
                     return
                 }
             }
-            // Before control mode activates, forward all data to terminal normally
-            // This shows MOTD, prompt, command echo - standard SSH behavior
+            // In control mode but haven't detected % messages yet.
+            // This is pre-control-mode data (MOTD, shell prompt, command echo).
+            // IMPORTANT: Do NOT forward this to Ghostty if it contains DCS 1000 p
+            // because that would trigger Ghostty's internal tmux control mode parser,
+            // which conflicts with our Swift-side TmuxGateway parsing.
+            if let str = String(data: data, encoding: .utf8) {
+                // DCS 1000 p is ESC P 1000 p = \x1bP1000p
+                // Check for this sequence and don't forward it
+                if str.contains("\u{1b}P1000p") || str.contains("\u{1b}P1000;") {
+                    logger.info("⚠️ Filtering out DCS 1000p (tmux control mode entry) from Ghostty")
+                    // Don't forward - wait for % messages to start gateway routing
+                    return
+                }
+            }
+            // Forward non-DCS data normally (MOTD, prompt, etc)
         }
         
+        logger.info("📥 Forwarding to delegate")
         delegate?.sshSession(self, didReceiveData: data)
     }
 }
@@ -1037,6 +1224,13 @@ extension SSHSession: NIOSSHConnectionDelegate {
             self.connectionHealth = health
             logger.info("🔌 Connection health changed: \(String(describing: health))")
             
+            // Update gateway health (actor-isolated)
+            if let gateway = self.tmuxGateway {
+                Task {
+                    await gateway.updateHealth(health)
+                }
+            }
+            
             // Notify delegate
             self.delegate?.sshSession(self, healthDidChange: health)
             
@@ -1046,9 +1240,9 @@ extension SSHSession: NIOSSHConnectionDelegate {
                 self.tmuxSessionManager?.clearPendingInputDisplay()
                 
                 for data in self.pendingInputQueue {
-                    if let client = self.tmuxControlClient, client.isActive {
-                        client.sendKeys(data) { [weak self] command in
-                            self?.performWrite(command, originalData: data)
+                    if self.controlModeActive, let gateway = self.tmuxGateway {
+                        Task {
+                            await gateway.sendKeys(data)
                         }
                     } else {
                         self.performWrite(data, originalData: data)
@@ -1060,101 +1254,3 @@ extension SSHSession: NIOSSHConnectionDelegate {
     }
 }
 
-// MARK: - TmuxControlClientDelegate
-
-extension SSHSession: TmuxControlClientDelegate {
-    func tmuxClient(_ client: TmuxControlClient, didReceivePaneOutput data: Data, paneId: String) {
-        // Route pane output through session manager
-        // The session manager handles routing to the appropriate Ghostty surface
-        if let manager = tmuxSessionManager {
-            manager.routeOutput(data, to: paneId)
-        } else {
-            // Fallback: if no session manager, forward directly to delegate
-            delegate?.sshSession(self, didReceiveData: data)
-        }
-    }
-    
-    func tmuxClientDidActivate(_ client: TmuxControlClient) {
-        // Control mode is now fully active - the first %begin/%end block has completed
-        // This means tmux has finished its initial response and is ready for commands
-        logger.info("Control mode fully activated")
-        
-        // Notify session manager
-        tmuxSessionManager?.controlModeActivated()
-        
-        // Flush any queued input that came in before control mode was ready
-        if !pendingInputQueue.isEmpty {
-            logger.info("Flushing \(self.pendingInputQueue.count) queued input chunks")
-            
-            // Clear the pending input display before flushing
-            tmuxSessionManager?.clearPendingInputDisplay()
-            
-            for data in pendingInputQueue {
-                client.sendKeys(data) { [weak self] command in
-                    self?.performWrite(command, originalData: data)
-                }
-            }
-            pendingInputQueue.removeAll()
-        }
-        
-        // Note: Session history restoration is now handled per-pane in TmuxSessionManager
-        // when surfaces are created. This ensures all panes get their history, not just %0.
-        
-        // Enable pause mode for iOS app lifecycle handling (tmux 3.2+)
-        // This buffers output when the app is backgrounded
-        client.enablePauseMode(pauseAfter: 1) { [weak self] command in
-            self?.writeControlCommand(command)
-        }
-    }
-    
-    func tmuxClient(_ client: TmuxControlClient, didRestoreSession content: String, paneId: String, paneState: TmuxControlClient.PaneState?) {
-        // Session content has been restored from capture-pane
-        // Feed it to the terminal so the user sees their session history
-        logger.info("Restoring session content to terminal: \(content.count) chars for pane \(paneId)")
-        
-        // Route through TmuxSessionManager which handles:
-        // 1. Clearing the screen
-        // 2. Feeding history content
-        // 3. Flushing any buffered live output that arrived during capture
-        if let manager = tmuxSessionManager {
-            manager.historyRestoreComplete(for: paneId, content: content)
-        } else {
-            // Fallback for non-tmux mode (shouldn't happen in practice)
-            logger.warning("No tmux session manager, using delegate fallback for session restore")
-            let clearScreen = "\u{1b}[2J\u{1b}[H"
-            if let clearData = clearScreen.data(using: .utf8) {
-                delegate?.sshSession(self, didReceiveData: clearData)
-            }
-            if !content.isEmpty {
-                let terminalContent = content.replacingOccurrences(of: "\n", with: "\r\n")
-                if let data = terminalContent.data(using: .utf8) {
-                    delegate?.sshSession(self, didReceiveData: data)
-                }
-            }
-        }
-    }
-    
-    func tmuxClient(_ client: TmuxControlClient, commandDidComplete commandId: String, response: String) {
-        logger.debug("tmux command completed: \(commandId) - \(response.prefix(100))")
-    }
-    
-    func tmuxClient(_ client: TmuxControlClient, commandDidFail commandId: String, error: String) {
-        logger.error("tmux command failed: \(commandId) - \(error)")
-    }
-    
-    func tmuxClientDidExit(_ client: TmuxControlClient, reason: String?) {
-        let reasonText = reason ?? "no reason"
-        logger.info("tmux control mode exited: \(reasonText)")
-        
-        // Reset control mode state
-        controlModeActive = false
-        tmuxControlClient?.reset()
-        
-        // Notify session manager with reason
-        tmuxSessionManager?.controlModeExited(reason: reason)
-        
-        // Notify delegate - this will typically trigger disconnect handling
-        // The SSH connection is still open, but tmux has terminated
-        delegate?.sshSession(self, didDisconnectWithError: SSHSessionError.tmuxExited(reason: reason))
-    }
-}
