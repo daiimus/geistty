@@ -158,10 +158,7 @@ class TmuxSessionManager: ObservableObject {
     /// Debounce task for layout changes to prevent UI thrashing
     private var layoutDebounceTask: Task<Void, Never>?
     
-    // MARK: - Control Client
-    
-    /// The control client for parsing tmux protocol
-    private var controlClient: TmuxControlClient?
+    // MARK: - Gateway Connection
     
     /// Write function to send data to SSH
     private var writeToSSH: ((String) -> Void)?
@@ -178,27 +175,16 @@ class TmuxSessionManager: ObservableObject {
     
     // MARK: - Connection
     
-    /// Set up the session manager with a control client (legacy)
-    func setup(controlClient: TmuxControlClient, write: @escaping (String) -> Void) {
-        self.controlClient = controlClient
-        self.writeToSSH = write
-        
-        // Set ourselves as the delegate for relevant events
-        // Note: SSHSession is still the primary delegate, but it forwards to us
-        
-        logger.info("TmuxSessionManager connected to control client")
-    }
-    
     /// Callback type for async command responses
     typealias CommandCallback = (Result<String, Error>) -> Void
     
     /// Function type for sending commands with callback
     typealias SendCommandFunc = (String, @escaping CommandCallback) -> Void
     
-    /// Send command function (used when gateway is the backend)
+    /// Send command function (provided by TmuxGateway)
     private var sendCommandFunc: SendCommandFunc?
     
-    /// Set up the session manager with gateway (actor-based, new approach)
+    /// Set up the session manager with gateway (actor-based)
     /// - Parameters:
     ///   - sendCommand: Function to send commands and receive responses
     ///   - write: Function to write raw strings to SSH (for fire-and-forget)
@@ -208,46 +194,31 @@ class TmuxSessionManager: ObservableObject {
     ) {
         self.sendCommandFunc = sendCommand
         self.writeToSSH = write
-        self.controlClient = nil  // No longer using TmuxControlClient
         
         logger.info("TmuxSessionManager connected to gateway")
     }
     
     // MARK: - Command Abstraction
     
-    /// Send a command and receive a response (works with both legacy client and gateway)
+    /// Send a command and receive a response
     private func sendCommand(_ command: String, completion: @escaping CommandCallback) {
-        // Try new gateway-style first
-        if let sendFunc = sendCommandFunc, let write = writeToSSH {
-            sendFunc(command, completion)
+        guard let sendFunc = sendCommandFunc else {
+            logger.warning("Cannot send command - no gateway available")
+            completion(.failure(TmuxGatewayError.notConnected))
             return
         }
         
-        // Fall back to legacy control client
-        if let client = controlClient, let write = writeToSSH {
-            client.sendCommand(command, via: write, completion: completion)
-            return
-        }
-        
-        logger.warning("Cannot send command - no client or gateway available")
-        completion(.failure(TmuxGatewayError.notConnected))
+        sendFunc(command, completion)
     }
     
     /// Send a fire-and-forget command (no response expected)
     private func sendCommandFireAndForget(_ command: String) {
-        // For gateway mode, use writeToSSH directly (gateway handles newline)
-        if sendCommandFunc != nil, let write = writeToSSH {
-            write("\(command)\n")
+        guard let write = writeToSSH else {
+            logger.warning("Cannot send fire-and-forget command - no write function available")
             return
         }
         
-        // Fall back to legacy control client
-        if let client = controlClient, let write = writeToSSH {
-            client.sendCommandFireAndForget(command, via: write)
-            return
-        }
-        
-        logger.warning("Cannot send fire-and-forget command - no client or gateway available")
+        write("\(command)\n")
     }
     
     /// Called when control mode becomes active
@@ -319,8 +290,8 @@ class TmuxSessionManager: ObservableObject {
     /// Refresh all state from tmux server
     /// Uses proper command routing so responses don't interfere with session restore
     func refreshState() {
-        guard writeToSSH != nil || controlClient != nil else {
-            logger.warning("Cannot refresh state: no client or gateway available")
+        guard writeToSSH != nil else {
+            logger.warning("Cannot refresh state: no write callback available")
             return
         }
         
