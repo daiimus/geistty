@@ -101,6 +101,9 @@ class SSHSession: ObservableObject, Identifiable {
     // Connection
     private var connection: NIOSSHConnection?
     
+    /// Exposed connection for SFTP (read-only access to create additional channels)
+    var sshConnection: NIOSSHConnection? { connection }
+    
     // Connection parameters (stored after connect)
     private(set) var host: String = ""
     private(set) var port: Int = 22

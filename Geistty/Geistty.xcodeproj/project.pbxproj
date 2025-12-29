@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */; };
 		A10000A0 /* FontMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A0 /* FontMapping.swift */; };
-		A10000A1 /* ShakeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A1 /* ShakeDetector.swift */; };
 		A10000A2 /* KeyTableIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A2 /* KeyTableIndicatorView.swift */; };
 		B1000001 /* GeisttyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* GeisttyUITests.swift */; };
 		B1000002 /* TmuxPaneUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* TmuxPaneUITests.swift */; };
@@ -32,7 +31,7 @@
 		A1000030 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* ConnectionListView.swift */; };
 		A1000031 /* ConnectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* ConnectionEditorView.swift */; };
 		A1000040 /* SFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* SFTPClient.swift */; };
-		A1000041 /* SFTPBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* SFTPBrowserView.swift */; };
+		A1000042 /* SFTPChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* SFTPChannel.swift */; };
 		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
 		A1000060 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* Theme.swift */; };
 		A1000061 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* Themes */; };
@@ -113,7 +112,6 @@
 		A2000030 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
 		A2000031 /* ConnectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEditorView.swift; sourceTree = "<group>"; };
 		A2000040 /* SFTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPClient.swift; sourceTree = "<group>"; };
-		A2000041 /* SFTPBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPBrowserView.swift; sourceTree = "<group>"; };
 		A2000050 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000060 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A2000061 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
@@ -139,7 +137,6 @@
 		A2000088 /* TmuxWindowPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowPickerView.swift; sourceTree = "<group>"; };
 		A2000090 /* NIOSSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NIOSSHConnection.swift; sourceTree = "<group>"; };
 		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
-		A20000A1 /* ShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShakeDetector.swift; sourceTree = "<group>"; };
 		A20000A2 /* KeyTableIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTableIndicatorView.swift; sourceTree = "<group>"; };
 		A2000093 /* TmuxGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxGateway.swift; sourceTree = "<group>"; };
 		A2000094 /* TmuxProtocolParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxProtocolParser.swift; sourceTree = "<group>"; };
@@ -269,7 +266,6 @@
 				A2000031 /* ConnectionEditorView.swift */,
 				A20000A2 /* KeyTableIndicatorView.swift */,
 				A2000050 /* SettingsView.swift */,
-				A20000A1 /* ShakeDetector.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -295,11 +291,12 @@
 			path = GeisttyUITests;
 			sourceTree = "<group>";
 		};
+		A2000042 /* SFTPChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPChannel.swift; sourceTree = "<group>"; };
 		A5000011 /* SFTP */ = {
 			isa = PBXGroup;
 			children = (
 				A2000040 /* SFTPClient.swift */,
-				A2000041 /* SFTPBrowserView.swift */,
+				A2000042 /* SFTPChannel.swift */,
 			);
 			path = SFTP;
 			sourceTree = "<group>";
@@ -464,7 +461,6 @@
 				A1000080 /* SurfaceSearchOverlay.swift in Sources */,
 				A1000003 /* TerminalContainerView.swift in Sources */,
 				A1000004 /* SSHSession.swift in Sources */,
-				A1000005 /* SSHConnection.swift in Sources */,
 				A1000090 /* NIOSSHConnection.swift in Sources */,
 				A1000084 /* TmuxLayout.swift in Sources */,
 				A1000082 /* TmuxModels.swift in Sources */,
@@ -483,9 +479,8 @@
 				A1000030 /* ConnectionListView.swift in Sources */,
 				A1000031 /* ConnectionEditorView.swift in Sources */,
 				A1000040 /* SFTPClient.swift in Sources */,
-				A1000041 /* SFTPBrowserView.swift in Sources */,
+				A1000042 /* SFTPChannel.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
-				A10000A1 /* ShakeDetector.swift in Sources */,
 				A10000A2 /* KeyTableIndicatorView.swift in Sources */,
 				A1000060 /* Theme.swift in Sources */,
 			);

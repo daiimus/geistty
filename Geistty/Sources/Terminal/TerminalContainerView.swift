@@ -136,7 +136,7 @@ class TerminalViewModel: ObservableObject {
     private var fontSizeCancellable: AnyCancellable?
     
     /// The SSH session
-    private var sshSession: SSHSession?
+    private(set) var sshSession: SSHSession?
     
     /// Terminal dimensions
     private var cols: Int = 80
@@ -1371,8 +1371,9 @@ class RawTerminalUIViewController: UIViewController {
     
     private func toggleSecureKeyboardEntry() {
         secureKeyboardEntry.toggle()
-        // TODO: Actually implement secure keyboard entry
-        // This would prevent other apps from seeing keystrokes
+        // Note: On iOS, keyboard input is already sandboxed per-app.
+        // There's no system API equivalent to macOS "Secure Keyboard Entry".
+        // This toggle is kept for UI parity but has no effect.
     }
     
     private func showKeyboardShortcutsHelp() {

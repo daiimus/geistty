@@ -65,7 +65,6 @@ Geistty/
 - `Sources/Ghostty/Ghostty.swift` - Main Ghostty integration, Config, App, Surface
 - `Sources/Ghostty/FontMapping.swift` - Centralized font name mapping (GUI ↔ Ghostty/CoreText)
 - `Sources/Terminal/TerminalContainerView.swift` - Terminal session UI
-- `Sources/Terminal/ShakeDetector.swift` - Shake gesture detection for "shake to clear"
 - `Sources/Terminal/KeyTableIndicatorView.swift` - Vim-style key table indicator
 - `Sources/SSH/NIOSSHConnection.swift` - SwiftNIO-SSH connection with Network.framework
 - `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux integration, data flow
@@ -75,6 +74,8 @@ Geistty/
 - `Sources/SSH/TmuxSessionManager.swift` - Multi-pane state management, surface ownership
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
 - `Sources/UI/SettingsView.swift` - App settings UI
+- `Sources/SFTP/SFTPChannel.swift` - Low-level SFTP protocol implementation
+- `Sources/SFTP/SFTPClient.swift` - High-level async SFTP API (for future File Provider)
 
 ## Ghostty C API Usage
 
@@ -276,7 +277,7 @@ logger.error("Error: \(error.localizedDescription)")
 logger.debug("Debug details: \(someValue)")
 ```
 
-Existing categories: `Ghostty`, `Terminal`, `NIOSSHConnection`, `SSHSession`, `SFTP`, `SFTPBrowser`, `SSHKey`, `Credentials`, `Keychain`
+Existing categories: `Ghostty`, `Terminal`, `NIOSSHConnection`, `SSHSession`, `SFTP`, `SSHKey`, `Credentials`, `Keychain`
 
 ### SwiftNIO-SSH Debugging
 
