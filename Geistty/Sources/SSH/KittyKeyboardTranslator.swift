@@ -458,15 +458,3 @@ enum FunctionalKey {
         }
     }
 }
-
-// MARK: - Passthrough Translator
-
-/// A no-op translator that passes data through unchanged
-/// Useful for terminals that support the Kitty protocol natively
-public struct PassthroughKeyboardTranslator: KeyboardTranslator, Sendable {
-    public init() {}
-    
-    public func translate(_ data: Data) -> Data {
-        return data
-    }
-}

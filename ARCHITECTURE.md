@@ -99,10 +99,10 @@ _ghostty_surface_set_size # Resize terminal
 
 ### 2. Ghostty Swift Wrappers
 
-The Ghostty C API is wrapped in two Swift files for full API parity:
+The Ghostty C API is wrapped in Swift for iOS integration:
 
 - **`Ghostty.swift`** - Main implementation (Config, App, SurfaceView classes)
-- **`GhosttyAPI.swift`** - Extended API wrappers for complete parity
+- **`FontMapping.swift`** - Centralized font name mapping (GUI ↔ CoreText)
 
 See [GHOSTTY_API.md](Geistty/GHOSTTY_API.md) for detailed API coverage.
 

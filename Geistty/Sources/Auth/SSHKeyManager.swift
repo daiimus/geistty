@@ -12,15 +12,6 @@ import os.log
 
 private let logger = Logger(subsystem: "com.geistty", category: "SSHKey")
 
-// Helper for printing to stderr (always visible in console)
-var standardError = FileHandle.standardError
-extension FileHandle: @retroactive TextOutputStream {
-    public func write(_ string: String) {
-        let data = Data(string.utf8)
-        self.write(data)
-    }
-}
-
 /// Types of SSH keys we support
 enum SSHKeyType: String, CaseIterable, Identifiable {
     case ed25519 = "ed25519"
@@ -210,52 +201,38 @@ class SSHKeyManager: ObservableObject {
     
     /// Import a private key from PEM data
     func importKey(name: String, pemData: Data, passphrase: String? = nil) throws -> SSHKeyPair {
-        // FORCE print to stderr which always shows
-        print("🚨🚨🚨 IMPORT KEY CALLED: \(name), \(pemData.count) bytes", to: &standardError)
         logger.info("📥 Importing key: \(name), data size: \(pemData.count) bytes")
         
         guard let pemString = String(data: pemData, encoding: .utf8) else {
-            print("🚨 FAILED UTF8 DECODE", to: &standardError)
             logger.error("📥 Failed to decode key as UTF-8")
             throw SSHKeyError.invalidKeyFormat
         }
         
-        print("🚨 PEM first 50 chars: \(pemString.prefix(50))", to: &standardError)
-        print("🚨 Contains OPENSSH: \(pemString.contains("OPENSSH PRIVATE KEY"))", to: &standardError)
-        print("🚨 Contains RSA: \(pemString.contains("RSA PRIVATE KEY"))", to: &standardError)
-        
-        logger.info("📥 PEM preview: \(String(pemString.prefix(100)))...")
+        logger.debug("📥 PEM preview: \(String(pemString.prefix(100)))...")
         
         // Detect key type from PEM header and content
         let type: SSHKeyType
         if pemString.contains("OPENSSH PRIVATE KEY") {
-            print("🚨 BRANCH: OpenSSH format", to: &standardError)
             logger.info("📥 Detected OpenSSH format, parsing binary...")
             // Parse OpenSSH format to detect actual key type
             if let detected = detectOpenSSHKeyType(pemString) {
                 type = detected
-                print("🚨 DETECTED TYPE: \(type.rawValue)", to: &standardError)
                 logger.info("📥 ✅ Detected key type: \(type.rawValue) (\(type.displayName))")
             } else {
-                print("🚨 DETECTION FAILED, defaulting to ed25519", to: &standardError)
                 logger.error("📥 ❌ Failed to detect OpenSSH key type! Defaulting to ed25519")
                 type = .ed25519
             }
         } else if pemString.contains("RSA PRIVATE KEY") {
-            print("🚨 BRANCH: RSA PEM format", to: &standardError)
             type = .rsa4096
             logger.info("📥 Detected RSA PEM format")
         } else if pemString.contains("EC PRIVATE KEY") {
-            print("🚨 BRANCH: EC PEM format", to: &standardError)
             type = .ed25519 // Map ECDSA to ed25519 for display purposes
             logger.info("📥 Detected EC PEM format")
         } else {
-            print("🚨 BRANCH: Unknown format!", to: &standardError)
             logger.error("📥 Unknown key format! Headers: \(pemString.prefix(200))")
             throw SSHKeyError.unsupportedKeyType
         }
         
-        print("🚨 FINAL TYPE: \(type.rawValue)", to: &standardError)
         logger.info("📥 Final key type: \(type.rawValue)")
         
         // Save to Keychain
@@ -323,7 +300,7 @@ class SSHKeyManager: ObservableObject {
         guard keyData.count > magicBytes.count else { return nil }
         
         var offset = magicBytes.count
-        logger.info("🔍 After magic, offset=\(offset)")
+        logger.debug("🔍 After magic, offset=\(offset)")
         
         // Helper to read uint32 big-endian
         func readUInt32() -> UInt32? {
@@ -347,32 +324,26 @@ class SSHKeyManager: ObservableObject {
         // Skip: ciphername, kdfname, kdfoptions
         let cipher = readString()
         let kdf = readString()
-        print("🚨 cipher='\(cipher ?? "nil")', kdf='\(kdf ?? "nil")'", to: &standardError)
-        logger.info("🔍 cipher='\(cipher ?? "nil")', kdf='\(kdf ?? "nil")'")
+        logger.debug("🔍 cipher='\(cipher ?? "nil")', kdf='\(kdf ?? "nil")'")
         
         guard let kdfOptionsLen = readUInt32() else { return nil }
         offset += Int(kdfOptionsLen) // skip kdf options
-        print("🚨 kdfOptionsLen=\(kdfOptionsLen), offset=\(offset)", to: &standardError)
-        logger.info("🔍 After kdf options, offset=\(offset)")
+        logger.debug("🔍 After kdf options, offset=\(offset)")
         
         // Number of keys
         guard let numKeys = readUInt32(), numKeys >= 1 else { return nil }
-        print("🚨 numKeys=\(numKeys)", to: &standardError)
-        logger.info("🔍 numKeys=\(numKeys)")
+        logger.debug("🔍 numKeys=\(numKeys)")
         
         // Public key blob length
         guard let pubKeyLen = readUInt32(), pubKeyLen > 4 else { return nil }
-        print("🚨 pubKeyLen=\(pubKeyLen), offset=\(offset)", to: &standardError)
-        logger.info("🔍 pubKeyLen=\(pubKeyLen), offset=\(offset)")
+        logger.debug("🔍 pubKeyLen=\(pubKeyLen), offset=\(offset)")
         
         // First field in public key blob is the key type
         guard let keyType = readString() else {
-            print("🚨 FAILED to read keyType string!", to: &standardError)
             logger.error("🔍 Failed to read key type string")
             return nil
         }
         
-        print("🚨 keyType from public blob: '\(keyType)'", to: &standardError)
         logger.info("🔍 OpenSSH key type from binary: '\(keyType)'")
         
         switch keyType {

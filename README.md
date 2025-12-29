@@ -167,19 +167,18 @@ geistty/
 │       │   ├── CredentialProvider.swift
 │       │   ├── KeychainManager.swift
 │       │   └── SSHKeyManager.swift
-│       ├── Ghostty/
-│       │   ├── Ghostty.swift         # Swift wrapper for libghostty
+       │   ├── Ghostty/
+       │   │   ├── Ghostty.swift         # Swift wrapper for libghostty
        │   ├── FontMapping.swift     # Centralized font name mapping
        │   └── GhosttyTerminalView.swift
        ├── SFTP/
-       │   ├── SFTPClient.swift
-       │   └── SFTPBrowserView.swift
+       │   ├── SFTPChannel.swift     # SFTP protocol (for future File Provider)
+       │   └── SFTPClient.swift
        ├── SSH/
        │   ├── NIOSSHConnection.swift # SwiftNIO-SSH wrapper
        │   └── SSHSession.swift       # High-level session manager
        ├── Terminal/
        │   ├── TerminalContainerView.swift
-       │   ├── ShakeDetector.swift    # Shake gesture detection
        │   └── KeyTableIndicatorView.swift
 │       └── UI/
 │           ├── ConnectionEditorView.swift
