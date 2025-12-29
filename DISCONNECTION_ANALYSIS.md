@@ -1,9 +1,17 @@
 # Disconnection Handling Analysis
 
-> **Note (Dec 2024):** Geistty has migrated from libssh2 to SwiftNIO-SSH. Some code examples
-> in this document reference the old libssh2 implementation for historical context. The
-> architecture recommendations (Part 4+) remain relevant and are being implemented with
-> SwiftNIO-SSH's native Network.framework support.
+> **Status (Dec 2025):** This document is **partially historical**. Geistty migrated from libssh2 to
+> SwiftNIO-SSH in Dec 2024, and from TmuxControlClient to actor-based TmuxGateway in Dec 2025.
+> 
+> **Still Relevant:**
+> - Part 4+ architecture recommendations (connection health, command queue pause/resume)
+> - The SwiftNIO-SSH + Network.framework path monitoring approach
+> - ConnectionHealth enum (`healthy`, `stale`, `dead`) - now implemented
+> 
+> **Historical (for reference only):**
+> - libssh2 code examples in Parts 1-3
+> - SSHConnection class (replaced by NIOSSHConnection)
+> - TmuxControlClient (replaced by TmuxGateway actor)
 
 ## Executive Summary
 

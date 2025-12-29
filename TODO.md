@@ -12,7 +12,29 @@ This document tracks the development progress for the Ghostty iOS SSH Terminal p
 
 These are the current focus areas before continuing with other roadmap items:
 
-### 🐛 CRITICAL: Multi-Pane Dimension Bug
+### ✅ TmuxGateway Migration - COMPLETE (Dec 28, 2025)
+See [Architecture: tmux Layer Alignment](#-architecture-tmux-layer-alignment--in-progress) for details.
+
+### 🧹 Code Review Findings (Dec 28, 2025)
+
+Comprehensive code review after TmuxGateway migration identified these items:
+
+| Priority | Task | Effort | Status |
+|----------|------|--------|--------|
+| High | Remove `TmuxControlClient.swift` (749 lines) - replaced by TmuxGateway | Low | 🔲 |
+| High | Add state enum for control mode flags (`controlModeActive`/`controlModeDataRouting` → `ControlModeState`) | Low | 🔲 |
+| Medium | Split `TmuxSessionManager.swift` (1831 lines) into smaller components | High | 🔲 |
+| Medium | Fix SwiftUI AttributeGraph cycles (see Known Issues) | Medium | 🔲 |
+| Low | Migrate callback bridges to async/await in TmuxSessionManager | Medium | 🔲 |
+| Low | Fix SF Mono font config (currently falls back to JetBrains Mono) | Low | 🔲 |
+
+**Architecture Assessment:**
+- **Architecture: 8/10** - Clean separation, proper actor isolation, follows Ghostty patterns
+- **Code Quality: 7.5/10** - Well-documented, consistent logging, some legacy cruft
+- **Robustness: 8/10** - Good error handling, health monitoring, reconnect logic
+- **Maintainability: 7/10** - TmuxSessionManager is large, some callback tech debt
+
+### 🐛 KNOWN: Multi-Pane Dimension Bug
 **Symptom:** After splitting, panes don't use full available screen space.
 Both panes appear undersized - neither fills its allocated area.
 
@@ -121,7 +143,7 @@ User Input ← Ghostty externalWriteCallback ← surface.onWrite ← sendInput()
   - Keep factory pattern but delegate to SurfaceManager
   - Future: enable surface reuse across reconnects
 
-#### Phase 4: Full Migration ✅ COMPLETE (Jan 2025)
+#### Phase 4: Full Migration ✅ COMPLETE (Dec 28, 2025)
 SSHSession now uses TmuxGateway actor instead of TmuxControlClient.
 
 **Changes Made:**
@@ -134,6 +156,11 @@ SSHSession now uses TmuxGateway actor instead of TmuxControlClient.
 - TmuxSessionManager has `setupWithGateway()` method for callback-based commands
 - Added helper methods `sendCommand()` and `sendCommandFireAndForget()` that abstract
   over both legacy TmuxControlClient and new TmuxGateway
+
+**Critical Bug Fix:**
+- Added DCS 1000p filter in `SSHSession.handleReceivedData()` to prevent Ghostty's internal
+  tmux parser from conflicting with Swift's TmuxGateway. This was causing `GHOSTTY PANIC:
+  reached unreachable code` crashes when running commands in tmux control mode.
 
 **Data Flow (New):**
 ```
@@ -149,11 +176,12 @@ SSH Server → NIOSSHConnection → SSHSession → TmuxGateway.receive()
 ```
 
 **Related Files:**
-- `TmuxGateway.swift` - Actor with command queue, health observation
-- `TmuxProtocolParser.swift` - Pure synchronous protocol parser
-- `KittyKeyboardTranslator.swift` - Keyboard translation
-- `SSHSession.swift` - Migration complete
-- `TmuxSessionManager.swift` - Updated with gateway support
+- `TmuxGateway.swift` (708 lines) - Actor with command queue, health observation, async/await API
+- `TmuxProtocolParser.swift` (492 lines) - Pure synchronous protocol parser
+- `KittyKeyboardTranslator.swift` (473 lines) - Keyboard translation (Kitty → legacy)
+- `SSHSession.swift` (1257 lines) - Migration complete, DCS 1000p filter
+- `TmuxSessionManager.swift` (1831 lines) - Updated with gateway support
+- `TmuxControlClient.swift` (749 lines) - **LEGACY: To be removed**
 
 ---
 
@@ -368,6 +396,10 @@ iOS aggressively suspends apps and drops network connections. tmux handles persi
 - [ ] Review and standardize naming conventions
 
 ### 4. Code Analysis Findings (Dec 2025)
+
+#### High Priority - TODO
+- [ ] Remove `TmuxControlClient.swift` (749 lines) - superseded by TmuxGateway actor
+- [ ] Consolidate `controlModeActive`/`controlModeDataRouting` flags into `ControlModeState` enum
 
 #### High Priority - DONE
 - [x] Remove legacy tmux capture code (~100 lines) - superseded by TmuxControlClient
@@ -794,6 +826,9 @@ Config file (`ghostty.conf`) is now the source of truth.
 4. **Simulator performance** - Rendering may be slower on iOS Simulator vs real device (Metal emulation overhead). Test on physical device for accurate performance assessment.
 5. ~~**Disconnect not detected**~~ - Fixed: Now handles EOF/channel close and navigates back
 6. **Scroll sensitivity** - Touch scrolling may need per-user tuning (currently adaptive velocity)
+7. **SwiftUI AttributeGraph cycles** - Console shows `AttributeGraph: cycle detected through attribute XXXXX` during multi-pane view updates. Cosmetic but indicates view hierarchy issues in `TmuxMultiPaneView.swift`.
+8. **IOSurfaceLayer size mismatch** - `surface is wrong size for layer, discarding` during rapid resizing. Cosmetic, indicates resize debouncing could be tighter.
+9. **SF Mono font fallback** - `font-family regular not found: SF Mono` - falls back to JetBrains Mono. SF Mono may not be available on iOS or needs different PostScript name.
 
 ---
 
