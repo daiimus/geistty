@@ -18,6 +18,10 @@ struct GeisttyApp: App {
         
         // Also set for UIView to catch any edge cases
         // UIView.appearance().backgroundColor = bgColor  // Too aggressive, breaks other UI
+        
+        // Sync File Provider domains for all saved connection profiles
+        // This ensures servers appear in Files.app sidebar
+        ConnectionProfileManager.shared.syncFileProviderDomains()
     }
     
     var body: some Scene {

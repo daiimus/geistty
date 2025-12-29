@@ -222,13 +222,43 @@ class ConnectionProfileManager: ObservableObject {
     func addProfile(_ profile: ConnectionProfile) {
         profiles.append(profile)
         saveProfiles()
+        
+        // Register File Provider domain for this connection
+        Task { @MainActor in
+            try? await FileProviderDomainManager.shared.registerDomain(
+                host: profile.host,
+                port: profile.port,
+                username: profile.username
+            )
+        }
     }
     
     /// Update an existing profile
     func updateProfile(_ profile: ConnectionProfile) {
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+            let oldProfile = profiles[index]
             profiles[index] = profile
             saveProfiles()
+            
+            // If connection details changed, update File Provider domain
+            if oldProfile.host != profile.host || 
+               oldProfile.port != profile.port || 
+               oldProfile.username != profile.username {
+                Task { @MainActor in
+                    // Remove old domain
+                    try? await FileProviderDomainManager.shared.removeDomain(
+                        host: oldProfile.host,
+                        port: oldProfile.port,
+                        username: oldProfile.username
+                    )
+                    // Register new domain
+                    try? await FileProviderDomainManager.shared.registerDomain(
+                        host: profile.host,
+                        port: profile.port,
+                        username: profile.username
+                    )
+                }
+            }
         }
     }
     
@@ -236,12 +266,33 @@ class ConnectionProfileManager: ObservableObject {
     func deleteProfile(_ profile: ConnectionProfile) {
         profiles.removeAll { $0.id == profile.id }
         saveProfiles()
+        
+        // Remove File Provider domain for this connection
+        Task { @MainActor in
+            try? await FileProviderDomainManager.shared.removeDomain(
+                host: profile.host,
+                port: profile.port,
+                username: profile.username
+            )
+        }
     }
     
     /// Delete profiles by ID
     func deleteProfiles(at offsets: IndexSet) {
+        let profilesToDelete = offsets.map { profiles[$0] }
         profiles.remove(atOffsets: offsets)
         saveProfiles()
+        
+        // Remove File Provider domains for deleted connections
+        Task { @MainActor in
+            for profile in profilesToDelete {
+                try? await FileProviderDomainManager.shared.removeDomain(
+                    host: profile.host,
+                    port: profile.port,
+                    username: profile.username
+                )
+            }
+        }
     }
     
     /// Mark a profile as recently connected
@@ -375,5 +426,21 @@ class ConnectionProfileManager: ObservableObject {
         
         iCloudStore.synchronize()
         mergeFromiCloud()
+    }
+    
+    // MARK: - File Provider Integration
+    
+    /// Syncs all saved profiles to File Provider domains
+    /// Call this on app launch to ensure domains are registered
+    func syncFileProviderDomains() {
+        Task { @MainActor in
+            for profile in profiles {
+                try? await FileProviderDomainManager.shared.registerDomain(
+                    host: profile.host,
+                    port: profile.port,
+                    username: profile.username
+                )
+            }
+        }
     }
 }
