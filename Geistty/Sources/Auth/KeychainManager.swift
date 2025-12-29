@@ -41,16 +41,60 @@ enum KeychainError: LocalizedError {
 /// Manages secure storage of credentials and SSH keys in the iOS Keychain
 class KeychainManager {
     
-    /// Shared instance
+    /// Shared instance for main app
     static let shared = KeychainManager()
+    
+    /// Shared instance for File Provider extension (uses App Group keychain)
+    static let sharedForExtension = KeychainManager(useAppGroup: true)
     
     /// Service identifier for our app's keychain items
     private let service = "com.geistty"
     
-    /// Access group for sharing across app extensions (if needed)
-    private let accessGroup: String? = nil
+    /// App Group identifier for sharing keychain items with extensions
+    /// This must match the App Group configured in both app and extension capabilities
+    static let appGroupIdentifier = "group.com.geistty.fileprovider"
     
-    private init() {}
+    /// Access group for sharing across app extensions
+    /// When set, keychain items are accessible from both main app and extensions
+    private let accessGroup: String?
+    
+    /// Creates a KeychainManager instance
+    /// - Parameter useAppGroup: If true, uses the shared App Group keychain for cross-process access
+    init(useAppGroup: Bool = false) {
+        self.accessGroup = useAppGroup ? KeychainManager.appGroupIdentifier : nil
+    }
+    
+    // MARK: - Shared Keychain Helpers
+    
+    /// Saves a password to both local and shared keychains for File Provider access
+    /// Use this when saving credentials that should be accessible from the Files.app extension
+    static func savePasswordToShared(_ password: String, for host: String, username: String) throws {
+        // Save to local keychain
+        try shared.savePassword(password, for: host, username: username)
+        // Also save to shared keychain for File Provider extension
+        try sharedForExtension.savePassword(password, for: host, username: username)
+    }
+    
+    /// Saves an SSH key to both local and shared keychains for File Provider access
+    /// Use this when saving keys that should be accessible from the Files.app extension
+    static func saveSSHKeyToShared(_ privateKey: Data, name: String) throws {
+        // Save to local keychain
+        try shared.saveSSHKey(privateKey, name: name)
+        // Also save to shared keychain for File Provider extension
+        try sharedForExtension.saveSSHKey(privateKey, name: name)
+    }
+    
+    /// Deletes a password from both local and shared keychains
+    static func deletePasswordFromShared(for host: String, username: String) throws {
+        try? shared.deletePassword(for: host, username: username)
+        try? sharedForExtension.deletePassword(for: host, username: username)
+    }
+    
+    /// Deletes an SSH key from both local and shared keychains
+    static func deleteSSHKeyFromShared(name: String) throws {
+        try? shared.deleteSSHKey(name: name)
+        try? sharedForExtension.deleteSSHKey(name: name)
+    }
     
     // MARK: - Password Storage
     
