@@ -21,9 +21,9 @@ Comprehensive code review after TmuxGateway migration identified these items:
 
 | Priority | Task | Effort | Status |
 |----------|------|--------|--------|
-| High | Remove `TmuxControlClient.swift` (749 lines) - replaced by TmuxGateway | Low | 🔲 |
+| High | ~~Remove `TmuxControlClient.swift` (749 lines) - replaced by TmuxGateway~~ | Low | ✅ Done |
 | High | Add state enum for control mode flags (`controlModeActive`/`controlModeDataRouting` → `ControlModeState`) | Low | 🔲 |
-| Medium | Split `TmuxSessionManager.swift` (1831 lines) into smaller components | High | 🔲 |
+| Medium | Split `TmuxSessionManager.swift` (1831→1802 lines) into smaller components | High | 🔲 |
 | Medium | Fix SwiftUI AttributeGraph cycles (see Known Issues) | Medium | 🔲 |
 | Low | Migrate callback bridges to async/await in TmuxSessionManager | Medium | 🔲 |
 | Low | Fix SF Mono font config (currently falls back to JetBrains Mono) | Low | 🔲 |
@@ -82,27 +82,32 @@ triggering correctly.
 
 ---
 
-### 🏗️ Architecture: tmux Layer Alignment 🔄 IN PROGRESS
+### ✅ Architecture: tmux Layer Alignment - COMPLETE (Dec 28, 2025)
 
-**Analysis Complete (Dec 2025):**
-Deep architecture review comparing to iTerm2's TmuxGateway implementation revealed alignment issues
-with Ghostty and SwiftNIO-SSH patterns. See [DISCONNECTION_ANALYSIS.md](DISCONNECTION_ANALYSIS.md).
+**Summary:** Migrated from @MainActor TmuxControlClient to actor-based TmuxGateway.
+See [AGENTS.md](AGENTS.md#tmux-integration) for current architecture.
 
 **Current Data Flow:**
 ```
-SSH Server → NIOSSHConnection → SSHSession → TmuxControlClient → TmuxSessionManager → Ghostty.SurfaceView
-                                                                                            ↓
-User Input ← Ghostty externalWriteCallback ← surface.onWrite ← sendInput() ← send-keys ←────┘
+SSH Server → NIOSSHConnection → SSHSession → TmuxGateway.receive()
+                                                   ↓
+                                        TmuxProtocolParser.parse()
+                                                   ↓
+                                        AsyncStream<TmuxGatewayEvent>
+                                                   ↓
+                              SSHSession.handleGatewayEvent() → TmuxSessionManager
+                                                   ↓
+                                        Ghostty.SurfaceView
 ```
 
-**Critical Issues Identified:**
+**Completed:**
 
-| Issue | Current | Target |
-|-------|---------|--------|
-| Concurrency | All @MainActor | Actor isolation (like SFTPClient) |
-| Write callback | Double async hop | Single-hop direct channel |
-| Health state | Not observed by tmux | Command queue pause/resume |
-| Surface lifecycle | Tied to tmux session | Independent SurfaceManager |
+| Issue | Before | After |
+|-------|--------|-------|
+| Concurrency | All @MainActor | Actor isolation (TmuxGateway) |
+| Write callback | Double async hop | Single-hop via gateway |
+| Health state | Not observed by tmux | TmuxGateway observes health |
+| Protocol parsing | Mixed in TmuxControlClient | Pure TmuxProtocolParser |
 | Keyboard translation | In TmuxControlClient | Dedicated KeyboardTranslator |
 
 #### Phase 1: Protocol Separation ✅ COMPLETE
