@@ -66,9 +66,7 @@ struct TmuxMultiPaneView: View {
                     sessionManager.toggleZoom(paneId: paneId)
                 },
                 paneContent: { paneId, cols, rows in
-                    // Log dimensions being passed to pane view
-                    let _ = logger.info("📐 paneContent called: pane=\(paneId), dims=\(cols)x\(rows)")
-                    return TmuxPaneSurfaceView(
+                    TmuxPaneSurfaceView(
                         paneId: paneId,
                         cols: cols,
                         rows: rows,

@@ -196,7 +196,8 @@ extension Ghostty {
             # Reload with Cmd+Shift+, or from Settings
             
             # === Font Settings ===
-            font-family = "SF Mono"
+            # Note: SF Mono is not available via CoreText - use Menlo or bundled fonts
+            font-family = "Menlo"
             font-thicken = true
             
             # Freetype hinting for clarity
