@@ -69,7 +69,10 @@ Geistty/
 - `Sources/Terminal/KeyTableIndicatorView.swift` - Vim-style key table indicator
 - `Sources/SSH/NIOSSHConnection.swift` - SwiftNIO-SSH connection with Network.framework
 - `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux integration, data flow
-- `Sources/SSH/TmuxControlClient.swift` - tmux Control Mode (-CC) protocol client
+- `Sources/SSH/TmuxGateway.swift` - **Actor-based tmux Control Mode gateway (replaces TmuxControlClient)**
+- `Sources/SSH/TmuxProtocolParser.swift` - Pure synchronous tmux protocol parser
+- `Sources/SSH/KittyKeyboardTranslator.swift` - Kitty → legacy keyboard translation
+- `Sources/SSH/TmuxSessionManager.swift` - Multi-pane state management, surface ownership
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
 - `Sources/UI/SettingsView.swift` - App settings UI
 
@@ -129,50 +132,32 @@ Live font updates use `ghostty_surface_update_config()` with a new config.
 
 ## tmux Integration
 
-Geistty has special tmux support with two modes:
+Geistty uses tmux Control Mode (`tmux -CC`) with an actor-based architecture:
 
-### Control Mode (Recommended)
+### Architecture (Dec 2025)
 
-Uses tmux's native Control Mode protocol (`tmux -CC`) for proper integration:
-
-```swift
-// TmuxControlClient.swift handles:
-// - %output %pane-id <octal-escaped-data> → pane output to Ghostty
-// - %begin/%end/%error blocks → command responses
-// - capture-pane via proper protocol commands
+```
+SSH Server → NIOSSHConnection → SSHSession → TmuxGateway.receive()
+                                                   ↓
+                                        TmuxProtocolParser.parse()
+                                                   ↓
+                                        AsyncStream<TmuxGatewayEvent>
+                                                   ↓
+                              SSHSession.handleGatewayEvent() → TmuxSessionManager
+                                                   ↓
+                                        Ghostty.SurfaceView
 ```
 
-Benefits:
-- Geistty owns the scrollback buffer (receives all `%output`)
-- Search works on buffered content without visible commands
-- No marker pollution in terminal output
-- Proper handling of escape sequences
+### Key Components
 
-### Legacy Mode (Fallback)
+| Component | Purpose |
+|-----------|----------|
+| `TmuxGateway` | Swift actor with command queue, health observation, async/await API |
+| `TmuxProtocolParser` | Pure synchronous parser: `parse(data, buffer, state) → (messages, buffer, state)` |
+| `KittyKeyboardTranslator` | Converts Kitty keyboard protocol to legacy terminal codes for tmux |
+| `TmuxSessionManager` | Multi-pane state, surface ownership, layout parsing |
 
-Uses marker-based `capture-pane` approach:
-
-```swift
-// tmux capture-pane flow (in SSHSession.swift)
-// 1. Send capture-pane command with unique markers
-// 2. Buffer SSH data until end marker received
-// 3. Extract captured content, search within it
-// 4. Resume normal terminal data flow
-```
-
-### Enabling Control Mode
-
-Control mode is currently opt-in during development:
-
-```swift
-// In SSHSession connect methods:
-try await session.connect(
-    host: "...",
-    useTmux: true,
-    useControlMode: true  // Enable control mode (default: false)
-)
-```
-
+### Control Mode Protocol
 ### Control Mode Protocol Reference
 
 From tmux wiki: https://github.com/tmux/tmux/wiki/Control-Mode
@@ -208,13 +193,16 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 | External Backend | iOS sandboxing prevents fork/exec/PTY |
 | SwiftNIO-SSH | Pure Swift, Network.framework integration, native async/await |
 | tmux Control Mode | Proper protocol integration; Geistty owns scrollback buffer |
+| TmuxGateway Actor | Proper concurrency isolation; async/await API; follows SFTPClient pattern |
+| TmuxProtocolParser | Pure synchronous parsing; state passed in/out explicitly; actor-friendly |
+| DCS 1000p Filter | Prevents dual-parser conflict between Ghostty and TmuxGateway |
 | capture-pane for search | Alternate screen mode (tmux, vim) has 0 scrollback by design in terminal emulators |
 | libxev fork | iOS uses `kevent`, not `kevent64` |
 | Custom module.modulemap name | Renamed to avoid Xcode module conflicts |
 
 ## Data Flow
 
-### Regular Mode
+### Regular Mode (No tmux)
 ```
 SSH Server → NIOSSHConnection (SwiftNIO-SSH) → SSHSession → Ghostty.Surface.writeOutput()
                                                          ↓
@@ -223,18 +211,44 @@ SSH Server → NIOSSHConnection (SwiftNIO-SSH) → SSHSession → Ghostty.Surfac
 User Input → Ghostty write callback → SSHSession → NIOSSHConnection.write()
 ```
 
-### Control Mode (tmux -CC)
+### Control Mode (tmux -CC) - Current Architecture
 ```
-SSH Server → NIOSSHConnection → SSHSession → TmuxControlClient.parse()
-                                                   ↓
-                                          Parse %output messages
-                                                   ↓
-                                Decode octal escapes → Ghostty.Surface.writeOutput()
-                                                   ↓
-                                            Terminal UI (Metal)
-                                                   ↓
-User Input → Ghostty write callback → SSHSession → NIOSSHConnection.write()
+SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
+                                        ↓
+                              [DCS 1000p filter - prevents Ghostty internal tmux parser conflict]
+                                        ↓
+                              TmuxGateway.receive(data)
+                                        ↓
+                              TmuxProtocolParser.parse()
+                                        ↓
+                              AsyncStream<TmuxGatewayEvent>
+                                        ↓
+                              SSHSession.handleGatewayEvent()
+                                        ↓
+                              TmuxSessionManager.routeOutput()
+                                        ↓
+                              Ghostty.Surface.writeOutput()
+                                        ↓
+                              Terminal UI (Metal)
+                                        ↓
+User Input → Ghostty write callback → SSHSession.write()
+                                        ↓
+                              TmuxGateway.sendKeys(data)
+                                        ↓
+                              KittyKeyboardTranslator.translate()
+                                        ↓
+                              "send-keys -H -t %pane hex..." → NIOSSHConnection.write()
 ```
+
+### Critical: DCS 1000p Filter
+
+The `SSHSession.handleReceivedData()` method filters out `\x1bP1000p` (DCS 1000p) sequences
+before forwarding to Ghostty. This is critical because:
+
+1. tmux sends DCS 1000p to signal control mode entry
+2. Ghostty has an internal tmux control mode parser that activates on this sequence
+3. If both Ghostty's parser AND our TmuxGateway parse the same data, it causes conflicts
+4. The filter ensures only TmuxGateway handles the control mode protocol
 
 ## Common Pitfalls
 

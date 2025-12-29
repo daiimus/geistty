@@ -49,7 +49,6 @@
 		A100007A /* Inconsolata-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007A /* Inconsolata-Regular.ttf */; };
 		A100007B /* Inconsolata-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007B /* Inconsolata-Bold.ttf */; };
 		A1000080 /* SurfaceSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000080 /* SurfaceSearchOverlay.swift */; };
-		A1000081 /* TmuxControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000081 /* TmuxControlClient.swift */; };
 		A1000082 /* TmuxModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000082 /* TmuxModels.swift */; };
 		A1000083 /* TmuxSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000083 /* TmuxSessionManager.swift */; };
 		A1000084 /* TmuxLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000084 /* TmuxLayout.swift */; };
@@ -131,7 +130,6 @@
 		A200007A /* Inconsolata-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Regular.ttf"; sourceTree = "<group>"; };
 		A200007B /* Inconsolata-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Bold.ttf"; sourceTree = "<group>"; };
 		A2000080 /* SurfaceSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceSearchOverlay.swift; sourceTree = "<group>"; };
-		A2000081 /* TmuxControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxControlClient.swift; sourceTree = "<group>"; };
 		A2000082 /* TmuxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModels.swift; sourceTree = "<group>"; };
 		A2000083 /* TmuxSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionManager.swift; sourceTree = "<group>"; };
 		A2000084 /* TmuxLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxLayout.swift; sourceTree = "<group>"; };
@@ -223,7 +221,6 @@
 				A2000004 /* SSHSession.swift */,
 				A2000090 /* NIOSSHConnection.swift */,
 				A2000095 /* KittyKeyboardTranslator.swift */,
-				A2000081 /* TmuxControlClient.swift */,
 				A2000093 /* TmuxGateway.swift */,
 				A2000084 /* TmuxLayout.swift */,
 				A2000082 /* TmuxModels.swift */,
@@ -469,7 +466,6 @@
 				A1000004 /* SSHSession.swift in Sources */,
 				A1000005 /* SSHConnection.swift in Sources */,
 				A1000090 /* NIOSSHConnection.swift in Sources */,
-				A1000081 /* TmuxControlClient.swift in Sources */,
 				A1000084 /* TmuxLayout.swift in Sources */,
 				A1000082 /* TmuxModels.swift in Sources */,
 				A1000083 /* TmuxSessionManager.swift in Sources */,
