@@ -60,6 +60,9 @@
 		A1000090 /* NIOSSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000090 /* NIOSSHConnection.swift */; };
 		A1000091 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000002 /* NIOSSH */; };
 		A1000092 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = AE000003 /* NIOTransportServices */; };
+		A1000093 /* TmuxGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000093 /* TmuxGateway.swift */; };
+		A1000094 /* TmuxProtocolParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000094 /* TmuxProtocolParser.swift */; };
+		A1000095 /* KittyKeyboardTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000095 /* KittyKeyboardTranslator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -140,6 +143,9 @@
 		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
 		A20000A1 /* ShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShakeDetector.swift; sourceTree = "<group>"; };
 		A20000A2 /* KeyTableIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTableIndicatorView.swift; sourceTree = "<group>"; };
+		A2000093 /* TmuxGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxGateway.swift; sourceTree = "<group>"; };
+		A2000094 /* TmuxProtocolParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxProtocolParser.swift; sourceTree = "<group>"; };
+		A2000095 /* KittyKeyboardTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyKeyboardTranslator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -216,9 +222,12 @@
 			children = (
 				A2000004 /* SSHSession.swift */,
 				A2000090 /* NIOSSHConnection.swift */,
+				A2000095 /* KittyKeyboardTranslator.swift */,
 				A2000081 /* TmuxControlClient.swift */,
+				A2000093 /* TmuxGateway.swift */,
 				A2000084 /* TmuxLayout.swift */,
 				A2000082 /* TmuxModels.swift */,
+				A2000094 /* TmuxProtocolParser.swift */,
 				A2000083 /* TmuxSessionManager.swift */,
 				A2000085 /* TmuxSplitTree.swift */,
 			);
@@ -465,6 +474,9 @@
 				A1000082 /* TmuxModels.swift in Sources */,
 				A1000083 /* TmuxSessionManager.swift in Sources */,
 				A1000085 /* TmuxSplitTree.swift in Sources */,
+				A1000093 /* TmuxGateway.swift in Sources */,
+				A1000094 /* TmuxProtocolParser.swift in Sources */,
+				A1000095 /* KittyKeyboardTranslator.swift in Sources */,
 				A1000086 /* TmuxSplitView.swift in Sources */,
 				A1000087 /* TmuxMultiPaneView.swift in Sources */,
 				A1000088 /* TmuxWindowPickerView.swift in Sources */,

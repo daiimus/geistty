@@ -60,6 +60,103 @@ triggering correctly.
 
 ---
 
+### 🏗️ Architecture: tmux Layer Alignment 🔄 IN PROGRESS
+
+**Analysis Complete (Dec 2025):**
+Deep architecture review comparing to iTerm2's TmuxGateway implementation revealed alignment issues
+with Ghostty and SwiftNIO-SSH patterns. See [DISCONNECTION_ANALYSIS.md](DISCONNECTION_ANALYSIS.md).
+
+**Current Data Flow:**
+```
+SSH Server → NIOSSHConnection → SSHSession → TmuxControlClient → TmuxSessionManager → Ghostty.SurfaceView
+                                                                                            ↓
+User Input ← Ghostty externalWriteCallback ← surface.onWrite ← sendInput() ← send-keys ←────┘
+```
+
+**Critical Issues Identified:**
+
+| Issue | Current | Target |
+|-------|---------|--------|
+| Concurrency | All @MainActor | Actor isolation (like SFTPClient) |
+| Write callback | Double async hop | Single-hop direct channel |
+| Health state | Not observed by tmux | Command queue pause/resume |
+| Surface lifecycle | Tied to tmux session | Independent SurfaceManager |
+| Keyboard translation | In TmuxControlClient | Dedicated KeyboardTranslator |
+
+#### Phase 1: Protocol Separation ✅ COMPLETE
+- [x] **Extract TmuxProtocolParser** - Pure synchronous parser from TmuxControlClient
+  - Created `TmuxProtocolParser.swift` with `TmuxMessage` enum
+  - No async, no state machine, just `parse(Data, buffer, blockState) -> (messages, buffer, blockState)`
+  - Reference: iTerm2's VT100TmuxParser pattern
+- [x] **Extract KeyboardTranslator** - Kitty protocol translation utility
+  - Created `KittyKeyboardTranslator.swift` with `KeyboardTranslator` protocol
+  - Also includes `PassthroughKeyboardTranslator` for native Kitty support
+  - TmuxControlClient now uses injected translator
+- [x] **Create actor TmuxGateway** - Command queue + protocol handling
+  - Created `TmuxGateway.swift` following `SFTPClient` actor pattern
+  - Proper actor isolation for command queue state
+  - `AsyncStream<TmuxGatewayEvent>` for output events
+  - Async/await API (no callbacks)
+  - Ready for ConnectionHealth integration
+
+#### Phase 2: Integration Alignment ✅ COMPLETE
+- [x] **Wire ConnectionHealth into tmux** - Pause commands when stale
+  - TmuxGateway has `updateHealth()` method
+  - Command queue pauses on .stale, fails on .dead
+  - Resumes and flushes queued commands on .healthy
+- [ ] **Single-hop write path** - Direct Ghostty → SSH channel
+  - Current: `externalWriteCallback → DispatchQueue.main.async → Task @MainActor → write`
+  - Target: Direct callback or AsyncChannel without main thread hop
+  - Blocked: Requires SSHSession write path to be non-@MainActor
+  - Note: Lower priority - current path works, just has extra latency
+
+#### Phase 3: Lifecycle Decoupling ✅ COMPLETE
+- [x] **Create SurfaceManager** - Centralized surface ownership
+  - Created `SurfaceManager.swift` with `SurfaceId`, `ManagedSurface`
+  - Owns all Ghostty.SurfaceView instances
+  - Event-driven API (`SurfaceEvent`: created, destroyed, resize, write)
+  - Surfaces can survive tmux session changes
+- [ ] **Migrate TmuxSessionManager** - Map paneId → surfaceId
+  - Replace direct surface ownership with SurfaceManager
+  - Keep factory pattern but delegate to SurfaceManager
+  - Future: enable surface reuse across reconnects
+
+#### Phase 4: Full Migration ✅ COMPLETE (Jan 2025)
+SSHSession now uses TmuxGateway actor instead of TmuxControlClient.
+
+**Changes Made:**
+- Replaced `tmuxControlClient: TmuxControlClient?` with `tmuxGateway: TmuxGateway?`
+- Added `gatewayEventTask: Task<Void, Never>?` for async event consumption
+- New `setupTmuxGateway()` replaces `setupTmuxControlClient()`
+- New `startGatewayEventLoop()` and `handleGatewayEvent()` for async/await pattern
+- Removed `TmuxControlClientDelegate` extension - events via AsyncStream
+- Wired `NIOSSHConnection.health` → `TmuxGateway.updateHealth()` in delegate
+- TmuxSessionManager has `setupWithGateway()` method for callback-based commands
+- Added helper methods `sendCommand()` and `sendCommandFireAndForget()` that abstract
+  over both legacy TmuxControlClient and new TmuxGateway
+
+**Data Flow (New):**
+```
+SSH Server → NIOSSHConnection → SSHSession → TmuxGateway.receive()
+                                                   ↓
+                                        TmuxProtocolParser.parse()
+                                                   ↓
+                                        AsyncStream<TmuxGatewayEvent>
+                                                   ↓
+                              handleGatewayEvent() → TmuxSessionManager
+                                                   ↓
+                                        Ghostty.SurfaceView
+```
+
+**Related Files:**
+- `TmuxGateway.swift` - Actor with command queue, health observation
+- `TmuxProtocolParser.swift` - Pure synchronous protocol parser
+- `KittyKeyboardTranslator.swift` - Keyboard translation
+- `SSHSession.swift` - Migration complete
+- `TmuxSessionManager.swift` - Updated with gateway support
+
+---
+
 ### 🏗️ Architecture: Swift-Native SSH ✅ COMPLETE
 
 **Migration Complete (Dec 2024):**

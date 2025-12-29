@@ -238,6 +238,10 @@ extension Notification.Name {
     
     // Appearance
     static let toggleBackgroundOpacity = Notification.Name("toggleBackgroundOpacity")
+    
+    // tmux control mode (from Ghostty)
+    static let tmuxStateChanged = Notification.Name("tmuxStateChanged")
+    static let tmuxExited = Notification.Name("tmuxExited")
 }
 
 /// Global application state

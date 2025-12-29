@@ -816,6 +816,12 @@ typedef struct {
   ssize_t selected;
 } ghostty_action_search_selected_s;
 
+// apprt.action.TmuxStateChanged
+typedef struct {
+  uint32_t window_count;
+  uint32_t pane_count;
+} ghostty_action_tmux_state_changed_s;
+
 // terminal.Scrollbar
 typedef struct {
   uint64_t total;
@@ -888,6 +894,8 @@ typedef enum {
   GHOSTTY_ACTION_SEARCH_TOTAL,
   GHOSTTY_ACTION_SEARCH_SELECTED,
   GHOSTTY_ACTION_READONLY,
+  GHOSTTY_ACTION_TMUX_STATE_CHANGED,
+  GHOSTTY_ACTION_TMUX_EXIT,
   } ghostty_action_tag_e;
 
 typedef union {
@@ -928,6 +936,7 @@ typedef union {
   ghostty_action_search_total_s search_total;
   ghostty_action_search_selected_s search_selected;
   ghostty_action_readonly_e readonly;
+  ghostty_action_tmux_state_changed_s tmux_state_changed;
 } ghostty_action_u;
 
 typedef struct {
@@ -1052,6 +1061,7 @@ void ghostty_surface_draw(ghostty_surface_t);
 void ghostty_surface_set_content_scale(ghostty_surface_t, double, double);
 void ghostty_surface_set_focus(ghostty_surface_t, bool);
 void ghostty_surface_set_occlusion(ghostty_surface_t, bool);
+
 void ghostty_surface_set_size(ghostty_surface_t, uint32_t, uint32_t);
 ghostty_surface_size_s ghostty_surface_size(ghostty_surface_t);
 void ghostty_surface_set_color_scheme(ghostty_surface_t,
@@ -1063,6 +1073,8 @@ bool ghostty_surface_key(ghostty_surface_t, ghostty_input_key_s);
 bool ghostty_surface_key_is_binding(ghostty_surface_t, ghostty_input_key_s);
 void ghostty_surface_text(ghostty_surface_t, const char*, uintptr_t);
 void ghostty_surface_write_output(ghostty_surface_t, const char*, uintptr_t);
+
+
 void ghostty_surface_preedit(ghostty_surface_t, const char*, uintptr_t);
 bool ghostty_surface_mouse_captured(ghostty_surface_t);
 bool ghostty_surface_mouse_button(ghostty_surface_t,
@@ -1119,6 +1131,27 @@ ghostty_search_result_s ghostty_surface_search_start(ghostty_surface_t,
 ghostty_search_result_s ghostty_surface_search_next(ghostty_surface_t);
 ghostty_search_result_s ghostty_surface_search_prev(ghostty_surface_t);
 void ghostty_surface_search_end(ghostty_surface_t);
+// === tmux Control Mode API (iOS) ===
+// These APIs expose Ghostty's native tmux control mode viewer for iOS apps.
+// When a surface enters tmux control mode (via tmux -CC), Ghostty internally
+// creates Terminal instances for each pane with full scrollback support.
+// These APIs allow iOS to query and render those pane Terminals.
+
+// Get number of tmux panes (returns 0 if not in tmux mode)
+size_t ghostty_surface_tmux_pane_count(ghostty_surface_t);
+
+// Get tmux pane IDs. Returns number of IDs written to out_ids array.
+// Returns 0 if not in tmux control mode.
+size_t ghostty_surface_tmux_pane_ids(ghostty_surface_t,
+                                     size_t* out_ids,
+                                     size_t max_count);
+
+// Set which tmux pane this surface renders.
+// Returns true if successful, false if pane_id not found or not in tmux mode.
+bool ghostty_surface_tmux_set_active_pane(ghostty_surface_t, size_t pane_id);
+
+// Reset to render the main terminal (not a tmux pane).
+void ghostty_surface_tmux_reset_active_pane(ghostty_surface_t);
 #endif
 
 ghostty_inspector_t ghostty_surface_inspector(ghostty_surface_t);
