@@ -1,5 +1,13 @@
 # tmux Integration Architecture
 
+> **⚠️ PARTIALLY OUTDATED (December 2025)**
+> 
+> This document's **vision and principles remain valid**, but the implementation details are outdated.
+> The architecture has been migrated from `TmuxControlClient` (class-based, @MainActor) to 
+> `TmuxGateway` (Swift actor with AsyncStream).
+> 
+> **For current architecture, see:** [AGENTS.md](AGENTS.md#tmux-integration)
+
 ## Vision
 
 Geistty provides a **native Ghostty experience** for iOS/iPadOS that seamlessly integrates with tmux. Instead of fighting against tmux's window/pane model, we embrace it - mapping tmux concepts to iPadOS UI concepts.
