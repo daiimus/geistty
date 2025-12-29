@@ -17,6 +17,8 @@ public enum FontMapping {
     
     /// All available terminal fonts.
     /// Order determines display order in settings UI.
+    /// Note: SF Mono is excluded because it's a system UI font that cannot be
+    /// accessed by name via CoreText - it requires special system font APIs.
     public enum Font: String, CaseIterable, Identifiable {
         // Bundled fonts
         case departureMono = "Departure Mono"
@@ -27,8 +29,7 @@ public enum FontMapping {
         case ibmPlexMono = "IBM Plex Mono"
         case inconsolata = "Inconsolata"
         
-        // System fonts
-        case sfMono = "SF Mono"
+        // System fonts (excludes SF Mono - see note above)
         case menlo = "Menlo"
         case courierNew = "Courier New"
         
@@ -47,7 +48,6 @@ public enum FontMapping {
             case .sourceCodePro: return "Source Code Pro"
             case .ibmPlexMono: return "IBM Plex Mono"
             case .inconsolata: return "Inconsolata"
-            case .sfMono: return "SF Mono"
             case .menlo: return "Menlo"
             case .courierNew: return "Courier New"
             }
@@ -59,7 +59,7 @@ public enum FontMapping {
             case .departureMono, .jetbrainsMono, .firaCode, .hack,
                  .sourceCodePro, .ibmPlexMono, .inconsolata:
                 return true
-            case .sfMono, .menlo, .courierNew:
+            case .menlo, .courierNew:
                 return false
             }
         }
@@ -82,8 +82,6 @@ public enum FontMapping {
                 return ["IBM Plex Mono", "IBMPlexMono", "IBMPlexMono-Regular"]
             case .inconsolata:
                 return ["Inconsolata", "Inconsolata-Regular"]
-            case .sfMono:
-                return ["SF Mono", "SFMono-Regular"]
             case .menlo:
                 return ["Menlo", "Menlo-Regular"]
             case .courierNew:
