@@ -22,15 +22,15 @@ Comprehensive code review after TmuxGateway migration identified these items:
 | Priority | Task | Effort | Status |
 |----------|------|--------|--------|
 | High | ~~Remove `TmuxControlClient.swift` (749 lines) - replaced by TmuxGateway~~ | Low | ✅ Done |
-| High | Add state enum for control mode flags (`controlModeActive`/`controlModeDataRouting` → `ControlModeState`) | Low | 🔲 |
-| Medium | Split `TmuxSessionManager.swift` (1831→1802 lines) into smaller components | High | 🔲 |
-| Medium | Fix SwiftUI AttributeGraph cycles (see Known Issues) | Medium | 🔲 |
+| High | ~~Add state enum for control mode flags → `ControlModeState`~~ | Low | ✅ Done |
+| Medium | Split `TmuxSessionManager.swift` (1802 lines) into smaller components | High | 🔲 Deferred |
+| Medium | ~~Fix SwiftUI AttributeGraph cycles (removed logging from view body)~~ | Medium | ✅ Done |
 | Low | Migrate callback bridges to async/await in TmuxSessionManager | Medium | 🔲 |
-| Low | Fix SF Mono font config (currently falls back to JetBrains Mono) | Low | 🔲 |
+| Low | ~~Fix SF Mono font config (removed - not accessible via CoreText)~~ | Low | ✅ Done |
 
 **Architecture Assessment:**
 - **Architecture: 8/10** - Clean separation, proper actor isolation, follows Ghostty patterns
-- **Code Quality: 7.5/10** - Well-documented, consistent logging, some legacy cruft
+- **Code Quality: 8/10** - Well-documented, consistent logging, state machine for control mode
 - **Robustness: 8/10** - Good error handling, health monitoring, reconnect logic
 - **Maintainability: 7/10** - TmuxSessionManager is large, some callback tech debt
 
@@ -831,9 +831,9 @@ Config file (`ghostty.conf`) is now the source of truth.
 4. **Simulator performance** - Rendering may be slower on iOS Simulator vs real device (Metal emulation overhead). Test on physical device for accurate performance assessment.
 5. ~~**Disconnect not detected**~~ - Fixed: Now handles EOF/channel close and navigates back
 6. **Scroll sensitivity** - Touch scrolling may need per-user tuning (currently adaptive velocity)
-7. **SwiftUI AttributeGraph cycles** - Console shows `AttributeGraph: cycle detected through attribute XXXXX` during multi-pane view updates. Cosmetic but indicates view hierarchy issues in `TmuxMultiPaneView.swift`.
+7. ~~**SwiftUI AttributeGraph cycles**~~ - Fixed: Removed logging from view body methods
 8. **IOSurfaceLayer size mismatch** - `surface is wrong size for layer, discarding` during rapid resizing. Cosmetic, indicates resize debouncing could be tighter.
-9. **SF Mono font fallback** - `font-family regular not found: SF Mono` - falls back to JetBrains Mono. SF Mono may not be available on iOS or needs different PostScript name.
+9. ~~**SF Mono font fallback**~~ - Fixed: Removed SF Mono from options (not accessible via CoreText, it's a system UI font). Default changed to Menlo.
 
 ---
 
