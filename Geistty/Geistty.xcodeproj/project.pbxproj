@@ -32,6 +32,7 @@
 		A1000031 /* ConnectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* ConnectionEditorView.swift */; };
 		A1000040 /* SFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* SFTPClient.swift */; };
 		A1000042 /* SFTPChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* SFTPChannel.swift */; };
+		A1000043 /* FileProviderDomainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* FileProviderDomainManager.swift */; };
 		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
 		A1000060 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* Theme.swift */; };
 		A1000061 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* Themes */; };
@@ -292,11 +293,13 @@
 			sourceTree = "<group>";
 		};
 		A2000042 /* SFTPChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPChannel.swift; sourceTree = "<group>"; };
+		A2000043 /* FileProviderDomainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderDomainManager.swift; sourceTree = "<group>"; };
 		A5000011 /* SFTP */ = {
 			isa = PBXGroup;
 			children = (
 				A2000040 /* SFTPClient.swift */,
 				A2000042 /* SFTPChannel.swift */,
+				A2000043 /* FileProviderDomainManager.swift */,
 			);
 			path = SFTP;
 			sourceTree = "<group>";
@@ -480,6 +483,7 @@
 				A1000031 /* ConnectionEditorView.swift in Sources */,
 				A1000040 /* SFTPClient.swift in Sources */,
 				A1000042 /* SFTPChannel.swift in Sources */,
+				A1000043 /* FileProviderDomainManager.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
 				A10000A2 /* KeyTableIndicatorView.swift in Sources */,
 				A1000060 /* Theme.swift in Sources */,
