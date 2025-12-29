@@ -1,5 +1,11 @@
 # Research Findings
 
+> **📚 HISTORICAL DOCUMENT (Early 2024)**
+> 
+> This document captures initial research conducted when starting the project. 
+> The findings informed design decisions but many implementation details have evolved.
+> Kept for reference and future research.
+
 This document captures research conducted on reference implementations and relevant technologies.
 
 ## Table of Contents
