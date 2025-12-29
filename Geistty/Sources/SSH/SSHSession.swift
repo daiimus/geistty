@@ -36,6 +36,43 @@ enum TmuxMode {
     case controlMode
 }
 
+/// Control mode lifecycle state
+/// Tracks the progression from initial connection through full activation
+enum ControlModeState: Equatable, CustomStringConvertible {
+    /// Not using tmux control mode (or tmux exited)
+    case inactive
+    
+    /// Control mode detected, data routing through gateway
+    /// Gateway is parsing protocol but hasn't signaled activation yet
+    /// User input is queued during this phase
+    case routing
+    
+    /// Gateway fully activated, ready for user input
+    /// Queued input has been flushed, send-keys is operational
+    case active
+    
+    var description: String {
+        switch self {
+        case .inactive: return "inactive"
+        case .routing: return "routing"
+        case .active: return "active"
+        }
+    }
+    
+    /// Whether data should be routed through the tmux gateway
+    var isRouting: Bool {
+        switch self {
+        case .inactive: return false
+        case .routing, .active: return true
+        }
+    }
+    
+    /// Whether user input can be sent via send-keys
+    var isActive: Bool {
+        self == .active
+    }
+}
+
 /// SSH session errors
 enum SSHSessionError: LocalizedError {
     case notConnected
@@ -94,16 +131,9 @@ class SSHSession: ObservableObject, Identifiable {
     /// Access this to get session/window/pane info and route output to surfaces
     private(set) var tmuxSessionManager: TmuxSessionManager?
     
-    /// Whether control mode is actually active and ready for input
-    /// Set to true when gateway emits .activated event (after first tmux response)
-    /// User input should NOT be sent via sendKeys until this is true
-    private var controlModeActive: Bool = false
-    
-    /// Whether SSH data should be routed through the tmux gateway
-    /// Set to true when we first detect control mode protocol messages
-    /// This is separate from controlModeActive because data routing starts
-    /// before the gateway is fully ready to accept user input
-    private var controlModeDataRouting: Bool = false
+    /// Control mode lifecycle state
+    /// Tracks progression: inactive → routing → active
+    private var controlModeState: ControlModeState = .inactive
     
     // Queue of input data waiting to be sent once control mode activates
     // This prevents input from going to tmux's command prompt before the shell is ready
@@ -618,8 +648,8 @@ class SSHSession: ObservableObject, Identifiable {
             }
             
         case .activated:
-            logger.info("🎉 Gateway activated - control mode ready! Setting controlModeActive=true")
-            controlModeActive = true
+            logger.info("🎉 Gateway activated - control mode ready! State: \(controlModeState) → active")
+            controlModeState = .active
             tmuxSessionManager?.controlModeActivated()
             
             // Flush queued input
@@ -650,8 +680,9 @@ class SSHSession: ObservableObject, Identifiable {
             tmuxSessionManager?.handleSessionChanged(sessionId: sessionId, sessionName: sessionName)
             
         case .exited(let reason):
-            logger.info("Gateway exited: \(reason ?? "unknown")")
-            controlModeActive = false
+            let reasonDesc = reason ?? "unknown"
+            logger.info("Gateway exited: \(reasonDesc)")
+            controlModeState = .inactive
             tmuxSessionManager?.controlModeExited(reason: reason)
             delegate?.sshSession(self, didDisconnectWithError: SSHSessionError.tmuxExited(reason: reason))
         }
@@ -793,7 +824,7 @@ class SSHSession: ObservableObject, Identifiable {
         connection?.resizePTY(cols: cols, rows: rows)
         
         // Also notify tmux if in control mode
-        if controlModeActive, tmuxGateway != nil {
+        if controlModeState.isActive, tmuxGateway != nil {
             Task {
                 await tmuxGateway?.resize(cols: cols, rows: rows)
             }
@@ -825,8 +856,8 @@ class SSHSession: ObservableObject, Identifiable {
         
         // In control mode, user input must go through send-keys command
         // Raw characters would be interpreted as tmux control commands!
-        // Use controlModeActive to ensure tmux is ready
-        if controlModeActive, tmuxGateway != nil {
+        // Use controlModeState.isActive to ensure tmux is ready
+        if controlModeState.isActive, tmuxGateway != nil {
             logger.info("⌨️ Routing \(data.count) bytes through gateway.sendKeys")
             Task {
                 await tmuxGateway?.sendKeys(data)
@@ -838,7 +869,7 @@ class SSHSession: ObservableObject, Identifiable {
         // This prevents input from being sent before tmux is ready for send-keys
         if tmuxMode == .controlMode {
             // Either gateway doesn't exist yet, or control mode isn't active
-            logger.info("⌨️ Control mode pending (controlModeActive=\(controlModeActive), gateway=\(tmuxGateway != nil)), queueing \(data.count) bytes of input")
+            logger.info("⌨️ Control mode pending (state=\(controlModeState), gateway=\(tmuxGateway != nil)), queueing \(data.count) bytes of input")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
             return
@@ -895,7 +926,7 @@ class SSHSession: ObservableObject, Identifiable {
         }
         
         // In control mode, user input must go through send-keys command
-        if controlModeActive, tmuxGateway != nil {
+        if controlModeState.isActive, tmuxGateway != nil {
             Task {
                 await tmuxGateway?.sendKeys(data)
             }
@@ -971,7 +1002,7 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Disconnect the session
     func disconnect() {
-        controlModeActive = false
+        controlModeState = .inactive
         pendingInputQueue.removeAll()
         gatewayEventTask?.cancel()
         gatewayEventTask = nil
@@ -1008,7 +1039,7 @@ class SSHSession: ObservableObject, Identifiable {
     /// In tmux control mode, this resumes paused panes to prevent
     /// the pause timeout from triggering unnecessarily.
     func appWillResignActive() {
-        guard controlModeActive, tmuxGateway != nil else { return }
+        guard controlModeState.isActive, tmuxGateway != nil else { return }
         logger.info("App resigning active, pause mode enabled")
         // Pause mode is already enabled - tmux will auto-pause after the timeout
         // No additional action needed here
@@ -1026,7 +1057,7 @@ class SSHSession: ObservableObject, Identifiable {
         }
         
         // If connection is alive and tmux is active, just resume paused panes
-        if isConnectionAlive, controlModeActive, tmuxGateway != nil {
+        if isConnectionAlive, controlModeState.isActive, tmuxGateway != nil {
             logger.info("🔄 Connection alive, resuming paused panes")
             Task {
                 await tmuxGateway?.resumeAllPausedPanes()
@@ -1061,7 +1092,7 @@ class SSHSession: ObservableObject, Identifiable {
         logger.info("🔄 Reconnect attempt \(reconnectAttempts)/\(maxReconnectAttempts)")
         
         // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
-        controlModeActive = false
+        controlModeState = .inactive
         gatewayEventTask?.cancel()
         gatewayEventTask = nil
         Task {
@@ -1122,12 +1153,12 @@ class SSHSession: ObservableObject, Identifiable {
     fileprivate func handleReceivedData(_ data: Data) {
         // Debug: log what we receive
         if let str = String(data: data, encoding: .utf8) {
-            logger.info("📥 handleReceivedData: \(data.count) bytes, controlModeDataRouting=\(self.controlModeDataRouting), tmuxMode=\(String(describing: self.tmuxMode))")
+            logger.info("📥 handleReceivedData: \(data.count) bytes, state=\(self.controlModeState), tmuxMode=\(String(describing: self.tmuxMode))")
             logger.info("📥 Content preview: \(str.prefix(200))")
         }
         
         // If control mode data routing is active, send through the gateway
-        if controlModeDataRouting, let gateway = tmuxGateway {
+        if controlModeState.isRouting, let gateway = tmuxGateway {
             // Gateway will parse the data and emit events via AsyncStream
             logger.info("📥 Routing to gateway")
             Task {
@@ -1139,7 +1170,7 @@ class SSHSession: ObservableObject, Identifiable {
         // Check if this data contains the start of control mode
         // tmux -CC sends control messages starting with % at line start
         // Common first messages: %begin, %session-changed, %output, %layout-change
-        if tmuxMode == .controlMode, !controlModeDataRouting {
+        if tmuxMode == .controlMode, controlModeState == .inactive {
             if let str = String(data: data, encoding: .utf8) {
                 // Check for any tmux control mode message (line starting with %)
                 // Also check raw string contains % near a newline (handles \r\n)
@@ -1148,11 +1179,11 @@ class SSHSession: ObservableObject, Identifiable {
                 logger.info("📥 Checking for control mode: hasControlMessage=\(hasControlMessage)")
                 
                 if hasControlMessage {
-                    logger.info("✅ Control mode detected! Starting data routing to gateway.")
+                    logger.info("✅ Control mode detected! State: \(controlModeState) → routing")
                     // Start routing data through the gateway
-                    // NOTE: controlModeActive remains false until gateway emits .activated
+                    // NOTE: controlModeState stays at .routing until gateway emits .activated
                     // This means user input will be queued until the gateway is fully ready
-                    controlModeDataRouting = true
+                    controlModeState = .routing
                     Task {
                         await tmuxGateway?.receive(data)
                     }
@@ -1240,7 +1271,7 @@ extension SSHSession: NIOSSHConnectionDelegate {
                 self.tmuxSessionManager?.clearPendingInputDisplay()
                 
                 for data in self.pendingInputQueue {
-                    if self.controlModeActive, let gateway = self.tmuxGateway {
+                    if self.controlModeState.isActive, let gateway = self.tmuxGateway {
                         Task {
                             await gateway.sendKeys(data)
                         }
