@@ -178,7 +178,7 @@ class TmuxSessionManager: ObservableObject {
     
     // MARK: - Connection
     
-    /// Set up the session manager with a control client
+    /// Set up the session manager with a control client (legacy)
     func setup(controlClient: TmuxControlClient, write: @escaping (String) -> Void) {
         self.controlClient = controlClient
         self.writeToSSH = write
@@ -187,6 +187,67 @@ class TmuxSessionManager: ObservableObject {
         // Note: SSHSession is still the primary delegate, but it forwards to us
         
         logger.info("TmuxSessionManager connected to control client")
+    }
+    
+    /// Callback type for async command responses
+    typealias CommandCallback = (Result<String, Error>) -> Void
+    
+    /// Function type for sending commands with callback
+    typealias SendCommandFunc = (String, @escaping CommandCallback) -> Void
+    
+    /// Send command function (used when gateway is the backend)
+    private var sendCommandFunc: SendCommandFunc?
+    
+    /// Set up the session manager with gateway (actor-based, new approach)
+    /// - Parameters:
+    ///   - sendCommand: Function to send commands and receive responses
+    ///   - write: Function to write raw strings to SSH (for fire-and-forget)
+    func setupWithGateway(
+        sendCommand: @escaping SendCommandFunc,
+        write: @escaping (String) -> Void
+    ) {
+        self.sendCommandFunc = sendCommand
+        self.writeToSSH = write
+        self.controlClient = nil  // No longer using TmuxControlClient
+        
+        logger.info("TmuxSessionManager connected to gateway")
+    }
+    
+    // MARK: - Command Abstraction
+    
+    /// Send a command and receive a response (works with both legacy client and gateway)
+    private func sendCommand(_ command: String, completion: @escaping CommandCallback) {
+        // Try new gateway-style first
+        if let sendFunc = sendCommandFunc, let write = writeToSSH {
+            sendFunc(command, completion)
+            return
+        }
+        
+        // Fall back to legacy control client
+        if let client = controlClient, let write = writeToSSH {
+            client.sendCommand(command, via: write, completion: completion)
+            return
+        }
+        
+        logger.warning("Cannot send command - no client or gateway available")
+        completion(.failure(TmuxGatewayError.notConnected))
+    }
+    
+    /// Send a fire-and-forget command (no response expected)
+    private func sendCommandFireAndForget(_ command: String) {
+        // For gateway mode, use writeToSSH directly (gateway handles newline)
+        if sendCommandFunc != nil, let write = writeToSSH {
+            write("\(command)\n")
+            return
+        }
+        
+        // Fall back to legacy control client
+        if let client = controlClient, let write = writeToSSH {
+            client.sendCommandFireAndForget(command, via: write)
+            return
+        }
+        
+        logger.warning("Cannot send fire-and-forget command - no client or gateway available")
     }
     
     /// Called when control mode becomes active
@@ -258,15 +319,15 @@ class TmuxSessionManager: ObservableObject {
     /// Refresh all state from tmux server
     /// Uses proper command routing so responses don't interfere with session restore
     func refreshState() {
-        guard let client = controlClient, let write = writeToSSH else {
-            logger.warning("Cannot refresh state: control client or write not available")
+        guard writeToSSH != nil || controlClient != nil else {
+            logger.warning("Cannot refresh state: no client or gateway available")
             return
         }
         
         logger.info("Refreshing tmux state")
         
         // Query sessions with proper callback
-        client.sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'", via: write) { [weak self] result in
+        sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'") { [weak self] result in
             switch result {
             case .success(let response):
                 self?.parseSessionsResponse(response)
@@ -276,7 +337,7 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // Query windows in current session
-        client.sendCommand("list-windows -F '\(TmuxQueryFormat.windows)'", via: write) { [weak self] result in
+        sendCommand("list-windows -F '\(TmuxQueryFormat.windows)'") { [weak self] result in
             switch result {
             case .success(let response):
                 self?.parseWindowsResponse(response)
@@ -286,7 +347,7 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // Query all panes
-        client.sendCommand("list-panes -a -F '\(TmuxQueryFormat.panes)'", via: write) { [weak self] result in
+        sendCommand("list-panes -a -F '\(TmuxQueryFormat.panes)'") { [weak self] result in
             switch result {
             case .success(let response):
                 self?.parsePanesResponse(response)
@@ -298,9 +359,7 @@ class TmuxSessionManager: ObservableObject {
     
     /// Query windows for a specific session
     func queryWindows(for sessionId: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
-        client.sendCommand("list-windows -t '\(sessionId)' -F '\(TmuxQueryFormat.windows)'", via: write) { [weak self] result in
+        sendCommand("list-windows -t '\(sessionId)' -F '\(TmuxQueryFormat.windows)'") { [weak self] result in
             if case .success(let response) = result {
                 self?.parseWindowsResponse(response)
             }
@@ -309,9 +368,7 @@ class TmuxSessionManager: ObservableObject {
     
     /// Query panes for a specific window
     func queryPanes(for windowId: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
-        client.sendCommand("list-panes -t '\(windowId)' -F '\(TmuxQueryFormat.panes)'", via: write) { [weak self] result in
+        sendCommand("list-panes -t '\(windowId)' -F '\(TmuxQueryFormat.panes)'") { [weak self] result in
             if case .success(let response) = result {
                 self?.parsePanesResponse(response)
             }
@@ -403,10 +460,8 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // Query window details using proper command routing
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
         // Query both window info and layout in parallel
-        client.sendCommand("display-message -t '\(windowId)' -p '#{window_index} #{window_name}'", via: write) { [weak self] result in
+        sendCommand("display-message -t '\(windowId)' -p '#{window_index} #{window_name}'") { [weak self] result in
             if case .success(let response) = result {
                 let parts = response.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1)
                 if parts.count >= 2, let index = Int(parts[0]) {
@@ -421,7 +476,7 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // Also query the layout for this window to build its split tree
-        client.sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'", via: write) { [weak self] result in
+        sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'") { [weak self] result in
             guard let self = self else { return }
             if case .success(let response) = result {
                 let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -552,9 +607,7 @@ class TmuxSessionManager: ObservableObject {
                 // No split tree yet - query the layout
                 logger.info("📑 No split tree for window \(windowId), querying layout...")
                 
-                guard let client = controlClient, let write = writeToSSH else { return }
-                
-                client.sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'", via: write) { [weak self] result in
+                sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'") { [weak self] result in
                     guard let self = self else { return }
                     if case .success(let response) = result {
                         let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -761,9 +814,7 @@ class TmuxSessionManager: ObservableObject {
         logger.debug("Pane mode changed: \(paneId)")
         
         // Query pane mode using proper command routing
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
-        client.sendCommand("display-message -t '\(paneId)' -p '#{pane_in_mode}'", via: write) { [weak self] result in
+        sendCommand("display-message -t '\(paneId)' -p '#{pane_in_mode}'") { [weak self] result in
             if case .success(let response) = result {
                 let inMode = response.trimmingCharacters(in: .whitespacesAndNewlines) != "0"
                 if var pane = self?.panes[paneId] {
@@ -778,9 +829,7 @@ class TmuxSessionManager: ObservableObject {
     func handleSessionsChanged() {
         logger.info("Sessions changed - refreshing session list")
         
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
-        client.sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'", via: write) { [weak self] result in
+        sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'") { [weak self] result in
             if case .success(let response) = result {
                 self?.parseSessionsResponse(response)
             }
@@ -790,18 +839,10 @@ class TmuxSessionManager: ObservableObject {
     // MARK: - Pane Output Routing
     
     /// Route pane output to the appropriate Ghostty surface
-    /// Uses state machine to ensure proper sequencing with history restore
+    /// Output always flows directly - no buffering for history restore
     func routeOutput(_ data: Data, to paneId: String) {
-        // Check pane restore state
-        if let state = paneRestoreStates[paneId] {
-            if state.shouldBufferOutput {
-                // Buffer output while awaiting history restore
-                paneRestoreStates[paneId]?.appendBufferedOutput(data)
-                logger.debug("📜 Buffering live output for pane \(paneId) awaiting history: \(data.count) bytes")
-                return
-            }
-            // State is .restored - proceed normally
-        }
+        // History restore is disabled - always flow output immediately
+        // (The state machine code is kept for future opt-in history restore)
         
         // Get existing surface or create one if factory is available
         guard let surface = getSurfaceOrCreate(for: paneId) else {
@@ -895,8 +936,17 @@ class TmuxSessionManager: ObservableObject {
         
         logger.info("Created Ghostty surface for pane \(paneId)")
         
-        // Handle history restore based on pane state
-        handleSurfaceCreatedForRestore(surface, paneId: paneId)
+        // Flush any output that was buffered before the surface was ready
+        if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+            logger.info("🔄 Flushing \(pending.count) buffered output chunks for pane \(paneId)")
+            for data in pending {
+                surface.feedData(data)
+            }
+        }
+        
+        // History restore is disabled - mark pane as restored immediately
+        // This ensures output flows without buffering delays
+        paneRestoreStates[paneId] = .restored
         
         return surface
     }
@@ -988,12 +1038,7 @@ class TmuxSessionManager: ObservableObject {
             }
         }
         
-        guard let client = controlClient else {
-            logger.warning("📜 Cannot restore pane history - control client not available")
-            return
-        }
-        
-        guard let write = writeToSSH else {
+        guard writeToSSH != nil else {
             logger.warning("📜 Cannot restore pane history - writeToSSH not configured")
             return
         }
@@ -1003,7 +1048,18 @@ class TmuxSessionManager: ObservableObject {
         // Transition to awaiting history state with any existing buffered data
         paneRestoreStates[paneId] = .awaitingHistory(bufferedOutput: existingBuffer)
         
-        client.restorePaneHistory(paneId: paneId, via: write)
+        // Send capture-pane command via abstracted sendCommand
+        // The response will be handled by the gateway and forwarded to historyRestoreComplete
+        sendCommand("capture-pane -pe -t \(paneId) -S -") { [weak self] result in
+            switch result {
+            case .success(let content):
+                self?.historyRestoreComplete(for: paneId, content: content)
+            case .failure(let error):
+                logger.error("📜 Failed to restore history for pane \(paneId): \(error)")
+                // Clear state on failure so we don't stay stuck
+                self?.paneRestoreStates[paneId] = .restored
+            }
+        }
     }
     
     /// Called when history restore is complete for a pane
@@ -1181,56 +1237,45 @@ class TmuxSessionManager: ObservableObject {
     
     /// Create a new window
     func newWindow(name: String? = nil) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
         var cmd = "new-window"
         if let name = name {
             cmd += " -n '\(name)'"
         }
-        client.sendCommandFireAndForget(cmd, via: write)
+        sendCommandFireAndForget(cmd)
     }
     
     /// Close current window
     func closeWindow() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("kill-window", via: write)
+        sendCommandFireAndForget("kill-window")
     }
     
     /// Close a specific window by ID
     func closeWindow(windowId: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("kill-window -t '\(windowId)'", via: write)
+        sendCommandFireAndForget("kill-window -t '\(windowId)'")
     }
     
     /// Rename current window
     func renameWindow(_ name: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
         // Escape single quotes in name to prevent command injection
         let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
-        client.sendCommandFireAndForget("rename-window '\(safeName)'", via: write)
+        sendCommandFireAndForget("rename-window '\(safeName)'")
     }
     
     /// Rename a specific window by ID
     func renameWindow(windowId: String, name: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
         // Escape single quotes in name to prevent command injection
         let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
-        client.sendCommandFireAndForget("rename-window -t '\(windowId)' '\(safeName)'", via: write)
+        sendCommandFireAndForget("rename-window -t '\(windowId)' '\(safeName)'")
     }
     
     /// Select a window by ID
     func selectWindow(_ windowId: String) {
-        guard let client = controlClient, let write = writeToSSH else {
-            logger.warning("📑 selectWindow(\(windowId)) - NO client or write!")
-            return
-        }
-        
         logger.info("📑 selectWindow: \(windowId)")
         logger.info("📑   Current windows: \(windows.keys.sorted().joined(separator: ", "))")
         logger.info("📑   Current split trees: \(windowSplitTrees.keys.sorted().joined(separator: ", "))")
         
         // Send select-window command to tmux
-        client.sendCommandFireAndForget("select-window -t '\(windowId)'", via: write)
+        sendCommandFireAndForget("select-window -t '\(windowId)'")
         focusedWindowId = windowId
         
         // Update current split tree for the newly focused window
@@ -1259,7 +1304,7 @@ class TmuxSessionManager: ObservableObject {
             // This prevents showing the old window's content during transition
             currentSplitTree = TmuxSplitTree()
             
-            client.sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'", via: write) { [weak self] result in
+            sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'") { [weak self] result in
                 guard let self = self else { return }
                 if case .success(let response) = result {
                     let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1288,69 +1333,58 @@ class TmuxSessionManager: ObservableObject {
     
     /// Navigate to next window (tab)
     func nextWindow() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("next-window", via: write)
+        sendCommandFireAndForget("next-window")
     }
     
     /// Navigate to previous window (tab)
     func previousWindow() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("previous-window", via: write)
+        sendCommandFireAndForget("previous-window")
     }
     
     /// Navigate to last window (most recently used)
     func lastWindow() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("last-window", via: write)
+        sendCommandFireAndForget("last-window")
     }
     
     /// Navigate to window by index (1-based like Ghostty Cmd+1-8)
     func selectWindowByIndex(_ index: Int) {
-        guard let client = controlClient, let write = writeToSSH else { return }
         // tmux uses 0-based indexing by default, but we accept 1-based from Ghostty shortcuts
-        client.sendCommandFireAndForget("select-window -t :\(index - 1)", via: write)
+        sendCommandFireAndForget("select-window -t :\(index - 1)")
     }
     
     /// Navigate to next pane
     func nextPane() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("select-pane -t :.+", via: write)
+        sendCommandFireAndForget("select-pane -t :.+")
     }
     
     /// Navigate to previous pane
     func previousPane() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("select-pane -t :.-", via: write)
+        sendCommandFireAndForget("select-pane -t :.-")
     }
     
     /// Toggle pane zoom (tmux zoom)
     func toggleTmuxZoom() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("resize-pane -Z", via: write)
+        sendCommandFireAndForget("resize-pane -Z")
     }
     
     /// Split pane horizontally (side by side)
     func splitHorizontal() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("split-window -h", via: write)
+        sendCommandFireAndForget("split-window -h")
     }
     
     /// Split pane vertically (stacked)
     func splitVertical() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("split-window -v", via: write)
+        sendCommandFireAndForget("split-window -v")
     }
     
     /// Close current pane
     func closePane() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("kill-pane", via: write)
+        sendCommandFireAndForget("kill-pane")
     }
     
     /// Select a pane by ID
     func selectPane(_ paneId: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("select-pane -t '\(paneId)'", via: write)
+        sendCommandFireAndForget("select-pane -t '\(paneId)'")
         focusedPaneId = paneId
     }
     
@@ -1365,8 +1399,6 @@ class TmuxSessionManager: ObservableObject {
     
     /// Navigate to pane in direction
     func navigatePane(_ direction: PaneDirection) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
         let dirFlag: String
         switch direction {
         case .up: dirFlag = "-U"
@@ -1374,7 +1406,7 @@ class TmuxSessionManager: ObservableObject {
         case .left: dirFlag = "-L"
         case .right: dirFlag = "-R"
         }
-        client.sendCommandFireAndForget("select-pane \(dirFlag)", via: write)
+        sendCommandFireAndForget("select-pane \(dirFlag)")
     }
     
     enum PaneDirection {
@@ -1398,8 +1430,6 @@ class TmuxSessionManager: ObservableObject {
     /// Equalize all splits in the current window
     /// Detects the root split direction and uses the appropriate layout
     func equalizeSplits() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        
         // Determine layout based on root split direction
         let layout: String
         if case .split(let split) = currentSplitTree.root {
@@ -1417,7 +1447,7 @@ class TmuxSessionManager: ObservableObject {
         }
         
         logger.info("📐 Equalizing splits with layout: \(layout)")
-        client.sendCommandFireAndForget("select-layout \(layout)", via: write)
+        sendCommandFireAndForget("select-layout \(layout)")
     }
     
     /// Update a split ratio locally (for UI drag feedback)
@@ -1431,11 +1461,6 @@ class TmuxSessionManager: ObservableObject {
     /// Sync a split ratio to tmux (called after drag settles)
     /// This sends the resize-pane command to tmux.
     func syncSplitRatioToTmux(forPaneId paneId: Int, ratio: Double) {
-        guard let client = controlClient, let write = writeToSSH else {
-            logger.warning("⚠️ No tmux client or write function - cannot sync resize")
-            return
-        }
-        
         // Find the split that contains this pane
         guard let splitInfo = findSplitContainingWithSize(paneId: paneId) else {
             logger.warning("⚠️ Could not find split containing %\(paneId)")
@@ -1451,7 +1476,7 @@ class TmuxSessionManager: ObservableObject {
         let command = "resize-pane -t %\(paneId) \(sizeFlag) \(newSize)"
         
         logger.info("📐 Syncing resize to tmux: \(command)")
-        client.sendCommandFireAndForget(command, via: write)
+        sendCommandFireAndForget(command)
     }
     
     /// Update a split ratio and sync to tmux (legacy - use syncSplitRatioToTmux instead)
@@ -1463,11 +1488,6 @@ class TmuxSessionManager: ObservableObject {
         updateSplitRatio(forPaneId: paneId, ratio: ratio)
         
         // Then send resize-pane to tmux
-        guard let client = controlClient, let write = writeToSSH else {
-            logger.warning("⚠️ No tmux client or write function - cannot sync resize")
-            return
-        }
-        
         // Find the split that contains this pane to determine direction and calculate size
         guard let splitInfo = findSplitContainingWithSize(paneId: paneId) else {
             logger.warning("⚠️ Could not find split containing %\(paneId)")
@@ -1494,7 +1514,7 @@ class TmuxSessionManager: ObservableObject {
         
         let command = "resize-pane -t %\(paneId) \(sizeFlag) \(newSize)"
         logger.info("📐 Sending: \(command)")
-        client.sendCommandFireAndForget(command, via: write)
+        sendCommandFireAndForget(command)
     }
     
     /// Find the split node that contains the given pane ID and return its direction and total size
@@ -1596,24 +1616,31 @@ class TmuxSessionManager: ObservableObject {
     
     /// Resize terminal (all panes)
     func resize(cols: Int, rows: Int) {
-        controlClient?.resize(cols: cols, rows: rows, via: { [weak self] cmd in
-            self?.writeToSSH?(cmd)
-        })
+        // Use the abstracted sendCommandFireAndForget
+        sendCommandFireAndForget("refresh-client -C \(cols),\(rows)")
     }
     
     /// Send input to the focused pane
+    /// Note: Input routing should go through SSHSession which uses TmuxGateway.sendKeys()
+    /// This is a legacy method kept for compatibility
     func sendInput(_ data: Data) {
         guard let write = writeToSSH else { return }
         
-        let command = controlClient?.makeSendKeysCommand(for: data, toPaneId: focusedPaneId) ?? ""
+        // Convert data to hex for send-keys -H
+        let hexString = data.map { String(format: "%02x", $0) }.joined(separator: " ")
+        let command = "send-keys -H -t \(focusedPaneId) \(hexString)\n"
         write(command)
     }
     
     /// Send input to a specific pane
+    /// Note: Input routing should go through SSHSession which uses TmuxGateway.sendKeys()
+    /// This is a legacy method kept for compatibility
     func sendInput(_ data: Data, to paneId: String) {
         guard let write = writeToSSH else { return }
         
-        let command = controlClient?.makeSendKeysCommand(for: data, toPaneId: paneId) ?? ""
+        // Convert data to hex for send-keys -H
+        let hexString = data.map { String(format: "%02x", $0) }.joined(separator: " ")
+        let command = "send-keys -H -t \(paneId) \(hexString)\n"
         write(command)
     }
     
@@ -1621,20 +1648,17 @@ class TmuxSessionManager: ObservableObject {
     
     /// Create a new session
     func newSession(name: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("new-session -d -s '\(name)'", via: write)
+        sendCommandFireAndForget("new-session -d -s '\(name)'")
     }
     
     /// Switch to a session
     func switchSession(_ sessionId: String) {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("switch-client -t '\(sessionId)'", via: write)
+        sendCommandFireAndForget("switch-client -t '\(sessionId)'")
     }
     
     /// Detach from current session
     func detach() {
-        guard let client = controlClient, let write = writeToSSH else { return }
-        client.sendCommandFireAndForget("detach-client", via: write)
+        sendCommandFireAndForget("detach-client")
     }
     
     // MARK: - Layout Helpers

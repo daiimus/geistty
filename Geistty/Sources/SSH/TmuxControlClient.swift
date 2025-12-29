@@ -5,6 +5,11 @@
 //  tmux Control Mode client for proper scrollback access.
 //  Uses tmux's native protocol instead of marker-based capture-pane hacks.
 //
+//  Architecture:
+//  - TmuxProtocolParser: Pure synchronous protocol parsing (extracted)
+//  - KittyKeyboardTranslator: Keyboard input translation (extracted)
+//  - TmuxControlClient: Coordinates parsing, command queue, and delegate callbacks
+//
 //  Control Mode Protocol:
 //  - Start: `tmux -CC attach` or `tmux -CC new`
 //  - Responses: %begin/%end/%error blocks
@@ -19,7 +24,10 @@ import os.log
 
 private let logger = Logger(subsystem: "com.geistty", category: "TmuxControl")
 
-/// tmux Control Mode message types
+// MARK: - Legacy Message Type (for delegate compatibility)
+
+/// tmux Control Mode message types (legacy, for delegate callbacks)
+/// NOTE: New code should use TmuxMessage from TmuxProtocolParser.swift
 enum TmuxControlMessage {
     /// Command response - successful
     case response(commandId: String, data: String)
@@ -72,12 +80,7 @@ enum TmuxControlMessage {
     case unknown(line: String)
 }
 
-/// State for parsing a multi-line %begin/%end block
-private struct PendingBlock {
-    let commandNumber: String  // tmux-assigned command ID (sequential)
-    let timestamp: String
-    var lines: [String] = []
-}
+// NOTE: PendingBlock removed - we now use TmuxBlockState from TmuxProtocolParser
 
 /// A pending command waiting for a response
 private struct PendingCommand {
@@ -165,11 +168,21 @@ class TmuxControlClient {
     /// We maintain our own copy since we're the "terminal" for tmux
     private var paneBuffers: [String: Data] = [:]
     
-    /// Current block being parsed (nil when not inside a block)
-    private var pendingBlock: PendingBlock?
+    // MARK: - Parser State (delegated to TmuxProtocolParser)
+    
+    /// Protocol parser instance (pure, synchronous)
+    private let parser = TmuxProtocolParser()
+    
+    /// Current block state for multi-line responses
+    private var blockState: TmuxBlockState?
     
     /// Unparsed data buffer (for partial line handling)
     private var parseBuffer: Data = Data()
+    
+    // MARK: - Keyboard Translation
+    
+    /// Keyboard translator for converting Kitty protocol to legacy codes
+    private let keyboardTranslator: KeyboardTranslator = KittyKeyboardTranslator()
     
     /// Active pane ID (for single-pane sessions)
     private(set) var activePaneId: String = "%0"
@@ -267,435 +280,7 @@ class TmuxControlClient {
     
     // MARK: - Input Handling
     
-    // MARK: - Kitty Keyboard Protocol Translation
-    
-    /// Kitty keyboard protocol modifier bits (after subtracting 1 from sequence value)
-    private struct KittyModifiers {
-        let shift: Bool
-        let alt: Bool
-        let ctrl: Bool
-        let superKey: Bool
-        let hyper: Bool
-        let meta: Bool
-        let capsLock: Bool
-        let numLock: Bool
-        
-        init(sequenceValue: Int) {
-            // Sequence encodes mods+1, so subtract 1 to get raw bits
-            let bits = sequenceValue > 0 ? sequenceValue - 1 : 0
-            self.shift = (bits & 1) != 0
-            self.alt = (bits & 2) != 0
-            self.ctrl = (bits & 4) != 0
-            self.superKey = (bits & 8) != 0
-            self.hyper = (bits & 16) != 0
-            self.meta = (bits & 32) != 0
-            self.capsLock = (bits & 64) != 0
-            self.numLock = (bits & 128) != 0
-        }
-        
-        var hasBindingModifiers: Bool {
-            ctrl || alt || superKey || hyper || meta
-        }
-    }
-    
-    /// Functional key codes in the kitty protocol
-    /// Maps kitty protocol codes to legacy escape sequences
-    private enum FunctionalKey {
-        case escape         // 27
-        case enter          // 13
-        case tab            // 9
-        case backspace      // 127
-        case insert         // 2~
-        case delete         // 3~
-        case arrowLeft      // D
-        case arrowRight     // C
-        case arrowUp        // A
-        case arrowDown      // B
-        case pageUp         // 5~
-        case pageDown       // 6~
-        case home           // H
-        case end            // F
-        case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
-        case f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25
-        
-        /// Convert kitty code to legacy bytes
-        func toLegacyBytes(mods: KittyModifiers) -> [UInt8] {
-            // For modified keys, we need to include the modifier in the sequence
-            let modParam = mods.hasBindingModifiers ? modifierParam(mods) : nil
-            
-            switch self {
-            case .escape:
-                return [0x1b]
-            case .enter:
-                return [0x0d]  // CR
-            case .tab:
-                if mods.shift {
-                    return [0x1b, 0x5b, 0x5a]  // ESC[Z for Shift+Tab
-                }
-                return [0x09]
-            case .backspace:
-                if mods.ctrl {
-                    return [0x08]  // Ctrl+Backspace = BS
-                }
-                return [0x7f]  // DEL
-            case .insert:
-                return csiSequence(code: 2, final: 0x7e, mods: modParam)
-            case .delete:
-                return csiSequence(code: 3, final: 0x7e, mods: modParam)
-            case .arrowUp:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x41, mods: modParam)
-            case .arrowDown:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x42, mods: modParam)
-            case .arrowRight:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x43, mods: modParam)
-            case .arrowLeft:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x44, mods: modParam)
-            case .home:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x48, mods: modParam)
-            case .end:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x46, mods: modParam)
-            case .pageUp:
-                return csiSequence(code: 5, final: 0x7e, mods: modParam)
-            case .pageDown:
-                return csiSequence(code: 6, final: 0x7e, mods: modParam)
-            case .f1:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x50, mods: modParam)  // ESC[P or ESC[1;modP
-            case .f2:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x51, mods: modParam)
-            case .f3:
-                return csiSequence(code: 13, final: 0x7e, mods: modParam)
-            case .f4:
-                return csiSequence(code: modParam != nil ? 1 : nil, final: 0x53, mods: modParam)
-            case .f5:
-                return csiSequence(code: 15, final: 0x7e, mods: modParam)
-            case .f6:
-                return csiSequence(code: 17, final: 0x7e, mods: modParam)
-            case .f7:
-                return csiSequence(code: 18, final: 0x7e, mods: modParam)
-            case .f8:
-                return csiSequence(code: 19, final: 0x7e, mods: modParam)
-            case .f9:
-                return csiSequence(code: 20, final: 0x7e, mods: modParam)
-            case .f10:
-                return csiSequence(code: 21, final: 0x7e, mods: modParam)
-            case .f11:
-                return csiSequence(code: 23, final: 0x7e, mods: modParam)
-            case .f12:
-                return csiSequence(code: 24, final: 0x7e, mods: modParam)
-            case .f13:
-                return csiSequence(code: 25, final: 0x7e, mods: modParam)
-            case .f14:
-                return csiSequence(code: 26, final: 0x7e, mods: modParam)
-            case .f15:
-                return csiSequence(code: 28, final: 0x7e, mods: modParam)
-            case .f16:
-                return csiSequence(code: 29, final: 0x7e, mods: modParam)
-            case .f17:
-                return csiSequence(code: 31, final: 0x7e, mods: modParam)
-            case .f18:
-                return csiSequence(code: 32, final: 0x7e, mods: modParam)
-            case .f19:
-                return csiSequence(code: 33, final: 0x7e, mods: modParam)
-            case .f20:
-                return csiSequence(code: 34, final: 0x7e, mods: modParam)
-            case .f21, .f22, .f23, .f24, .f25:
-                // F21-F25 don't have standard legacy codes, pass as-is
-                return []
-            }
-        }
-        
-        private func modifierParam(_ mods: KittyModifiers) -> Int {
-            var param = 1
-            if mods.shift { param += 1 }
-            if mods.alt { param += 2 }
-            if mods.ctrl { param += 4 }
-            if mods.superKey { param += 8 }
-            return param
-        }
-        
-        private func csiSequence(code: Int?, final: UInt8, mods: Int?) -> [UInt8] {
-            var result: [UInt8] = [0x1b, 0x5b]  // ESC [
-            
-            if let code = code {
-                for char in String(code).utf8 {
-                    result.append(char)
-                }
-            }
-            
-            if let mods = mods {
-                result.append(0x3b)  // ;
-                for char in String(mods).utf8 {
-                    result.append(char)
-                }
-            }
-            
-            result.append(final)
-            return result
-        }
-        
-        /// Create from kitty protocol code and final byte
-        static func from(code: Int, final: UInt8) -> FunctionalKey? {
-            switch (code, final) {
-            // CSI u sequences (final = 'u')
-            case (27, 0x75): return .escape
-            case (13, 0x75): return .enter
-            case (9, 0x75): return .tab
-            case (127, 0x75): return .backspace
-            
-            // CSI ~ sequences (final = '~')
-            case (2, 0x7e): return .insert
-            case (3, 0x7e): return .delete
-            case (5, 0x7e): return .pageUp
-            case (6, 0x7e): return .pageDown
-            case (13, 0x7e): return .f3
-            case (15, 0x7e): return .f5
-            case (17, 0x7e): return .f6
-            case (18, 0x7e): return .f7
-            case (19, 0x7e): return .f8
-            case (20, 0x7e): return .f9
-            case (21, 0x7e): return .f10
-            case (23, 0x7e): return .f11
-            case (24, 0x7e): return .f12
-            
-            // High-numbered function keys (kitty-specific codes)
-            case (57376, 0x75): return .f13
-            case (57377, 0x75): return .f14
-            case (57378, 0x75): return .f15
-            case (57379, 0x75): return .f16
-            case (57380, 0x75): return .f17
-            case (57381, 0x75): return .f18
-            case (57382, 0x75): return .f19
-            case (57383, 0x75): return .f20
-            case (57384, 0x75): return .f21
-            case (57385, 0x75): return .f22
-            case (57386, 0x75): return .f23
-            case (57387, 0x75): return .f24
-            case (57388, 0x75): return .f25
-            
-            // CSI letter sequences (code = 1 typically)
-            case (_, 0x41): return .arrowUp      // A
-            case (_, 0x42): return .arrowDown    // B
-            case (_, 0x43): return .arrowRight   // C
-            case (_, 0x44): return .arrowLeft    // D
-            case (_, 0x48): return .home         // H
-            case (_, 0x46): return .end          // F
-            case (_, 0x50): return .f1           // P
-            case (_, 0x51): return .f2           // Q
-            case (_, 0x53): return .f4           // S
-            
-            default: return nil
-            }
-        }
-    }
-    
-    /// Comprehensive translator for Kitty keyboard protocol sequences to legacy terminal codes.
-    ///
-    /// The Kitty keyboard protocol (https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
-    /// encodes keys as CSI sequences with different final bytes:
-    /// - `ESC [ <code> ; <mods> u` - Unicode codepoints and special keys
-    /// - `ESC [ <code> ; <mods> ~` - Function keys, insert, delete, page up/down  
-    /// - `ESC [ 1 ; <mods> <letter>` - Arrow keys (A/B/C/D), Home (H), End (F), F1-F4 (P/Q/R/S)
-    ///
-    /// Modifier encoding: sequence value = modifier_bits + 1
-    /// - shift=1, alt=2, ctrl=4, super=8, hyper=16, meta=32, caps_lock=64, num_lock=128
-    ///
-    /// Event types (after colon): 1=press, 2=repeat, 3=release
-    ///
-    /// This translator converts these to legacy terminal sequences that tmux understands.
-    private func translateKittyToLegacy(_ data: Data) -> Data {
-        var result = Data()
-        var i = 0
-        let bytes = Array(data)
-        
-        while i < bytes.count {
-            // Check for CSI sequence: ESC [
-            if i + 2 < bytes.count && bytes[i] == 0x1b && bytes[i + 1] == 0x5b {
-                if let (translated, consumed) = parseAndTranslateCSI(bytes: bytes, startIndex: i + 2) {
-                    result.append(contentsOf: translated)
-                    i += consumed + 2  // +2 for ESC [
-                    continue
-                }
-            }
-            
-            // Not a translatable CSI sequence - copy byte as-is
-            result.append(bytes[i])
-            i += 1
-        }
-        
-        return result
-    }
-    
-    /// Parse and translate a CSI sequence starting after "ESC ["
-    /// Returns (translated bytes, number of bytes consumed from input) or nil if not translatable
-    private func parseAndTranslateCSI(bytes: [UInt8], startIndex: Int) -> (translated: [UInt8], consumed: Int)? {
-        var j = startIndex
-        
-        // Parse the first number (code)
-        var code: Int = 0
-        var hasCode = false
-        while j < bytes.count && bytes[j] >= 0x30 && bytes[j] <= 0x39 {
-            code = code * 10 + Int(bytes[j] - 0x30)
-            hasCode = true
-            j += 1
-        }
-        
-        // Parse alternates (colon-separated, used in kitty for shifted/base keys)
-        // Format: code:shifted:base
-        while j < bytes.count && bytes[j] == 0x3a {  // ':'
-            j += 1
-            while j < bytes.count && bytes[j] >= 0x30 && bytes[j] <= 0x39 {
-                j += 1
-            }
-        }
-        
-        // Parse modifiers (after semicolon)
-        var mods: Int = 1
-        if j < bytes.count && bytes[j] == 0x3b {  // ';'
-            j += 1
-            mods = 0
-            while j < bytes.count && bytes[j] >= 0x30 && bytes[j] <= 0x39 {
-                mods = mods * 10 + Int(bytes[j] - 0x30)
-                j += 1
-            }
-            
-            // Skip event type (after colon) - we only care about the key, not press/release
-            if j < bytes.count && bytes[j] == 0x3a {  // ':'
-                j += 1
-                while j < bytes.count && bytes[j] >= 0x30 && bytes[j] <= 0x39 {
-                    j += 1
-                }
-            }
-        }
-        
-        // Parse text section (after second semicolon, kitty report_associated mode)
-        // Format: ;mods;text1:text2:...
-        if j < bytes.count && bytes[j] == 0x3b {  // ';'
-            j += 1
-            // Skip the text codepoints
-            while j < bytes.count && (bytes[j] >= 0x30 && bytes[j] <= 0x39 || bytes[j] == 0x3a) {
-                j += 1
-            }
-        }
-        
-        // Check for final byte (must be in range 0x40-0x7e for CSI sequences)
-        guard j < bytes.count && bytes[j] >= 0x40 && bytes[j] <= 0x7e else {
-            return nil
-        }
-        
-        let finalByte = bytes[j]
-        let consumed = j - startIndex + 1
-        let modifiers = KittyModifiers(sequenceValue: mods)
-        
-        // Try to match as a functional key
-        if let functionalKey = FunctionalKey.from(code: code, final: finalByte) {
-            let translated = functionalKey.toLegacyBytes(mods: modifiers)
-            if !translated.isEmpty {
-                logger.debug("Kitty functional key: code=\(code), final=\(String(format: "0x%02x", finalByte)), mods=\(mods) -> \(translated.count) bytes")
-                return (translated, consumed)
-            }
-        }
-        
-        // Handle CSI u sequences for regular characters
-        if finalByte == 0x75 {  // 'u'
-            // Ctrl+letter -> C0 control code
-            if modifiers.ctrl && !modifiers.shift {
-                if code >= 0x40 && code <= 0x7f {
-                    // Standard ctrl translation
-                    var ctrlChar = code
-                    if code >= 0x61 && code <= 0x7a {  // lowercase a-z
-                        ctrlChar = code - 0x20  // convert to uppercase
-                    }
-                    let c0Code = UInt8((ctrlChar - 0x40) & 0x1f)
-                    
-                    var translated: [UInt8] = []
-                    if modifiers.alt {
-                        translated.append(0x1b)  // ESC prefix for Alt
-                    }
-                    translated.append(c0Code)
-                    
-                    logger.debug("Kitty Ctrl+char: code=\(code), mods=\(mods) -> C0=0x\(String(format: "%02x", c0Code))")
-                    return (translated, consumed)
-                }
-                
-                // Special control codes (code < 0x20)
-                if code < 0x20 {
-                    var translated: [UInt8] = []
-                    if modifiers.alt {
-                        translated.append(0x1b)
-                    }
-                    translated.append(UInt8(code))
-                    
-                    logger.debug("Kitty special ctrl: code=\(code), mods=\(mods)")
-                    return (translated, consumed)
-                }
-            }
-            
-            // Alt+character -> ESC + character
-            if modifiers.alt && !modifiers.ctrl && !modifiers.shift {
-                if code > 0 && code < 128 {
-                    logger.debug("Kitty Alt+char: code=\(code)")
-                    return ([0x1b, UInt8(code)], consumed)
-                }
-            }
-            
-            // Plain character (no modifiers or just shift) -> pass the character
-            if !modifiers.hasBindingModifiers || (modifiers.shift && !modifiers.ctrl && !modifiers.alt) {
-                if code > 0 && code < 128 {
-                    logger.debug("Kitty plain char: code=\(code)")
-                    return ([UInt8(code)], consumed)
-                }
-                // For Unicode characters, encode as UTF-8
-                if code > 127 {
-                    var utf8: [UInt8] = []
-                    if code < 0x80 {
-                        utf8.append(UInt8(code))
-                    } else if code < 0x800 {
-                        utf8.append(UInt8(0xC0 | (code >> 6)))
-                        utf8.append(UInt8(0x80 | (code & 0x3F)))
-                    } else if code < 0x10000 {
-                        utf8.append(UInt8(0xE0 | (code >> 12)))
-                        utf8.append(UInt8(0x80 | ((code >> 6) & 0x3F)))
-                        utf8.append(UInt8(0x80 | (code & 0x3F)))
-                    } else {
-                        utf8.append(UInt8(0xF0 | (code >> 18)))
-                        utf8.append(UInt8(0x80 | ((code >> 12) & 0x3F)))
-                        utf8.append(UInt8(0x80 | ((code >> 6) & 0x3F)))
-                        utf8.append(UInt8(0x80 | (code & 0x3F)))
-                    }
-                    logger.debug("Kitty Unicode: code=\(code) -> UTF-8")
-                    return (utf8, consumed)
-                }
-            }
-        }
-        
-        // For CSI ~ and letter sequences without special handling, 
-        // reconstruct legacy sequence format
-        if finalByte == 0x7e || (finalByte >= 0x41 && finalByte <= 0x5a) {  // ~ or A-Z
-            var legacy: [UInt8] = [0x1b, 0x5b]  // ESC [
-            
-            if hasCode && (finalByte == 0x7e || mods > 1) {
-                for char in String(code).utf8 {
-                    legacy.append(char)
-                }
-            }
-            
-            if mods > 1 {
-                legacy.append(0x3b)  // ;
-                for char in String(mods).utf8 {
-                    legacy.append(char)
-                }
-            }
-            
-            legacy.append(finalByte)
-            
-            logger.debug("Kitty CSI passthrough: code=\(code), final=\(String(format: "0x%02x", finalByte)), mods=\(mods)")
-            return (legacy, consumed)
-        }
-        
-        // Unknown sequence - don't translate
-        logger.debug("Kitty unknown: code=\(code), final=\(String(format: "0x%02x", finalByte)), mods=\(mods)")
-        return nil
-    }
+    // NOTE: Kitty keyboard protocol translation moved to KittyKeyboardTranslator.swift
     
     /// Send user input to a pane via send-keys command
     /// In control mode, we can't send raw characters - they would be interpreted as tmux commands.
@@ -710,7 +295,8 @@ class TmuxControlClient {
         
         // Translate Kitty keyboard protocol sequences to legacy terminal codes
         // This handles the case where Ghostty sends Ctrl+C as ESC[99;5u instead of 0x03
-        let translatedData = translateKittyToLegacy(data)
+        // Uses the injected keyboard translator (KittyKeyboardTranslator by default)
+        let translatedData = keyboardTranslator.translate(data)
         
         // For send-keys, we use -l (literal) to send the exact characters.
         // We need to escape special characters for the tmux command line.
@@ -729,287 +315,65 @@ class TmuxControlClient {
         write(command)
     }
     
-    // MARK: - Parsing
+    // MARK: - Parsing (delegated to TmuxProtocolParser)
     
     /// Parse incoming data from tmux control mode
     /// Call this with each chunk of data received from SSH
     func parse(_ data: Data) {
-        parseBuffer.append(data)
-        
         // Debug: log raw data
         if let str = String(data: data, encoding: .utf8) {
             logger.debug("Raw data received (\(data.count) bytes): \(str.prefix(200))")
         }
         
-        // Process complete lines
-        while let newlineIndex = parseBuffer.firstIndex(of: 0x0A) { // \n
-            let lineData = parseBuffer[..<newlineIndex]
-            parseBuffer = Data(parseBuffer[(newlineIndex + 1)...])
-            
-            guard let line = String(data: lineData, encoding: .utf8) else {
-                logger.warning("Failed to decode line as UTF-8")
-                continue
-            }
-            
-            parseLine(line)
+        // Delegate to pure protocol parser
+        let (messages, remainingBuffer, newBlockState) = parser.parse(
+            data,
+            buffer: parseBuffer,
+            blockState: blockState
+        )
+        
+        // Update local state
+        parseBuffer = remainingBuffer
+        blockState = newBlockState
+        
+        // Process each parsed message
+        for message in messages {
+            handleParsedMessage(message)
         }
     }
     
-    /// Parse a single line of control mode output
-    private func parseLine(_ line: String) {
-        // Remove trailing \r if present (tmux sometimes sends \r\n)
-        let trimmedLine = line.hasSuffix("\r") ? String(line.dropLast()) : line
-        
-        // Check if we're inside a %begin/%end block
-        if let block = pendingBlock {
-            if trimmedLine.hasPrefix("%end ") {
-                // Block complete
-                finishBlock(block, success: true)
-                pendingBlock = nil
-            } else if trimmedLine.hasPrefix("%error ") {
-                // Block failed
-                finishBlock(block, success: false)
-                pendingBlock = nil
-            } else if trimmedLine.hasPrefix("%") {
-                // This is a notification (like %layout-change, %output) that arrived
-                // in the middle of a %begin/%end block. Process it separately.
-                // tmux can interleave notifications with command responses.
-                let message = parseMessage(trimmedLine)
-                handleMessage(message)
-            } else {
-                // Content line - add to block
-                pendingBlock?.lines.append(trimmedLine)
-            }
-            return
-        }
-        
-        // Parse control mode message
-        let message = parseMessage(trimmedLine)
-        handleMessage(message)
-    }
+    // MARK: - Message Handling (converts TmuxMessage to existing flow)
     
-    /// Parse a control mode message line
-    private func parseMessage(_ line: String) -> TmuxControlMessage {
-        guard line.hasPrefix("%") else {
-            // Not a control message - could be startup banner or prompt
-            logger.debug("Non-control line: \(line.prefix(100))")
-            return .unknown(line: line)
-        }
-        
-        logger.info("Control message: \(line.prefix(100))")
-        
-        // Split on first space
-        let parts = line.split(separator: " ", maxSplits: 1)
-        guard !parts.isEmpty else {
-            return .unknown(line: line)
-        }
-        
-        let messageType = String(parts[0])
-        let rest = parts.count > 1 ? String(parts[1]) : ""
-        
-        switch messageType {
-        case "%begin":
-            // %begin <timestamp> <command-number> <flags>
-            // Start of command response block
-            // The command-number is assigned by tmux sequentially (0, 1, 2, ...)
-            let beginParts = rest.split(separator: " ")
-            let timestamp = beginParts.count > 0 ? String(beginParts[0]) : ""
-            let commandNumber = beginParts.count > 1 ? String(beginParts[1]) : "0"
-            let flags = beginParts.count > 2 ? String(beginParts[2]) : "0"
-            logger.info("%begin block: time=\(timestamp) cmd=\(commandNumber) flags=\(flags)")
-            
+    /// Handle a parsed message from TmuxProtocolParser
+    private func handleParsedMessage(_ message: TmuxMessage) {
+        switch message {
+        case .blockBegin(_, let commandNumber, _):
             // Map this tmux command number to our first pending command (FIFO)
             if !pendingCommandQueue.isEmpty {
                 let pending = pendingCommandQueue[0]
                 commandNumberToLocalId[commandNumber] = pending.localId
                 logger.debug("Mapped tmux cmd \(commandNumber) -> \(pending.localId)")
             }
-            
-            pendingBlock = PendingBlock(commandNumber: commandNumber, timestamp: timestamp)
             // Don't trigger activation here - wait until first block completes
-            // This ensures tmux is ready to receive commands
-            return .unknown(line: line) // Don't emit a separate message
             
-        case "%output":
-            // %output <pane-id> <octal-escaped-data>
-            let outputParts = rest.split(separator: " ", maxSplits: 1)
-            if outputParts.count >= 2 {
-                let paneId = String(outputParts[0])
-                let escapedData = String(outputParts[1])
-                if let decodedData = decodeOctalEscapes(escapedData) {
-                    return .output(paneId: paneId, data: decodedData)
-                } else {
-                    logger.error("%output failed to decode octal escapes")
-                }
-            } else {
-                logger.warning("%output unexpected format: \(rest.prefix(50))")
+        case .blockContent:
+            // Content is accumulated in blockState by the parser
+            // Nothing to do here - we process it when block ends
+            break
+            
+        case .blockEnd(_, let commandNumber):
+            // Block complete - process the accumulated content
+            if let block = blockState {
+                finishBlockFromParser(block, commandNumber: commandNumber, success: true)
             }
-            return .unknown(line: line)
             
-        case "%extended-output":
-            // %extended-output %<pane-id> <latency> : <octal-escaped-data>
-            // Used by tmux 3.2+ when pause mode is enabled
-            // Format: %extended-output %0 0 : data
-            
-            // Find the colon separator - data starts after ": "
-            if let colonRange = rest.range(of: " : ") {
-                let prefix = rest[..<colonRange.lowerBound]
-                let prefixParts = prefix.split(separator: " ")
-                
-                if prefixParts.count >= 1 {
-                    let paneId = String(prefixParts[0])
-                    let escapedData = String(rest[colonRange.upperBound...])
-                    
-                    if let decodedData = decodeOctalEscapes(escapedData) {
-                        return .output(paneId: paneId, data: decodedData)
-                    } else {
-                        logger.error("%extended-output failed to decode octal escapes")
-                    }
-                }
-            } else {
-                logger.warning("%extended-output unexpected format (no colon): \(rest.prefix(50))")
+        case .blockError(_, let commandNumber):
+            // Block error - process with error
+            if let block = blockState {
+                finishBlockFromParser(block, commandNumber: commandNumber, success: false)
             }
-            return .unknown(line: line)
             
-        case "%session-changed":
-            // %session-changed $<id> <name>
-            let sessionParts = rest.split(separator: " ", maxSplits: 1)
-            if sessionParts.count >= 2 {
-                let sessionId = String(sessionParts[0])
-                let sessionName = String(sessionParts[1])
-                return .sessionChanged(sessionId: sessionId, sessionName: sessionName)
-            }
-            return .unknown(line: line)
-            
-        case "%layout-change":
-            // %layout-change @<window-id> <window-index> <layout>
-            let layoutParts = rest.split(separator: " ", maxSplits: 2)
-            if layoutParts.count >= 3 {
-                let windowId = String(layoutParts[0])
-                let windowIndex = Int(layoutParts[1]) ?? 0
-                let layout = String(layoutParts[2])
-                return .layoutChanged(windowId: windowId, windowIndex: windowIndex, layout: layout)
-            }
-            return .unknown(line: line)
-            
-        case "%exit":
-            // %exit [reason]
-            let reason = rest.isEmpty ? nil : rest
-            return .exit(reason: reason)
-            
-        case "%window-add":
-            return .windowAdd(windowId: rest)
-            
-        case "%window-close":
-            return .windowClose(windowId: rest)
-            
-        case "%window-renamed":
-            let renameParts = rest.split(separator: " ", maxSplits: 1)
-            if renameParts.count >= 2 {
-                return .windowRenamed(windowId: String(renameParts[0]), name: String(renameParts[1]))
-            }
-            return .unknown(line: line)
-            
-        case "%pane-mode-changed":
-            return .paneModeChanged(paneId: rest)
-            
-        case "%pause-pane-changed":
-            return .pausePaneChanged(paneId: rest)
-            
-        case "%pause":
-            // %pause %pane-id - pane output is paused
-            return .pause(paneId: rest)
-            
-        case "%continue":
-            // %continue %pane-id - pane output resumed
-            return .continue(paneId: rest)
-            
-        case "%client-session-changed":
-            let clientParts = rest.split(separator: " ", maxSplits: 1)
-            if clientParts.count >= 2 {
-                return .clientSessionChanged(clientName: String(clientParts[0]), sessionId: String(clientParts[1]))
-            }
-            return .unknown(line: line)
-            
-        case "%client-detached":
-            return .clientDetached(clientName: rest)
-            
-        case "%window-pane-changed":
-            // %window-pane-changed @window %pane
-            let parts = rest.split(separator: " ")
-            if parts.count >= 2 {
-                return .windowPaneChanged(windowId: String(parts[0]), paneId: String(parts[1]))
-            }
-            return .unknown(line: line)
-            
-        case "%unlinked-window-add":
-            return .unlinkedWindowAdd(windowId: rest)
-            
-        case "%unlinked-window-close":
-            return .unlinkedWindowClose(windowId: rest)
-            
-        case "%unlinked-window-renamed":
-            let parts = rest.split(separator: " ", maxSplits: 1)
-            if parts.count >= 2 {
-                return .unlinkedWindowRenamed(windowId: String(parts[0]), name: String(parts[1]))
-            }
-            return .unknown(line: line)
-            
-        case "%session-renamed":
-            // %session-renamed $session name
-            let parts = rest.split(separator: " ", maxSplits: 1)
-            if parts.count >= 2 {
-                return .sessionRenamed(sessionId: String(parts[0]), newName: String(parts[1]))
-            }
-            return .unknown(line: line)
-            
-        case "%sessions-changed":
-            return .sessionsChanged
-            
-        case "%session-window-changed":
-            // %session-window-changed $session @window
-            let parts = rest.split(separator: " ")
-            if parts.count >= 2 {
-                return .sessionWindowChanged(sessionId: String(parts[0]), windowId: String(parts[1]))
-            }
-            return .unknown(line: line)
-            
-        case "%subscription-changed":
-            // %subscription-changed name session-id window-id pane-id value
-            // IDs may be empty (-) if not applicable
-            let parts = rest.split(separator: " ", maxSplits: 4)
-            if parts.count >= 5 {
-                let name = String(parts[0])
-                let sessionId = parts[1] == "-" ? nil : String(parts[1])
-                let windowId = parts[2] == "-" ? nil : String(parts[2])
-                let paneId = parts[3] == "-" ? nil : String(parts[3])
-                let value = String(parts[4])
-                return .subscriptionChanged(name: name, sessionId: sessionId, windowId: windowId, paneId: paneId, value: value)
-            }
-            return .unknown(line: line)
-            
-        default:
-            return .unknown(line: line)
-        }
-    }
-    
-    /// Notify delegate that control mode is now active (once)
-    private func notifyActivationIfNeeded() {
-        guard !hasNotifiedActivation else { return }
-        hasNotifiedActivation = true
-        isActive = true
-        logger.info("Control mode activated, notifying delegate")
-        delegate?.tmuxClientDidActivate(self)
-    }
-    
-    /// Handle a parsed control mode message
-    private func handleMessage(_ message: TmuxControlMessage) {
-        // Note: Activation is ONLY triggered after the first %begin/%end block completes
-        // (in finishBlock). This ensures tmux is fully ready for commands.
-        // Early %output messages with shell prompts should not trigger activation.
-        
-        switch message {
-        case .output(let paneId, let data):
+        case .output(let paneId, let data), .extendedOutput(let paneId, _, let data):
             // Append to pane buffer
             if paneBuffers[paneId] == nil {
                 paneBuffers[paneId] = Data()
@@ -1019,16 +383,21 @@ class TmuxControlClient {
             // Notify delegate
             delegate?.tmuxClient(self, didReceivePaneOutput: data, paneId: paneId)
             
-        case .exit(let reason):
-            logger.info("tmux control mode exit: \(reason ?? "no reason")")
-            isActive = false
-            delegate?.tmuxClientDidExit(self, reason: reason)
-            
         case .sessionChanged(let sessionId, let sessionName):
             logger.info("Session changed: \(sessionId) (\(sessionName))")
-            // %session-changed means tmux session is ready - trigger activation
             notifyActivationIfNeeded()
             sessionManager?.handleSessionChanged(sessionId: sessionId, sessionName: sessionName)
+            
+        case .sessionRenamed(let sessionId, let newName):
+            logger.info("Session renamed: \(sessionId) -> \(newName)")
+            
+        case .sessionsChanged:
+            logger.info("Sessions changed (session created or destroyed)")
+            sessionManager?.handleSessionsChanged()
+            
+        case .sessionWindowChanged(let sessionId, let windowId):
+            logger.info("Session window changed: \(sessionId) -> \(windowId)")
+            sessionManager?.handleSessionWindowChanged(sessionId: sessionId, windowId: windowId)
             
         case .layoutChanged(let windowId, let windowIndex, let layout):
             logger.debug("Layout changed: window \(windowId) index \(windowIndex)")
@@ -1046,6 +415,20 @@ class TmuxControlClient {
             logger.debug("Window renamed: \(windowId) -> \(name)")
             sessionManager?.handleWindowRenamed(windowId: windowId, name: name)
             
+        case .windowPaneChanged(let windowId, let paneId):
+            logger.info("Window pane changed: \(windowId) -> \(paneId)")
+            activePaneId = paneId
+            sessionManager?.handleWindowPaneChanged(windowId: windowId, paneId: paneId)
+            
+        case .unlinkedWindowAdd(let windowId):
+            logger.debug("Unlinked window added: \(windowId)")
+            
+        case .unlinkedWindowClose(let windowId):
+            logger.debug("Unlinked window closed: \(windowId)")
+            
+        case .unlinkedWindowRenamed(let windowId, let name):
+            logger.debug("Unlinked window renamed: \(windowId) -> \(name)")
+            
         case .clientSessionChanged(let clientName, let sessionId):
             logger.debug("Client session changed: \(clientName) -> \(sessionId)")
             
@@ -1059,47 +442,21 @@ class TmuxControlClient {
         case .pausePaneChanged(let paneId):
             logger.debug("Pause pane changed: \(paneId)")
             
-        case .windowPaneChanged(let windowId, let paneId):
-            logger.info("Window pane changed: \(windowId) -> \(paneId)")
-            activePaneId = paneId
-            sessionManager?.handleWindowPaneChanged(windowId: windowId, paneId: paneId)
-            
-        case .sessionRenamed(let sessionId, let newName):
-            logger.info("Session renamed: \(sessionId) -> \(newName)")
-            
-        case .sessionsChanged:
-            logger.info("Sessions changed (session created or destroyed)")
-            sessionManager?.handleSessionsChanged()
-            
-        case .sessionWindowChanged(let sessionId, let windowId):
-            logger.info("Session window changed: \(sessionId) -> \(windowId)")
-            sessionManager?.handleSessionWindowChanged(sessionId: sessionId, windowId: windowId)
-            
-        case .unlinkedWindowAdd(let windowId):
-            logger.debug("Unlinked window added: \(windowId)")
-            
-        case .unlinkedWindowClose(let windowId):
-            logger.debug("Unlinked window closed: \(windowId)")
-            
-        case .unlinkedWindowRenamed(let windowId, let name):
-            logger.debug("Unlinked window renamed: \(windowId) -> \(name)")
-            
-        case .subscriptionChanged(let name, let sessionId, let windowId, let paneId, let value):
-            logger.debug("Subscription '\(name)' changed: session=\(sessionId ?? "-") window=\(windowId ?? "-") pane=\(paneId ?? "-") value=\(value)")
-            
         case .pause(let paneId):
-            // Pane output is now paused (tmux 3.2+)
             logger.info("Pane paused: \(paneId)")
             pausedPanes.insert(paneId)
             
         case .continue(let paneId):
-            // Pane output has resumed
             logger.info("Pane continued: \(paneId)")
             pausedPanes.remove(paneId)
             
-        case .response, .error:
-            // These are handled in finishBlock
-            break
+        case .subscriptionChanged(let name, let sessionId, let windowId, let paneId, let value):
+            logger.debug("Subscription '\(name)' changed: session=\(sessionId ?? "-") window=\(windowId ?? "-") pane=\(paneId ?? "-") value=\(value)")
+            
+        case .exit(let reason):
+            logger.info("tmux control mode exit: \(reason ?? "no reason")")
+            isActive = false
+            delegate?.tmuxClientDidExit(self, reason: reason)
             
         case .unknown(let line):
             // Check if this looks like the control mode prompt
@@ -1111,22 +468,19 @@ class TmuxControlClient {
         }
     }
     
-    /// Finish a pending %begin/%end block
-    private func finishBlock(_ block: PendingBlock, success: Bool) {
-        let content = block.lines.joined(separator: "\n")
+    /// Finish a pending block using TmuxBlockState from parser
+    private func finishBlockFromParser(_ block: TmuxBlockState, commandNumber: String, success: Bool) {
+        let content = block.content
         
-        logger.info("Block finished: cmd=\(block.commandNumber) success=\(success) lines=\(block.lines.count) content='\(content.prefix(100))'")
+        logger.info("Block finished: cmd=\(commandNumber) success=\(success) lines=\(block.lines.count) content='\(content.prefix(100))'")
         
         // Notify activation after first block completes
-        // This is the right time because tmux has finished its initial response
-        // and is now ready to receive new commands
         notifyActivationIfNeeded()
         
         // Clean up the command number mapping
-        _ = commandNumberToLocalId.removeValue(forKey: block.commandNumber)
+        _ = commandNumberToLocalId.removeValue(forKey: commandNumber)
         
-        // Find and remove the matching pending command from the queue
-        // We use FIFO - the first pending command matches the first response
+        // Find and remove the matching pending command from the queue (FIFO)
         if !pendingCommandQueue.isEmpty {
             let pending = pendingCommandQueue.removeFirst()
             
@@ -1144,69 +498,21 @@ class TmuxControlClient {
             }
         } else {
             // No pending command - this is an unsolicited response
-            // This happens during initial tmux startup (first %begin/%end)
             if success {
-                logger.info("📜 Unsolicited response block: cmd=\(block.commandNumber), content length=\(content.count)")
+                logger.info("📜 Unsolicited response block: cmd=\(commandNumber), content length=\(content.count)")
             } else {
-                logger.warning("📜 Unsolicited error block: cmd=\(block.commandNumber) - \(content)")
+                logger.warning("📜 Unsolicited error block: cmd=\(commandNumber) - \(content)")
             }
         }
     }
     
-    // MARK: - Octal Escape Decoding
-    
-    /// Decode octal escapes in tmux control mode output
-    /// Characters < 32 and `\` are encoded as octal (e.g., \033 for ESC, \134 for \)
-    private func decodeOctalEscapes(_ string: String) -> Data? {
-        var result = Data()
-        var index = string.startIndex
-        
-        while index < string.endIndex {
-            let char = string[index]
-            
-            if char == "\\" {
-                // Potential octal escape
-                let afterBackslash = string.index(after: index)
-                if afterBackslash < string.endIndex {
-                    var octalDigits = ""
-                    var scanIndex = afterBackslash
-                    
-                    // Read up to 3 octal digits
-                    while scanIndex < string.endIndex && octalDigits.count < 3 {
-                        let c = string[scanIndex]
-                        if c >= "0" && c <= "7" {
-                            octalDigits.append(c)
-                            scanIndex = string.index(after: scanIndex)
-                        } else {
-                            break
-                        }
-                    }
-                    
-                    if !octalDigits.isEmpty, let value = UInt8(octalDigits, radix: 8) {
-                        // Valid octal escape
-                        result.append(value)
-                        index = scanIndex
-                        continue
-                    }
-                }
-                
-                // Not a valid octal escape - output backslash literally
-                result.append(UInt8(ascii: "\\"))
-                index = string.index(after: index)
-            } else {
-                // Regular character
-                let scalar = char.unicodeScalars.first!
-                if scalar.value < 128 {
-                    result.append(UInt8(scalar.value))
-                } else {
-                    // Multi-byte UTF-8
-                    result.append(contentsOf: String(char).utf8)
-                }
-                index = string.index(after: index)
-            }
-        }
-        
-        return result
+    /// Notify delegate that control mode is now active (once)
+    private func notifyActivationIfNeeded() {
+        guard !hasNotifiedActivation else { return }
+        hasNotifiedActivation = true
+        isActive = true
+        logger.info("Control mode activated, notifying delegate")
+        delegate?.tmuxClientDidActivate(self)
     }
     
     // MARK: - Scrollback Access
@@ -1400,7 +706,6 @@ class TmuxControlClient {
         hasRestoredSession = false
         isPauseEnabled = false
         pausedPanes.removeAll()
-        pendingBlock = nil
         parseBuffer = Data()
         
         // CRITICAL: Cancel timeouts AND invoke callbacks with failure
