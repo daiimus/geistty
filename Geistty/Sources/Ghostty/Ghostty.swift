@@ -2371,11 +2371,6 @@ extension Ghostty {
                 
                 guard let surface = surface else { continue }
                 
-                // Debug: Log Ctrl key presses
-                if hasCtrl {
-                    NSLog("🎹 Hardware key with Ctrl: char='\(char)' keyCode=\(keyCode)")
-                }
-                
                 // Add Ctrl toggle state to modifiers if active
                 var modFlags = uiKey.modifierFlags
                 if ctrlToggleActive {
@@ -2478,7 +2473,7 @@ extension Ghostty {
             // Get the SurfaceView from userdata
             guard let surface = surface,
                   let userdata = ghostty_surface_userdata(surface) else {
-                NSLog("⚠️ externalWriteCallback: surface or userdata is nil")
+                Ghostty.logger.warning("⚠️ externalWriteCallback: surface or userdata is nil")
                 return
             }
             
@@ -2486,16 +2481,13 @@ extension Ghostty {
             
             // Check if surface is still valid (not closed)
             guard surfaceView.surface != nil else {
-                NSLog("⚠️ externalWriteCallback: surfaceView.surface is nil (closed)")
+                Ghostty.logger.warning("⚠️ externalWriteCallback: surfaceView.surface is nil (closed)")
                 return
             }
             
             // Convert to Data and call the onWrite callback
             if let data = data, len > 0 {
                 let swiftData = Data(bytes: data, count: Int(len))
-                // Debug: log what Ghostty is sending
-                let hexStr = swiftData.map { String(format: "%02x", $0) }.joined(separator: " ")
-                NSLog("📤 externalWriteCallback: \(len) bytes: \(hexStr)")
                 DispatchQueue.main.async {
                     surfaceView.onWrite?(swiftData)
                 }

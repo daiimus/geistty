@@ -196,7 +196,7 @@ class KeychainManager {
         let account = "ssh-key:\(name)"
         
         // Try new format first (generic password)
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -260,7 +260,7 @@ class KeychainManager {
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: tag.data(using: .utf8)!
         ]
-        let status = SecItemDelete(queryOld as CFDictionary)
+        _ = SecItemDelete(queryOld as CFDictionary)
         
         // Consider success if either was deleted or not found
         logger.info("🗑️ Deleted SSH key: \(name)")

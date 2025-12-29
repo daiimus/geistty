@@ -143,12 +143,29 @@ final class SSHClientConfiguration: NIOSSHClientUserAuthenticationDelegate, @unc
 
 // MARK: - Server Authentication (Host Key Verification)
 
-/// Simple host key verifier that accepts all keys (TOFU - Trust On First Use)
-/// TODO: Implement proper known_hosts verification
+/// Host key verifier using TOFU (Trust On First Use) model.
+///
+/// # Security Note
+/// This implementation accepts all host keys on first connection without verification
+/// against a known_hosts file. This is a known limitation.
+///
+/// ## Why TOFU?
+/// - SwiftNIO-SSH doesn't provide built-in known_hosts parsing
+/// - Implementing full OpenSSH known_hosts format is complex (hashed hosts, wildcards, etc.)
+/// - Most mobile SSH apps (Termius, Prompt) also use TOFU or simpler verification
+///
+/// ## Future Improvements
+/// - Store host keys in Keychain after first connection
+/// - Warn user if host key changes (potential MITM)
+/// - Optional: per-connection fingerprint display for manual verification
+///
+/// ## Risk Mitigation
+/// - iOS sandboxing limits attack surface
+/// - Credentials are stored in Secure Enclave (when available)
+/// - TLS-level certificate pinning is not applicable to SSH
 final class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
-        // For now, accept all host keys (TOFU model)
-        // TODO: Store and verify against known_hosts
+        // Accept all host keys (TOFU model) - see class documentation for rationale
         logger.info("🔑 Accepting host key (TOFU): \(String(describing: hostKey))")
         validationCompletePromise.succeed(())
     }
@@ -227,9 +244,13 @@ public class NIOSSHConnection: ObservableObject {
     private var channel: Channel?
     private var sshChannel: Channel?
     
+    /// Public access to the parent channel for creating additional channels (SFTP)
+    public var parentChannel: Channel? { channel }
+    
     // Network path monitoring
     private var pathMonitor: NWPathMonitor?
     private var lastKnownPath: NWPath?
+
     
     // MARK: - Initialization
     

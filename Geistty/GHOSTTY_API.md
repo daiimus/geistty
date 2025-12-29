@@ -191,8 +191,7 @@ All Ghostty types have Swift equivalents:
 ## Files
 
 - `Ghostty.swift` - Main API implementation (Config, App, SurfaceView)
-- `GhosttyAPI.swift` - Extended API wrappers for full parity
-- `ThemeManager.swift` - Theme configuration
+- `FontMapping.swift` - Font name translation (GUI names ↔ CoreText names)
 
 ## Usage Examples
 

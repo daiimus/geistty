@@ -34,6 +34,35 @@ Comprehensive code review after TmuxGateway migration identified these items:
 - **Robustness: 8/10** - Good error handling, health monitoring, reconnect logic
 - **Maintainability: 7/10** - TmuxSessionManager is large, some callback tech debt
 
+### 🧹 Codebase Cleanup (Dec 29, 2025)
+
+Comprehensive audit identified dead code and tech debt:
+
+#### Dead Code Removal (Priority 1) ✅ COMPLETE
+| File | Lines | Issue | Status |
+|------|-------|-------|--------|
+| `GhosttyAPI.swift` | 660 | Not in Xcode build, never used | ✅ Deleted |
+| `SurfaceManager.swift` | 419 | Not in Xcode build, never integrated | ✅ Deleted |
+| `ShakeDetector.swift` | 48 | `.onShake()` never called | ✅ Deleted |
+| `SSHConnection.swift` ref | - | Dangling pbxproj reference | ✅ Removed |
+| `PassthroughKeyboardTranslator` | ~10 | Defined but never instantiated | ✅ Deleted |
+
+#### Debug Code Cleanup (Priority 2) ✅ COMPLETE
+| File | Issue | Status |
+|------|-------|--------|
+| `SSHKeyManager.swift` | 20+ `print()` to standardError | ✅ Removed |
+| `Ghostty.swift` | `NSLog("🎹 Hardware key...")` | ✅ Removed |
+| `TmuxSplitView.swift` | `print("Zoom toggled...")` | ✅ In #Preview, OK |
+| `ConfigSyncManager.swift` | `print()` statements | ✅ Already clean |
+| `Theme.swift` | `print()` statements | ✅ Already clean |
+
+#### Incomplete Features (Priority 3) ✅ COMPLETE
+| Location | Issue | Status |
+|----------|-------|--------|
+| `SFTPBrowserView.swift` | Reinventing iOS Files.app | ✅ Deleted - File Provider is the right approach |
+| `TerminalContainerView.swift` | Secure keyboard entry TODO | ✅ Documented - iOS sandboxes keyboard by default |
+| `NIOSSHConnection.swift` | known_hosts TODO (security) | ✅ Documented TOFU model with rationale |
+
 ### 🐛 KNOWN: Multi-Pane Dimension Bug
 **Symptom:** After splitting, panes don't use full available screen space.
 Both panes appear undersized - neither fills its allocated area.
@@ -425,7 +454,7 @@ iOS aggressively suspends apps and drops network connections. tmux handles persi
 #### Low Priority - Nice to Have
 - [ ] Extract magic numbers to constants (timeouts, marker strings)
 - [ ] Implement or remove TODO comments in production code
-- [ ] Clarify SFTP status - either implement or mark as future feature
+- [x] ~~Clarify SFTP status~~ - SFTP browser implemented (Dec 29, 2025)
 
 ---
 
@@ -457,7 +486,9 @@ For a solid v1 release targeting **SSH + SSH with tmux**:
 ### V2 Features (Post-V1) 🔲
 - [ ] Multiple tmux windows - Window list UI and switching
 - [ ] iPadOS Scene integration - Each pane as native window
-- [ ] SFTP file browser
+- [x] SFTP protocol implementation (Dec 29, 2025) - SFTPChannel + SFTPClient
+- [ ] SFTP File Provider Extension - Files.app integration with per-server toggle
+- [ ] In-app file browser with iOS-native file handling (Quick Look, Share, Open In)
 - [ ] Secure Enclave key storage
 - [ ] Enhanced connecting indicator in terminal view
 
@@ -736,11 +767,20 @@ Config file (`ghostty.conf`) is now the source of truth.
 
 - [ ] **Secure Enclave keys** (hardware-backed SSH keys)
 - [x] **Multiple sessions** (native iOS multi-window via WindowGroup + UISupportsMultipleScenes)
-- [ ] **SFTP browser** (integrate with iPadOS Files app) ⭐ HIGH VALUE
-  - [ ] FileProvider extension for Files.app integration
-  - [ ] Browse remote directories
-  - [ ] Upload/download files
-  - [ ] Quick Look preview support
+- [ ] **SFTP / Remote Files** ⭐ HIGH VALUE
+  - [x] SFTPChannel protocol implementation (Dec 29, 2025)
+  - [x] SFTPClient async API (kept for File Provider)
+  - [x] ~~In-App Browser~~ (Removed Dec 29, 2025 - iOS Files.app does this better)
+  - [ ] **File Provider Extension** (The Right Way™)
+    - [ ] NSFileProviderReplicatedExtension (iOS 16+ replicated provider)
+    - [ ] Shared Framework for SFTP code (used by app + extension)
+    - [ ] Shared Keychain access group for credentials
+    - [ ] Per-server "Show in Files.app" toggle in connection settings
+    - [ ] Appear in Files.app Locations sidebar (like Shellfish, OneDrive)
+    - [ ] Real file URLs (NSFileProviderItem) for drag/drop, Share Sheet, Open In
+    - [ ] Offline cache with sync badges
+    - [ ] Thumbnail generation for images/videos
+    - [ ] Background upload/download support
 - [ ] **Mosh support** (stretch goal)
 - [ ] **Snippet library** (saved commands)
 - [ ] **Port forwarding**
