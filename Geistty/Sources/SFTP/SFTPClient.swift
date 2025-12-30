@@ -86,6 +86,9 @@ actor SFTPClient {
     private var host: String = ""
     private var username: String = ""
     
+    /// Connection state - tracks whether SFTP subsystem is open (set after successful connect)
+    private var _isConnected: Bool = false
+    
     /// Read buffer size (64KB)
     private let readBufferSize: UInt32 = 64 * 1024
     
@@ -103,6 +106,7 @@ actor SFTPClient {
     /// Set the parent channel for SFTP operations
     func setParentChannel(_ parentChannel: Channel) {
         self.channel = SFTPChannel(parentChannel: parentChannel)
+        self._isConnected = false
     }
     
     /// Connect the SFTP subsystem
@@ -117,26 +121,31 @@ actor SFTPClient {
         logger.info("📂 Connecting SFTP to \(host)...")
         try await channel.open()
         
+        // Mark connected only after SFTP subsystem successfully opens
+        self._isConnected = true
+        
         // Get initial path (home directory)
         do {
             currentPath = try await channel.realpath(".")
-            logger.info("📂 SFTP connected, home: \(currentPath)")
+            logger.info("📂 SFTP connected, home: \(self.currentPath)")
         } catch {
             currentPath = "/home/\(username)"
-            logger.warning("📂 Could not resolve home, using: \(currentPath)")
+            logger.warning("📂 Could not resolve home, using: \(self.currentPath)")
         }
     }
     
     /// Disconnect from server
     func disconnect() async {
         logger.info("📂 Disconnecting SFTP")
+        self._isConnected = false
         await channel?.close()
         channel = nil
     }
     
-    /// Check if connected
+    /// Check if connected - verifies SFTP subsystem is actually open, not just object exists
     var isConnected: Bool {
-        channel != nil
+        // Return our tracked state - set true only after channel.open() succeeds
+        return _isConnected && channel != nil
     }
     
     // MARK: - Directory Operations
@@ -333,7 +342,7 @@ actor SFTPClient {
         }
         
         currentPath = try await channel.realpath(fullPath)
-        logger.info("📂 Changed directory to: \(currentPath)")
+        logger.info("📂 Changed directory to: \(self.currentPath)")
     }
     
     // MARK: - Convenience Methods

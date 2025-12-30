@@ -19,9 +19,32 @@ struct GeisttyApp: App {
         // Also set for UIView to catch any edge cases
         // UIView.appearance().backgroundColor = bgColor  // Too aggressive, breaks other UI
         
+        // Clean up legacy File Provider domains from previous architecture
+        // (We used to create one domain per connection, now we use a single "geistty" domain)
+        FileProviderDomainManager.cleanupLegacyDomains()
+        
         // Sync File Provider domains for all saved connection profiles
         // This ensures servers appear in Files.app sidebar
         ConnectionProfileManager.shared.syncFileProviderDomains()
+        
+        // Debug: Log what's stored for File Provider
+        Task {
+            // Clear old log
+            FileProviderDomainManager.clearExtensionDebugLog()
+            
+            // Check what connections are stored
+            let connections = FileProviderDomainManager.getConnections()
+            print("📂 [DEBUG] Stored File Provider connections: \(connections.count)")
+            for conn in connections {
+                print("📂 [DEBUG] - \(conn.name): \(conn.host):\(conn.port) user=\(conn.username)")
+                print("📂 [DEBUG]   authMethod=\(conn.authMethod), hasSSHKey=\(conn.sshKeyData != nil), hasPassword=\(conn.password != nil)")
+            }
+            
+            // Check for extension debug log
+            if let log = FileProviderDomainManager.readExtensionDebugLog() {
+                print("📂 [DEBUG] Extension log:\n\(log)")
+            }
+        }
     }
     
     var body: some Scene {

@@ -24,6 +24,7 @@ struct ConnectionEditorView: View {
     @State private var isFavorite = false
     @State private var useTmux = false
     @State private var tmuxSessionName = ""
+    @State private var enableFilesIntegration = false
     
     // Key import
     @State private var showingKeyImport = false
@@ -143,6 +144,15 @@ struct ConnectionEditorView: View {
                 Toggle("Add to Favorites", isOn: $isFavorite)
             }
             
+            // Files.app Integration
+            Section {
+                Toggle("Show in Files App", isOn: $enableFilesIntegration)
+            } header: {
+                Text("Files Integration")
+            } footer: {
+                Text("Enable to browse this server's files directly from the iOS Files app.")
+            }
+            
             // tmux Integration
             Section {
                 Toggle("Auto-attach to tmux", isOn: $useTmux)
@@ -240,6 +250,7 @@ struct ConnectionEditorView: View {
         isFavorite = profile.isFavorite
         useTmux = profile.useTmux
         tmuxSessionName = profile.tmuxSessionName ?? ""
+        enableFilesIntegration = profile.enableFilesIntegration
     }
     
     private func save() {
@@ -252,7 +263,8 @@ struct ConnectionEditorView: View {
             authMethod: authMethod,
             sshKeyName: authMethod == .sshKey ? selectedKeyName : nil,
             useTmux: useTmux,
-            tmuxSessionName: tmuxSessionName.isEmpty ? nil : tmuxSessionName
+            tmuxSessionName: tmuxSessionName.isEmpty ? nil : tmuxSessionName,
+            enableFilesIntegration: enableFilesIntegration
         )
         
         newProfile.isFavorite = isFavorite

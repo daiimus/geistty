@@ -255,7 +255,8 @@ struct ConnectionListView: View {
             authMethod: profile.authMethod,
             sshKeyName: profile.sshKeyName,
             useTmux: profile.useTmux,
-            tmuxSessionName: profile.tmuxSessionName
+            tmuxSessionName: profile.tmuxSessionName,
+            enableFilesIntegration: false  // Don't duplicate Files integration to avoid domain conflicts
         )
         profileManager.addProfile(duplicate)
     }
