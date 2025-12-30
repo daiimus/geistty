@@ -101,12 +101,25 @@ final class SFTPChannelHandler: ChannelDuplexHandler, @unchecked Sendable {
     /// Callback for channel close
     private let onClose: @Sendable (Error?) -> Void
     
+    /// Callback for channel events (success/failure for subsystem request)
+    private let onEvent: @Sendable (Any) -> Void
+    
     /// Buffer for incomplete packets
     private var receiveBuffer = Data()
     
-    init(onData: @escaping @Sendable (Data) -> Void, onClose: @escaping @Sendable (Error?) -> Void) {
+    init(
+        onData: @escaping @Sendable (Data) -> Void,
+        onClose: @escaping @Sendable (Error?) -> Void,
+        onEvent: @escaping @Sendable (Any) -> Void
+    ) {
         self.onData = onData
         self.onClose = onClose
+        self.onEvent = onEvent
+    }
+    
+    func channelActive(context: ChannelHandlerContext) {
+        logger.info("📂 SFTP channel active")
+        context.fireChannelActive()
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -153,6 +166,12 @@ final class SFTPChannelHandler: ChannelDuplexHandler, @unchecked Sendable {
         }
     }
     
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        logger.info("📂 SFTP channel event: \(type(of: event))")
+        onEvent(event)
+        context.fireUserInboundEventTriggered(event)
+    }
+    
     func channelInactive(context: ChannelHandlerContext) {
         logger.info("🔌 SFTP channel inactive")
         onClose(nil)
@@ -189,6 +208,9 @@ actor SFTPChannel {
     
     /// Pending requests waiting for responses
     private var pendingRequests: [UInt32: CheckedContinuation<Data, Error>] = [:]
+    
+    /// Continuation waiting for subsystem success event
+    private var subsystemContinuation: CheckedContinuation<Void, Error>?
     
     /// SFTP protocol version
     private var protocolVersion: UInt32 = 0
@@ -228,6 +250,9 @@ actor SFTPChannel {
                     },
                     onClose: { error in
                         Task { await self?.handleChannelClose(error) }
+                    },
+                    onEvent: { event in
+                        Task { await self?.handleChannelEvent(event) }
                     }
                 )
             )
@@ -236,22 +261,73 @@ actor SFTPChannel {
         // Wait for channel to be created
         let childChannel = try await channelPromise.futureResult.get()
         self.channel = childChannel
+        logger.info("📂 SSH child channel created")
         
-        // Request SFTP subsystem
+        // Request SFTP subsystem and wait for success/failure
         logger.info("📂 Requesting SFTP subsystem...")
         let subsystemRequest = SSHChannelRequestEvent.SubsystemRequest(
             subsystem: "sftp",
             wantReply: true
         )
         
-        try await childChannel.triggerUserOutboundEvent(subsystemRequest).get()
-        logger.info("📂 SFTP subsystem request sent, waiting for response...")
+        // Wait for subsystem success/failure event with timeout
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.subsystemContinuation = continuation
+            
+            // Schedule timeout
+            Task {
+                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                if let cont = await self.subsystemContinuation {
+                    await self.clearSubsystemContinuation()
+                    cont.resume(throwing: SFTPError.connectionFailed("Subsystem request timeout"))
+                }
+            }
+            
+            // Send the subsystem request
+            Task {
+                do {
+                    try await childChannel.triggerUserOutboundEvent(subsystemRequest).get()
+                    logger.info("📂 SFTP subsystem request sent, waiting for response...")
+                } catch {
+                    if let cont = await self.subsystemContinuation {
+                        await self.clearSubsystemContinuation()
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        
+        logger.info("📂 SFTP subsystem request succeeded")
         
         // Initialize SFTP protocol
         try await initializeSFTP()
         
         isConnected = true
         logger.info("📂 SFTP channel ready (version \(self.protocolVersion))")
+    }
+    
+    /// Clear the subsystem continuation (actor-isolated)
+    private func clearSubsystemContinuation() {
+        subsystemContinuation = nil
+    }
+    
+    /// Handle channel events (subsystem success/failure)
+    private func handleChannelEvent(_ event: Any) {
+        logger.info("📂 Processing channel event: \(type(of: event))")
+        
+        if event is ChannelSuccessEvent {
+            logger.info("📂 Received ChannelSuccessEvent - subsystem request succeeded")
+            if let continuation = subsystemContinuation {
+                subsystemContinuation = nil
+                continuation.resume()
+            }
+        } else if event is ChannelFailureEvent {
+            logger.error("📂 Received ChannelFailureEvent - subsystem request failed")
+            if let continuation = subsystemContinuation {
+                subsystemContinuation = nil
+                continuation.resume(throwing: SFTPError.connectionFailed("Subsystem request was rejected by server"))
+            }
+        }
     }
     
     /// Initialize the SFTP protocol (version negotiation)
