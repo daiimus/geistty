@@ -157,20 +157,11 @@ public enum SSHKeyParser {
         }
         
         // Skip public key
-        let _ = try readString(from: keyData, at: &offset)
+        let _ = try readBytes(from: keyData, at: &offset)
         
-        // Read encrypted private section
-        var privateData = try readString(from: keyData, at: &offset).data(using: .utf8) ?? Data()
-        
-        // If the private section wasn't a string, read as binary
-        if privateData.isEmpty {
-            offset -= 4 // back up to re-read length
-            let privLen = try readUInt32(from: keyData, at: &offset)
-            guard offset + Int(privLen) <= keyData.count else {
-                throw SSHKeyParseError.invalidKey("Private key data truncated")
-            }
-            privateData = keyData.subdata(in: offset..<(offset + Int(privLen)))
-        }
+        // Read private key section (this is binary, not a string!)
+        var privateData = try readBytes(from: keyData, at: &offset)
+        logger.debug("🔑 Private data: \(privateData.count) bytes at offset \(offset)")
         
         // Handle encrypted keys
         if cipherName != "none" {
