@@ -113,15 +113,20 @@ final class SFTPChannelHandler: ChannelDuplexHandler, @unchecked Sendable {
         let channelData = unwrapInboundIn(data)
         
         // Only process regular channel data
-        guard case .channel = channelData.type else { return }
+        guard case .channel = channelData.type else { 
+            logger.debug("📂 Received non-channel data type, ignoring")
+            return 
+        }
         
         switch channelData.data {
         case .byteBuffer(var buffer):
             if let bytes = buffer.readBytes(length: buffer.readableBytes) {
+                logger.info("📂 SFTPChannelHandler received \(bytes.count) bytes")
                 receiveBuffer.append(contentsOf: bytes)
                 processBuffer()
             }
         case .fileRegion:
+            logger.debug("📂 Received file region, ignoring")
             break
         }
     }
@@ -240,7 +245,7 @@ actor SFTPChannel {
         )
         
         try await childChannel.triggerUserOutboundEvent(subsystemRequest).get()
-        logger.info("📂 SFTP subsystem activated")
+        logger.info("📂 SFTP subsystem request sent, waiting for response...")
         
         // Initialize SFTP protocol
         try await initializeSFTP()
@@ -344,12 +349,25 @@ actor SFTPChannel {
         }
     }
     
-    /// Wait for the next packet (used during initialization)
-    private func receiveNextPacket() async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            // Use ID 0 for init response
+    /// Wait for the next packet with timeout (used during initialization)
+    private func receiveNextPacket(timeout: TimeInterval = 30) async throws -> Data {
+        logger.info("📂 Waiting for SFTP version response (timeout: \(timeout)s)...")
+        
+        // Store continuation in actor-isolated storage, then race with timeout
+        let result: Data = try await withCheckedThrowingContinuation { continuation in
             pendingRequests[0] = continuation
+            
+            // Schedule timeout
+            Task {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                // If still pending after timeout, fail it
+                if let cont = await self.pendingRequests.removeValue(forKey: 0) {
+                    cont.resume(throwing: SFTPError.connectionFailed("SFTP initialization timeout after \(timeout) seconds"))
+                }
+            }
         }
+        
+        return result
     }
     
     /// Handle channel close
