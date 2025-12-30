@@ -2,11 +2,12 @@
 //  FileProviderDomainManager.swift
 //  Geistty
 //
-//  Manages File Provider domains for SSH connections
+//  Manages the single File Provider domain for Geistty.
 //
-//  Each saved SSH connection gets its own domain that appears
-//  in the Files.app sidebar. This class handles domain registration
-//  and removal.
+//  Architecture (Shellfish-style):
+//  - ONE domain "Geistty" appears in Files.app sidebar
+//  - Inside, each enabled connection appears as a folder
+//  - Browsing into a connection folder shows remote files
 //
 
 import FileProvider
@@ -14,141 +15,314 @@ import os.log
 
 private let logger = Logger(subsystem: "com.geistty", category: "FileProviderDomain")
 
-/// Manages File Provider domains for SSH connections
-/// Each domain represents one SSH server and appears in Files.app sidebar
+/// Manages the single Geistty File Provider domain
+/// Connections with Files integration enabled appear as folders inside
 @MainActor
 class FileProviderDomainManager: ObservableObject {
     
     /// Shared instance
     static let shared = FileProviderDomainManager()
     
-    /// Currently registered domains (domain ID -> display name)
-    @Published private(set) var registeredDomains: [String: String] = [:]
+    /// The single domain identifier for Geistty
+    nonisolated static let domainIdentifier = "geistty"
+    
+    /// Whether the domain is registered
+    @Published private(set) var isDomainRegistered = false
+    
+    /// App Group identifier for shared storage with extension
+    nonisolated static let appGroupIdentifier = "group.com.geistty.fileprovider"
+    
+    /// Key for connection list in shared UserDefaults
+    nonisolated private static let connectionsKey = "fileprovider_connections"
     
     private init() {
-        // Load existing domains on init
         Task {
-            await refreshDomains()
+            await refreshDomainStatus()
         }
     }
     
-    /// Creates a domain identifier from connection info
-    /// Format: "sftp-<host>-<port>-<username>"
-    static func domainIdentifier(host: String, port: Int, username: String) -> String {
-        return "sftp-\(host)-\(port)-\(username)"
-    }
+    // MARK: - Domain Management
     
-    /// Creates a display name for the domain
-    static func displayName(host: String, username: String) -> String {
-        return "\(username)@\(host)"
-    }
-    
-    /// Registers a new File Provider domain for an SSH connection
-    /// - Parameters:
-    ///   - host: SSH server hostname
-    ///   - port: SSH port (default 22)
-    ///   - username: SSH username
-    /// - Returns: The registered domain identifier
-    @discardableResult
-    func registerDomain(host: String, port: Int = 22, username: String) async throws -> String {
-        let identifier = Self.domainIdentifier(host: host, port: port, username: username)
-        let displayName = Self.displayName(host: host, username: username)
-        
-        // Check if already registered
-        if registeredDomains[identifier] != nil {
-            logger.info("📂 Domain already registered: \(identifier)")
-            return identifier
+    /// Ensures the Geistty domain is registered
+    func ensureDomainRegistered() async throws {
+        if isDomainRegistered {
+            return
         }
         
-        let domainId = NSFileProviderDomainIdentifier(rawValue: identifier)
-        let domain = NSFileProviderDomain(identifier: domainId, displayName: displayName)
+        let domainId = NSFileProviderDomainIdentifier(rawValue: Self.domainIdentifier)
+        let domain = NSFileProviderDomain(identifier: domainId, displayName: "Geistty")
         
-        logger.info("📂 Registering File Provider domain: \(identifier)")
+        logger.info("📂 Registering Geistty File Provider domain")
         
         do {
             try await NSFileProviderManager.add(domain)
-            registeredDomains[identifier] = displayName
-            logger.info("✅ Domain registered: \(displayName)")
-            return identifier
+            isDomainRegistered = true
+            logger.info("✅ Geistty domain registered")
         } catch {
-            logger.error("❌ Failed to register domain: \(error.localizedDescription)")
-            throw error
+            // Domain might already exist - check if it's registered
+            let domains = try? await NSFileProviderManager.domains()
+            if domains?.contains(where: { $0.identifier == domainId }) == true {
+                isDomainRegistered = true
+                logger.info("📂 Domain already registered")
+            } else {
+                throw error
+            }
         }
     }
     
-    /// Removes a File Provider domain
-    /// - Parameter identifier: The domain identifier to remove
-    func removeDomain(identifier: String) async throws {
-        let domainId = NSFileProviderDomainIdentifier(rawValue: identifier)
+    /// Removes the Geistty domain (called when no connections have Files integration)
+    func removeDomain() async throws {
+        let domainId = NSFileProviderDomainIdentifier(rawValue: Self.domainIdentifier)
         
-        // Find the domain
         let domains = try await NSFileProviderManager.domains()
         guard let domain = domains.first(where: { $0.identifier == domainId }) else {
-            logger.warning("📂 Domain not found for removal: \(identifier)")
-            registeredDomains.removeValue(forKey: identifier)
+            isDomainRegistered = false
             return
         }
         
-        logger.info("📂 Removing File Provider domain: \(identifier)")
-        
-        do {
-            try await NSFileProviderManager.remove(domain)
-            registeredDomains.removeValue(forKey: identifier)
-            logger.info("✅ Domain removed: \(identifier)")
-        } catch {
-            logger.error("❌ Failed to remove domain: \(error.localizedDescription)")
-            throw error
-        }
+        try await NSFileProviderManager.remove(domain)
+        isDomainRegistered = false
+        logger.info("📂 Geistty domain removed")
     }
     
-    /// Removes a domain for a specific connection
-    func removeDomain(host: String, port: Int = 22, username: String) async throws {
-        let identifier = Self.domainIdentifier(host: host, port: port, username: username)
-        try await removeDomain(identifier: identifier)
-    }
-    
-    /// Refreshes the list of registered domains
-    func refreshDomains() async {
+    /// Refreshes domain registration status
+    func refreshDomainStatus() async {
         do {
             let domains = try await NSFileProviderManager.domains()
-            var newDomains: [String: String] = [:]
-            
-            for domain in domains {
-                let id = domain.identifier.rawValue
-                // Only track our SFTP domains
-                if id.hasPrefix("sftp-") {
-                    newDomains[id] = domain.displayName
-                }
-            }
-            
-            registeredDomains = newDomains
-            logger.info("📂 Refreshed domains: \(newDomains.count) SFTP domains found")
+            isDomainRegistered = domains.contains { $0.identifier.rawValue == Self.domainIdentifier }
         } catch {
-            logger.error("📂 Failed to refresh domains: \(error.localizedDescription)")
+            logger.error("📂 Failed to check domain status: \(error.localizedDescription)")
         }
     }
     
-    /// Checks if a domain is registered for a connection
-    func isDomainRegistered(host: String, port: Int = 22, username: String) -> Bool {
-        let identifier = Self.domainIdentifier(host: host, port: port, username: username)
-        return registeredDomains[identifier] != nil
+    /// Removes legacy domains from previous implementation
+    /// Call this on app launch to clean up old per-connection domains
+    static func cleanupLegacyDomains() {
+        Task {
+            do {
+                let domains = try await NSFileProviderManager.domains()
+                
+                for domain in domains {
+                    // Keep only the new "geistty" domain, remove any legacy domains
+                    // Legacy domains had format like "sftp_host_port_user"
+                    if domain.identifier.rawValue != domainIdentifier {
+                        logger.info("📂 Removing legacy domain: \(domain.identifier.rawValue)")
+                        try await NSFileProviderManager.remove(domain)
+                    }
+                }
+            } catch {
+                logger.error("📂 Failed to cleanup legacy domains: \(error.localizedDescription)")
+            }
+        }
     }
     
-    /// Signals that the contents of a domain need to be refreshed
-    func signalEnumeratorChanged(host: String, port: Int = 22, username: String) async {
-        let identifier = Self.domainIdentifier(host: host, port: port, username: username)
-        let domainId = NSFileProviderDomainIdentifier(rawValue: identifier)
+    /// Signals that the root content changed (connection added/removed)
+    func signalRootChanged() async {
+        let domainId = NSFileProviderDomainIdentifier(rawValue: Self.domainIdentifier)
+        let domain = NSFileProviderDomain(identifier: domainId, displayName: "Geistty")
         
-        guard let manager = NSFileProviderManager(for: NSFileProviderDomain(identifier: domainId, displayName: "")) else {
-            logger.warning("📂 No manager for domain: \(identifier)")
+        guard let manager = NSFileProviderManager(for: domain) else {
             return
         }
         
         do {
-            try await manager.signalEnumerator(for: .workingSet)
-            logger.debug("📂 Signaled enumerator change for: \(identifier)")
+            try await manager.signalEnumerator(for: .rootContainer)
+            logger.debug("📂 Signaled root enumerator change")
         } catch {
-            logger.error("📂 Failed to signal enumerator: \(error.localizedDescription)")
+            logger.error("📂 Failed to signal change: \(error.localizedDescription)")
         }
+    }
+    
+    // MARK: - Connection Management (stored in shared UserDefaults)
+    
+    /// Connection info stored for File Provider access
+    struct FileProviderConnection: Codable, Identifiable {
+        let id: String  // Profile UUID
+        let name: String
+        let host: String
+        let port: Int
+        let username: String
+        let authMethod: String  // "ssh_key" or "password"
+        let sshKeyName: String?
+        let sshKeyData: String?  // Base64-encoded
+        let password: String?
+    }
+    
+    /// Gets shared UserDefaults
+    private var sharedDefaults: UserDefaults? {
+        UserDefaults(suiteName: Self.appGroupIdentifier)
+    }
+    
+    /// Adds or updates a connection for File Provider access
+    func addConnection(
+        profileId: String,
+        name: String,
+        host: String,
+        port: Int,
+        username: String,
+        authMethod: String,
+        sshKeyName: String?
+    ) async {
+        guard let defaults = sharedDefaults else {
+            logger.error("📂 Cannot access shared UserDefaults")
+            return
+        }
+        
+        // Get credentials from keychain
+        var sshKeyData: String?
+        var password: String?
+        
+        logger.info("📂 Adding connection: \(name), authMethod: \(authMethod)")
+        
+        if authMethod == "ssh_key", let keyName = sshKeyName {
+            logger.info("📂 Looking for SSH key: \(keyName)")
+            if let data = try? KeychainManager.shared.getSSHKey(name: keyName) {
+                sshKeyData = data.base64EncodedString()
+                logger.info("📂 Got SSH key '\(keyName)' for File Provider (\(data.count) bytes)")
+            } else {
+                logger.error("❌ Failed to get SSH key '\(keyName)' from keychain")
+            }
+        } else if authMethod == "password" {
+            logger.info("📂 Looking for password for \(username)@\(host)")
+            if let pwd = try? KeychainManager.shared.getPassword(for: host, username: username) {
+                password = pwd
+                logger.info("📂 Got password for File Provider")
+            } else {
+                logger.error("❌ Failed to get password from keychain for \(username)@\(host)")
+            }
+        }
+        
+        // Log credential status
+        logger.info("📂 Credentials: sshKeyData=\(sshKeyData != nil), password=\(password != nil)")
+        
+        let connection = FileProviderConnection(
+            id: profileId,
+            name: name,
+            host: host,
+            port: port,
+            username: username,
+            authMethod: authMethod,
+            sshKeyName: sshKeyName,
+            sshKeyData: sshKeyData,
+            password: password
+        )
+        
+        // Load existing, update, save
+        var connections = loadConnections()
+        connections[profileId] = connection
+        saveConnections(connections)
+        
+        // Ensure domain is registered and signal change
+        do {
+            try await ensureDomainRegistered()
+            await signalRootChanged()
+        } catch {
+            logger.error("📂 Failed to register domain: \(error.localizedDescription)")
+        }
+        
+        logger.info("📂 Added connection: \(name)")
+    }
+    
+    /// Removes a connection from File Provider
+    func removeConnection(profileId: String) async {
+        guard let defaults = sharedDefaults else { return }
+        
+        var connections = loadConnections()
+        connections.removeValue(forKey: profileId)
+        saveConnections(connections)
+        
+        // If no connections left, remove the domain entirely
+        if connections.isEmpty {
+            do {
+                try await removeDomain()
+            } catch {
+                logger.error("📂 Failed to remove domain: \(error.localizedDescription)")
+            }
+        } else {
+            await signalRootChanged()
+        }
+        
+        logger.info("📂 Removed connection: \(profileId)")
+    }
+    
+    /// Loads all connections from shared storage
+    private func loadConnections() -> [String: FileProviderConnection] {
+        guard let defaults = sharedDefaults,
+              let data = defaults.data(forKey: Self.connectionsKey),
+              let connections = try? JSONDecoder().decode([String: FileProviderConnection].self, from: data) else {
+            return [:]
+        }
+        return connections
+    }
+    
+    /// Saves connections to shared storage
+    private func saveConnections(_ connections: [String: FileProviderConnection]) {
+        guard let defaults = sharedDefaults,
+              let data = try? JSONEncoder().encode(connections) else {
+            return
+        }
+        defaults.set(data, forKey: Self.connectionsKey)
+        defaults.synchronize()
+    }
+    
+    /// Gets all connections (for File Provider extension to enumerate)
+    /// This is nonisolated because it only reads from shared UserDefaults
+    nonisolated static func getConnections() -> [FileProviderConnection] {
+        guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
+              let data = defaults.data(forKey: connectionsKey),
+              let connections = try? JSONDecoder().decode([String: FileProviderConnection].self, from: data) else {
+            return []
+        }
+        return Array(connections.values)
+    }
+    
+    /// Gets a specific connection by ID
+    /// This is nonisolated because it only reads from shared UserDefaults
+    nonisolated static func getConnection(id: String) -> FileProviderConnection? {
+        NSLog("📂 [FP-DM] getConnection(id: %@)", id)
+        
+        guard let defaults = UserDefaults(suiteName: appGroupIdentifier) else {
+            NSLog("❌ [FP-DM] Cannot access shared UserDefaults")
+            return nil
+        }
+        
+        guard let data = defaults.data(forKey: connectionsKey) else {
+            NSLog("❌ [FP-DM] No data for key: %@", connectionsKey)
+            return nil
+        }
+        
+        guard let connections = try? JSONDecoder().decode([String: FileProviderConnection].self, from: data) else {
+            NSLog("❌ [FP-DM] Failed to decode connections")
+            return nil
+        }
+        
+        NSLog("📂 [FP-DM] Found %d connections, looking for id: %@", connections.count, id)
+        NSLog("📂 [FP-DM] Available IDs: %@", connections.keys.joined(separator: ", "))
+        
+        if let conn = connections[id] {
+            NSLog("📂 [FP-DM] Found connection: %@", conn.name)
+            return conn
+        } else {
+            NSLog("❌ [FP-DM] Connection not found for id: %@", id)
+            return nil
+        }
+    }
+    
+    /// Reads debug log from File Provider extension (for debugging)
+    nonisolated static func readExtensionDebugLog() -> String? {
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
+            return nil
+        }
+        let logFile = containerURL.appendingPathComponent("fileprovider_debug.log")
+        return try? String(contentsOf: logFile, encoding: .utf8)
+    }
+    
+    /// Clears the extension debug log
+    nonisolated static func clearExtensionDebugLog() {
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
+            return
+        }
+        let logFile = containerURL.appendingPathComponent("fileprovider_debug.log")
+        try? FileManager.default.removeItem(at: logFile)
     }
 }
