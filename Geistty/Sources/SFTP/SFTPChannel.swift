@@ -270,31 +270,31 @@ actor SFTPChannel {
             wantReply: true
         )
         
-        // Wait for subsystem success/failure event with timeout
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            self.subsystemContinuation = continuation
-            
-            // Schedule timeout
-            Task {
-                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
-                if let cont = await self.subsystemContinuation {
-                    await self.clearSubsystemContinuation()
-                    cont.resume(throwing: SFTPError.connectionFailed("Subsystem request timeout"))
-                }
-            }
-            
-            // Send the subsystem request
-            Task {
-                do {
-                    try await childChannel.triggerUserOutboundEvent(subsystemRequest).get()
-                    logger.info("📂 SFTP subsystem request sent, waiting for response...")
-                } catch {
-                    if let cont = await self.subsystemContinuation {
-                        await self.clearSubsystemContinuation()
-                        cont.resume(throwing: error)
+        // First send the subsystem request
+        try await childChannel.triggerUserOutboundEvent(subsystemRequest).get()
+        logger.info("📂 SFTP subsystem request sent, waiting for response...")
+        
+        // Then wait for success/failure event with timeout
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            // Task 1: Wait for the event callback to fire
+            group.addTask {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    // Store continuation - handleChannelEvent will resume it
+                    Task { @MainActor in
+                        await self.setSubsystemContinuation(continuation)
                     }
                 }
             }
+            
+            // Task 2: Timeout after 10 seconds  
+            group.addTask {
+                try await Task.sleep(nanoseconds: 10_000_000_000)
+                throw SFTPError.connectionFailed("Subsystem request timeout (10s)")
+            }
+            
+            // Wait for first task to complete (success or timeout)
+            try await group.next()
+            group.cancelAll()
         }
         
         logger.info("📂 SFTP subsystem request succeeded")
@@ -311,6 +311,11 @@ actor SFTPChannel {
         subsystemContinuation = nil
     }
     
+    /// Set the subsystem continuation (actor-isolated)
+    private func setSubsystemContinuation(_ continuation: CheckedContinuation<Void, Error>) {
+        subsystemContinuation = continuation
+    }
+
     /// Handle channel events (subsystem success/failure)
     private func handleChannelEvent(_ event: Any) {
         logger.info("📂 Processing channel event: \(type(of: event))")
