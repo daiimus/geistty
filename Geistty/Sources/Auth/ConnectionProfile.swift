@@ -8,6 +8,9 @@
 import Foundation
 import SwiftUI
 import Combine
+import os.log
+
+private let logger = Logger(subsystem: "com.geistty", category: "ConnectionProfile")
 
 /// Authentication method for SSH connections
 ///
@@ -62,6 +65,9 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
     var useTmux: Bool  // Auto-attach to or create tmux session
     var tmuxSessionName: String?  // Custom tmux session name (nil = default "main")
     
+    // Files.app integration
+    var enableFilesIntegration: Bool  // Show this server in Files.app sidebar
+    
     // Metadata
     var createdAt: Date
     var lastConnectedAt: Date?
@@ -77,7 +83,8 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
         authMethod: AuthMethod = .sshKey,
         sshKeyName: String? = nil,
         useTmux: Bool = false,
-        tmuxSessionName: String? = nil
+        tmuxSessionName: String? = nil,
+        enableFilesIntegration: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -88,16 +95,17 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
         self.sshKeyName = sshKeyName
         self.useTmux = useTmux
         self.tmuxSessionName = tmuxSessionName
+        self.enableFilesIntegration = enableFilesIntegration
         self.createdAt = Date()
         self.lastConnectedAt = nil
         self.isFavorite = false
         self.colorTag = nil
     }
     
-    // Custom coding keys to handle migration from old profiles without tmux fields
+    // Custom coding keys to handle migration from old profiles without tmux/filesIntegration fields
     enum CodingKeys: String, CodingKey {
         case id, name, host, port, username, authMethod, sshKeyName
-        case useTmux, tmuxSessionName
+        case useTmux, tmuxSessionName, enableFilesIntegration
         case createdAt, lastConnectedAt, isFavorite, colorTag
     }
     
@@ -113,6 +121,7 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
         // Handle migration: default to false if not present
         useTmux = try container.decodeIfPresent(Bool.self, forKey: .useTmux) ?? false
         tmuxSessionName = try container.decodeIfPresent(String.self, forKey: .tmuxSessionName)
+        enableFilesIntegration = try container.decodeIfPresent(Bool.self, forKey: .enableFilesIntegration) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         lastConnectedAt = try container.decodeIfPresent(Date.self, forKey: .lastConnectedAt)
         isFavorite = try container.decode(Bool.self, forKey: .isFavorite)
@@ -223,14 +232,22 @@ class ConnectionProfileManager: ObservableObject {
         profiles.append(profile)
         saveProfiles()
         
-        // Register File Provider domain for this connection
-        Task { @MainActor in
-            try? await FileProviderDomainManager.shared.registerDomain(
-                host: profile.host,
-                port: profile.port,
-                username: profile.username
-            )
+        // Add to File Provider if enabled
+        #if !FILEPROVIDER_EXTENSION
+        if profile.enableFilesIntegration {
+            Task { @MainActor in
+                await FileProviderDomainManager.shared.addConnection(
+                    profileId: profile.id.uuidString,
+                    name: profile.name.isEmpty ? "\(profile.username)@\(profile.host)" : profile.name,
+                    host: profile.host,
+                    port: profile.port,
+                    username: profile.username,
+                    authMethod: profile.authMethod.rawValue,
+                    sshKeyName: profile.sshKeyName
+                )
+            }
         }
+        #endif
     }
     
     /// Update an existing profile
@@ -240,25 +257,29 @@ class ConnectionProfileManager: ObservableObject {
             profiles[index] = profile
             saveProfiles()
             
-            // If connection details changed, update File Provider domain
-            if oldProfile.host != profile.host || 
-               oldProfile.port != profile.port || 
-               oldProfile.username != profile.username {
-                Task { @MainActor in
-                    // Remove old domain
-                    try? await FileProviderDomainManager.shared.removeDomain(
-                        host: oldProfile.host,
-                        port: oldProfile.port,
-                        username: oldProfile.username
+            // Update File Provider
+            #if !FILEPROVIDER_EXTENSION
+            Task { @MainActor in
+                // Handle toggling off
+                if oldProfile.enableFilesIntegration && !profile.enableFilesIntegration {
+                    await FileProviderDomainManager.shared.removeConnection(
+                        profileId: profile.id.uuidString
                     )
-                    // Register new domain
-                    try? await FileProviderDomainManager.shared.registerDomain(
+                }
+                // Handle toggling on or updating
+                else if profile.enableFilesIntegration {
+                    await FileProviderDomainManager.shared.addConnection(
+                        profileId: profile.id.uuidString,
+                        name: profile.name.isEmpty ? "\(profile.username)@\(profile.host)" : profile.name,
                         host: profile.host,
                         port: profile.port,
-                        username: profile.username
+                        username: profile.username,
+                        authMethod: profile.authMethod.rawValue,
+                        sshKeyName: profile.sshKeyName
                     )
                 }
             }
+            #endif
         }
     }
     
@@ -267,14 +288,16 @@ class ConnectionProfileManager: ObservableObject {
         profiles.removeAll { $0.id == profile.id }
         saveProfiles()
         
-        // Remove File Provider domain for this connection
-        Task { @MainActor in
-            try? await FileProviderDomainManager.shared.removeDomain(
-                host: profile.host,
-                port: profile.port,
-                username: profile.username
-            )
+        // Remove from File Provider if it was enabled
+        #if !FILEPROVIDER_EXTENSION
+        if profile.enableFilesIntegration {
+            Task { @MainActor in
+                await FileProviderDomainManager.shared.removeConnection(
+                    profileId: profile.id.uuidString
+                )
+            }
         }
+        #endif
     }
     
     /// Delete profiles by ID
@@ -283,16 +306,19 @@ class ConnectionProfileManager: ObservableObject {
         profiles.remove(atOffsets: offsets)
         saveProfiles()
         
-        // Remove File Provider domains for deleted connections
-        Task { @MainActor in
-            for profile in profilesToDelete {
-                try? await FileProviderDomainManager.shared.removeDomain(
-                    host: profile.host,
-                    port: profile.port,
-                    username: profile.username
-                )
+        // Remove File Provider for deleted connections
+        #if !FILEPROVIDER_EXTENSION
+        let profilesWithFilesIntegration = profilesToDelete.filter { $0.enableFilesIntegration }
+        if !profilesWithFilesIntegration.isEmpty {
+            Task { @MainActor in
+                for profile in profilesWithFilesIntegration {
+                    await FileProviderDomainManager.shared.removeConnection(
+                        profileId: profile.id.uuidString
+                    )
+                }
             }
         }
+        #endif
     }
     
     /// Mark a profile as recently connected
@@ -430,17 +456,35 @@ class ConnectionProfileManager: ObservableObject {
     
     // MARK: - File Provider Integration
     
-    /// Syncs all saved profiles to File Provider domains
-    /// Call this on app launch to ensure domains are registered
+    /// Syncs all saved profiles to File Provider
+    /// Call this on app launch to ensure the domain is registered and connections are synced
     func syncFileProviderDomains() {
+        #if !FILEPROVIDER_EXTENSION
         Task { @MainActor in
-            for profile in profiles {
-                try? await FileProviderDomainManager.shared.registerDomain(
-                    host: profile.host,
-                    port: profile.port,
-                    username: profile.username
-                )
+            // Get all profiles with Files integration enabled
+            let enabledProfiles = profiles.filter { $0.enableFilesIntegration }
+            
+            if enabledProfiles.isEmpty {
+                // No profiles with Files integration - remove domain
+                try? await FileProviderDomainManager.shared.removeDomain()
+            } else {
+                // Ensure domain is registered
+                try? await FileProviderDomainManager.shared.ensureDomainRegistered()
+                
+                // Add each enabled profile as a connection
+                for profile in enabledProfiles {
+                    await FileProviderDomainManager.shared.addConnection(
+                        profileId: profile.id.uuidString,
+                        name: profile.name,
+                        host: profile.host,
+                        port: profile.port,
+                        username: profile.username,
+                        authMethod: profile.authMethod.rawValue,
+                        sshKeyName: profile.sshKeyName
+                    )
+                }
             }
         }
+        #endif
     }
 }

@@ -191,8 +191,8 @@ actor SFTPChannel {
     /// Whether the channel is initialized
     private var isInitialized = false
     
-    /// Connection state
-    private var isConnected = false
+    /// Connection state - true only after SFTP subsystem is open and initialized
+    private(set) var isConnected = false
     
     init(parentChannel: Channel) {
         self.parentChannel = parentChannel
@@ -246,7 +246,7 @@ actor SFTPChannel {
         try await initializeSFTP()
         
         isConnected = true
-        logger.info("📂 SFTP channel ready (version \(protocolVersion))")
+        logger.info("📂 SFTP channel ready (version \(self.protocolVersion))")
     }
     
     /// Initialize the SFTP protocol (version negotiation)

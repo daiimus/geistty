@@ -328,7 +328,7 @@ public class NIOSSHConnection: ObservableObject {
     
     /// Connect to the SSH server with a specific authentication method
     public func connect(authMethod: SSHAuthMethod) async throws {
-        logger.info("🔗 NIOSSHConnection.connect() - host=\(host) port=\(port)")
+        logger.info("🔗 NIOSSHConnection.connect() - host=\(self.host) port=\(self.port)")
         
         guard state == .disconnected else {
             throw NIOSSHError.alreadyConnected
@@ -344,6 +344,10 @@ public class NIOSSHConnection: ObservableObject {
         // Create event loop group using Network.framework (NIOTransportServices)
         let group = NIOTSEventLoopGroup()
         self.eventLoopGroup = group
+        
+        // Capture connection parameters for closures
+        let connectionHost = self.host
+        let connectionPort = self.port
         
         do {
             // Configure SSH client
@@ -367,8 +371,8 @@ public class NIOSSHConnection: ObservableObject {
                 }
             
             // Connect
-            logger.info("🔗 Connecting to \(host):\(port)...")
-            let channel = try await bootstrap.connect(host: host, port: port).get()
+            logger.info("🔗 Connecting to \(connectionHost):\(connectionPort)...")
+            let channel = try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
             self.channel = channel
             
             logger.info("🔗 TCP connected, SSH handshake in progress...")
@@ -394,6 +398,107 @@ public class NIOSSHConnection: ObservableObject {
             eventLoopGroup = nil
             throw NIOSSHError.connectionFailed(error.localizedDescription)
         }
+    }
+    
+    /// Connect to the SSH server for SFTP-only (no shell/PTY)
+    /// Use this for File Provider extension where we only need SFTP subsystem
+    public func connectForSFTP(authMethod: SSHAuthMethod) async throws {
+        logger.info("🔗 NIOSSHConnection.connectForSFTP() - host=\(self.host) port=\(self.port)")
+        
+        guard state == .disconnected else {
+            throw NIOSSHError.alreadyConnected
+        }
+        
+        // Check network availability
+        if let path = lastKnownPath, path.status != .satisfied {
+            throw NIOSSHError.networkUnavailable
+        }
+        
+        state = .connecting
+        
+        // Create event loop group using Network.framework (NIOTransportServices)
+        let group = NIOTSEventLoopGroup()
+        self.eventLoopGroup = group
+        
+        // Capture connection parameters for closures
+        let connectionHost = self.host
+        let connectionPort = self.port
+        
+        do {
+            // Configure SSH client
+            let clientConfig = SSHClientConfiguration(username: username, authMethod: authMethod)
+            let serverAuthDelegate = AcceptAllHostKeysDelegate()
+            
+            // Bootstrap the connection
+            let bootstrap = NIOTSConnectionBootstrap(group: group)
+                .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+                .channelInitializer { channel in
+                    channel.pipeline.addHandlers([
+                        NIOSSHHandler(
+                            role: .client(.init(
+                                userAuthDelegate: clientConfig,
+                                serverAuthDelegate: serverAuthDelegate
+                            )),
+                            allocator: channel.allocator,
+                            inboundChildChannelInitializer: nil
+                        )
+                    ])
+                }
+            
+            // Connect
+            logger.info("🔗 Connecting to \(connectionHost):\(connectionPort) (SFTP mode)...")
+            let channel = try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
+            self.channel = channel
+            
+            logger.info("🔗 TCP connected, verifying SSH authentication...")
+            
+            // CRITICAL: We must verify that SSH authentication completed successfully.
+            // The bootstrap.connect() returns after TCP connects, but SSH handshake and
+            // authentication happen asynchronously. NIOSSHHandler.createChannel() will
+            // fail if authentication hasn't completed, so we use it to verify auth.
+            try await verifyAuthentication(on: channel)
+            
+            state = .channelOpen
+            health = .healthy
+            
+            logger.info("🔗 SSH authenticated (SFTP mode) - ready for subsystem channels")
+            
+        } catch {
+            logger.error("🔗 Connection failed: \(error.localizedDescription)")
+            state = .disconnected
+            try? await eventLoopGroup?.shutdownGracefully()
+            eventLoopGroup = nil
+            throw NIOSSHError.connectionFailed(error.localizedDescription)
+        }
+    }
+    
+    /// Verify that SSH authentication completed successfully by creating a test channel
+    /// This is necessary because bootstrap.connect() returns before auth finishes.
+    private func verifyAuthentication(on channel: Channel) async throws {
+        logger.info("🔐 Verifying SSH authentication...")
+        
+        let sshHandler = try channel.pipeline.handler(type: NIOSSHHandler.self).wait()
+        
+        // Attempt to create a session channel - this will fail if auth isn't complete
+        let channelPromise = channel.eventLoop.makePromise(of: Channel.self)
+        
+        sshHandler.createChannel(channelPromise) { childChannel, channelType in
+            guard channelType == .session else {
+                return childChannel.eventLoop.makeFailedFuture(
+                    NIOSSHError.channelError("Unexpected channel type during auth verification")
+                )
+            }
+            // No handlers needed - we're just verifying auth works
+            return childChannel.eventLoop.makeSucceededVoidFuture()
+        }
+        
+        // Wait for channel creation - this blocks until auth completes
+        let testChannel = try await channelPromise.futureResult.get()
+        
+        // Close the test channel immediately - we only needed it to verify auth
+        try await testChannel.close().get()
+        
+        logger.info("🔐 SSH authentication verified successfully")
     }
     
     // MARK: - Shell Channel
@@ -437,13 +542,17 @@ public class NIOSSHConnection: ObservableObject {
         
         self.sshChannel = childChannel
         
+        // Capture PTY dimensions for closures
+        let ptyCols = self.cols
+        let ptyRows = self.rows
+        
         // Request PTY
-        logger.info("🖥️ Requesting PTY (cols=\(cols) rows=\(rows))...")
+        logger.info("🖥️ Requesting PTY (cols=\(ptyCols) rows=\(ptyRows))...")
         let ptyRequest = SSHChannelRequestEvent.PseudoTerminalRequest(
             wantReply: true,
             term: "xterm-256color",
-            terminalCharacterWidth: cols,
-            terminalRowHeight: rows,
+            terminalCharacterWidth: ptyCols,
+            terminalRowHeight: ptyRows,
             terminalPixelWidth: 0,
             terminalPixelHeight: 0,
             terminalModes: SSHTerminalModes([:])

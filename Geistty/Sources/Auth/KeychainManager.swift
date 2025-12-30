@@ -2,7 +2,11 @@
 //  KeychainManager.swift
 //  Geistty
 //
-//  Secure storage for SSH keys and credentials using iOS Keychain
+//  Secure storage for SSH keys and credentials using iOS Keychain.
+//  
+//  Both the main app and File Provider extension have the same keychain-access-groups
+//  entitlement, which automatically allows them to share keychain items.
+//  We don't need to specify kSecAttrAccessGroup - iOS handles sharing automatically.
 //
 
 import Foundation
@@ -38,63 +42,28 @@ enum KeychainError: LocalizedError {
     }
 }
 
-/// Manages secure storage of credentials and SSH keys in the iOS Keychain
+/// Manages secure storage of credentials and SSH keys in the iOS Keychain.
+///
+/// Both the main app and File Provider extension share the same keychain-access-groups
+/// entitlement. We explicitly specify the access group to ensure items are accessible
+/// across app extensions.
 class KeychainManager {
     
-    /// Shared instance for main app
+    /// Shared instance - use this everywhere (main app and extensions)
     static let shared = KeychainManager()
     
-    /// Shared instance for File Provider extension (uses App Group keychain)
-    static let sharedForExtension = KeychainManager(useAppGroup: true)
+    /// Legacy alias for backwards compatibility
+    static var sharedForExtension: KeychainManager { shared }
     
     /// Service identifier for our app's keychain items
     private let service = "com.geistty"
     
-    /// App Group identifier for sharing keychain items with extensions
-    /// This must match the App Group configured in both app and extension capabilities
-    static let appGroupIdentifier = "group.com.geistty.fileprovider"
+    /// Access group for sharing between main app and extensions
+    /// This must match the keychain-access-groups in entitlements
+    /// The actual value at runtime will be "TEAMID.com.geistty.shared"
+    private let accessGroup = "com.geistty.shared"
     
-    /// Access group for sharing across app extensions
-    /// When set, keychain items are accessible from both main app and extensions
-    private let accessGroup: String?
-    
-    /// Creates a KeychainManager instance
-    /// - Parameter useAppGroup: If true, uses the shared App Group keychain for cross-process access
-    init(useAppGroup: Bool = false) {
-        self.accessGroup = useAppGroup ? KeychainManager.appGroupIdentifier : nil
-    }
-    
-    // MARK: - Shared Keychain Helpers
-    
-    /// Saves a password to both local and shared keychains for File Provider access
-    /// Use this when saving credentials that should be accessible from the Files.app extension
-    static func savePasswordToShared(_ password: String, for host: String, username: String) throws {
-        // Save to local keychain
-        try shared.savePassword(password, for: host, username: username)
-        // Also save to shared keychain for File Provider extension
-        try sharedForExtension.savePassword(password, for: host, username: username)
-    }
-    
-    /// Saves an SSH key to both local and shared keychains for File Provider access
-    /// Use this when saving keys that should be accessible from the Files.app extension
-    static func saveSSHKeyToShared(_ privateKey: Data, name: String) throws {
-        // Save to local keychain
-        try shared.saveSSHKey(privateKey, name: name)
-        // Also save to shared keychain for File Provider extension
-        try sharedForExtension.saveSSHKey(privateKey, name: name)
-    }
-    
-    /// Deletes a password from both local and shared keychains
-    static func deletePasswordFromShared(for host: String, username: String) throws {
-        try? shared.deletePassword(for: host, username: username)
-        try? sharedForExtension.deletePassword(for: host, username: username)
-    }
-    
-    /// Deletes an SSH key from both local and shared keychains
-    static func deleteSSHKeyFromShared(name: String) throws {
-        try? shared.deleteSSHKey(name: name)
-        try? sharedForExtension.deleteSSHKey(name: name)
-    }
+    private init() {}
     
     // MARK: - Password Storage
     
@@ -105,7 +74,10 @@ class KeychainManager {
             throw KeychainError.dataConversionError
         }
         
-        var query: [String: Any] = [
+        // Delete existing first to avoid duplicate issues
+        try? deletePassword(for: host, username: username)
+        
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -113,26 +85,10 @@ class KeychainManager {
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
         
-        if let group = accessGroup {
-            query[kSecAttrAccessGroup as String] = group
-        }
-        
-        // Try to add, if duplicate exists, update it
-        var status = SecItemAdd(query as CFDictionary, nil)
-        
-        if status == errSecDuplicateItem {
-            let updateQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account
-            ]
-            let updateAttributes: [String: Any] = [
-                kSecValueData as String: data
-            ]
-            status = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
-        }
+        let status = SecItemAdd(query as CFDictionary, nil)
         
         guard status == errSecSuccess else {
+            logger.error("❌ Failed to save password for \(account): OSStatus \(status)")
             throw KeychainError.unexpectedStatus(status)
         }
         
@@ -143,17 +99,13 @@ class KeychainManager {
     func getPassword(for host: String, username: String) throws -> String {
         let account = "\(username)@\(host)"
         
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
-        
-        if let group = accessGroup {
-            query[kSecAttrAccessGroup as String] = group
-        }
         
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -195,12 +147,13 @@ class KeychainManager {
     // MARK: - SSH Key Storage
     
     /// Save an SSH private key PEM data to the Keychain
-    /// Note: We store raw PEM data as generic password, not as kSecClassKey,
-    /// because kSecClassKey expects specific cryptographic formats and may corrupt PEM text.
     func saveSSHKey(_ privateKey: Data, name: String, useSecureEnclave: Bool = false) throws {
         let account = "ssh-key:\(name)"
         
-        var query: [String: Any] = [
+        // Delete existing key with same name (all formats)
+        try? deleteSSHKey(name: name)
+        
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -208,31 +161,14 @@ class KeychainManager {
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
         
-        if let group = accessGroup {
-            query[kSecAttrAccessGroup as String] = group
-        }
-        
-        // Delete existing key with same name (both old and new format)
-        let deleteQueryOld: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: "com.geistty.key.\(name)".data(using: .utf8)!
-        ]
-        SecItemDelete(deleteQueryOld as CFDictionary)
-        
-        let deleteQueryNew: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(deleteQueryNew as CFDictionary)
-        
         let status = SecItemAdd(query as CFDictionary, nil)
         
         guard status == errSecSuccess else {
+            logger.error("❌ Failed to save SSH key '\(name)': OSStatus \(status)")
             throw KeychainError.unexpectedStatus(status)
         }
         
-        logger.info("💾 Saved SSH key: \(name)")
+        logger.info("💾 Saved SSH key '\(name)'")
     }
     
     /// Retrieve an SSH private key PEM data from the Keychain
@@ -251,14 +187,8 @@ class KeychainManager {
         var result: AnyObject?
         var status = SecItemCopyMatching(query as CFDictionary, &result)
         
-        if status == errSecSuccess {
-            logger.info("🔑 Retrieved key '\(name)' from NEW format (kSecClassGenericPassword)")
-        }
-        
-        // Fallback to old format (kSecClassKey) for migration
-        // WARNING: Old format likely corrupted non-RSA keys!
+        // Fallback: old kSecClassKey format (pre-migration)
         if status == errSecItemNotFound {
-            logger.warning("⚠️ Key '\(name)' not found in new format, trying OLD format (may be corrupted!)")
             let tag = "com.geistty.key.\(name)"
             let oldQuery: [String: Any] = [
                 kSecClass as String: kSecClassKey,
@@ -267,13 +197,17 @@ class KeychainManager {
                 kSecMatchLimit as String: kSecMatchLimitOne
             ]
             status = SecItemCopyMatching(oldQuery as CFDictionary, &result)
-            if status == errSecSuccess {
-                logger.error("❌ Key '\(name)' retrieved from OLD format - THIS KEY IS LIKELY CORRUPTED! Delete and re-import.")
+            
+            // If found in old format, migrate to new format
+            if status == errSecSuccess, let data = result as? Data {
+                logger.info("🔄 Migrating SSH key '\(name)' from old format")
+                try? saveSSHKey(data, name: name)
             }
         }
         
         guard status == errSecSuccess else {
             if status == errSecItemNotFound {
+                logger.warning("🔑 SSH key '\(name)' not found in keychain")
                 throw KeychainError.itemNotFound
             }
             throw KeychainError.unexpectedStatus(status)
@@ -283,6 +217,7 @@ class KeychainManager {
             throw KeychainError.dataConversionError
         }
         
+        logger.info("🔑 Retrieved SSH key '\(name)'")
         return data
     }
     
@@ -291,23 +226,22 @@ class KeychainManager {
         let account = "ssh-key:\(name)"
         
         // Delete new format
-        let queryNew: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        SecItemDelete(queryNew as CFDictionary)
+        SecItemDelete(query as CFDictionary)
         
-        // Also delete old format for migration
+        // Also delete old kSecClassKey format
         let tag = "com.geistty.key.\(name)"
-        let queryOld: [String: Any] = [
+        let oldQuery: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: tag.data(using: .utf8)!
         ]
-        _ = SecItemDelete(queryOld as CFDictionary)
+        SecItemDelete(oldQuery as CFDictionary)
         
-        // Consider success if either was deleted or not found
-        logger.info("🗑️ Deleted SSH key: \(name)")
+        logger.info("🗑️ Deleted SSH key '\(name)'")
     }
     
     /// List all saved SSH key names
@@ -322,9 +256,9 @@ class KeychainManager {
             kSecMatchLimit as String: kSecMatchLimitAll
         ]
         
-        var resultNew: AnyObject?
-        if SecItemCopyMatching(queryNew as CFDictionary, &resultNew) == errSecSuccess,
-           let items = resultNew as? [[String: Any]] {
+        var result: AnyObject?
+        if SecItemCopyMatching(queryNew as CFDictionary, &result) == errSecSuccess,
+           let items = result as? [[String: Any]] {
             for item in items {
                 if let account = item[kSecAttrAccount as String] as? String,
                    account.hasPrefix("ssh-key:") {
@@ -333,16 +267,15 @@ class KeychainManager {
             }
         }
         
-        // Also query old format for migration
+        // Also query old kSecClassKey format for migration
         let queryOld: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
         ]
         
-        var resultOld: AnyObject?
-        if SecItemCopyMatching(queryOld as CFDictionary, &resultOld) == errSecSuccess,
-           let items = resultOld as? [[String: Any]] {
+        if SecItemCopyMatching(queryOld as CFDictionary, &result) == errSecSuccess,
+           let items = result as? [[String: Any]] {
             for item in items {
                 if let tagData = item[kSecAttrApplicationTag as String] as? Data,
                    let tag = String(data: tagData, encoding: .utf8),
