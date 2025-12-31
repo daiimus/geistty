@@ -16,6 +16,28 @@ import os.log
 
 private let logger = Logger(subsystem: "com.geistty", category: "SFTP")
 
+/// Debug logging to shared file (for File Provider debugging)
+private func fpDebugLog(_ message: String) {
+    let groupId = "group.com.geistty.fileprovider"
+    guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupId) else {
+        return
+    }
+    
+    let logFile = containerURL.appendingPathComponent("fileprovider_debug.log")
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let entry = "[\(timestamp)] SFTPChannel: \(message)\n"
+    
+    if FileManager.default.fileExists(atPath: logFile.path) {
+        if let handle = try? FileHandle(forWritingTo: logFile) {
+            handle.seekToEndOfFile()
+            handle.write(entry.data(using: .utf8)!)
+            handle.closeFile()
+        }
+    } else {
+        try? entry.write(to: logFile, atomically: true, encoding: .utf8)
+    }
+}
+
 // MARK: - SFTP Protocol Constants
 
 /// SFTP packet types
@@ -124,10 +146,12 @@ final class SFTPChannelHandler: ChannelDuplexHandler, @unchecked Sendable {
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let channelData = unwrapInboundIn(data)
+        fpDebugLog("channelRead called, type=\(channelData.type)")
         
         // Only process regular channel data
         guard case .channel = channelData.type else { 
             logger.debug("📂 Received non-channel data type, ignoring")
+            fpDebugLog("channelRead: non-channel data, ignoring")
             return 
         }
         
@@ -135,32 +159,42 @@ final class SFTPChannelHandler: ChannelDuplexHandler, @unchecked Sendable {
         case .byteBuffer(var buffer):
             if let bytes = buffer.readBytes(length: buffer.readableBytes) {
                 logger.info("📂 SFTPChannelHandler received \(bytes.count) bytes")
+                fpDebugLog("channelRead: received \(bytes.count) bytes")
                 receiveBuffer.append(contentsOf: bytes)
                 processBuffer()
             }
         case .fileRegion:
             logger.debug("📂 Received file region, ignoring")
+            fpDebugLog("channelRead: file region, ignoring")
             break
         }
     }
     
     /// Process buffered data, extracting complete SFTP packets
     private func processBuffer() {
+        fpDebugLog("processBuffer: buffer has \(receiveBuffer.count) bytes")
         // SFTP packets are: length (4 bytes) + type (1 byte) + data
         while receiveBuffer.count >= 4 {
-            let length = UInt32(receiveBuffer[0]) << 24 |
-                         UInt32(receiveBuffer[1]) << 16 |
-                         UInt32(receiveBuffer[2]) << 8 |
-                         UInt32(receiveBuffer[3])
+            // Use withUnsafeBytes for safe access regardless of Data's internal indices
+            let length = receiveBuffer.withUnsafeBytes { ptr -> UInt32 in
+                let bytes = ptr.bindMemory(to: UInt8.self)
+                return UInt32(bytes[0]) << 24 |
+                       UInt32(bytes[1]) << 16 |
+                       UInt32(bytes[2]) << 8 |
+                       UInt32(bytes[3])
+            }
             
             let totalLength = Int(length) + 4
+            fpDebugLog("processBuffer: packet length=\(length), total=\(totalLength), have=\(receiveBuffer.count)")
             
             if receiveBuffer.count >= totalLength {
-                // Extract complete packet
-                let packet = receiveBuffer.prefix(totalLength)
-                receiveBuffer.removeFirst(totalLength)
-                onData(Data(packet))
+                // Extract complete packet - use prefix which creates a new Data with indices starting at 0
+                let packet = Data(receiveBuffer.prefix(totalLength))
+                receiveBuffer = Data(receiveBuffer.dropFirst(totalLength))
+                fpDebugLog("processBuffer: extracted packet of \(totalLength) bytes, calling onData")
+                onData(packet)
             } else {
+                fpDebugLog("processBuffer: waiting for more data")
                 break // Wait for more data
             }
         }
@@ -228,42 +262,57 @@ actor SFTPChannel {
     /// Open the SFTP subsystem channel
     func open() async throws {
         logger.info("📂 Opening SFTP channel...")
+        fpDebugLog("open() called")
         
         // Get the SSH handler from the parent channel
+        // This returns an EventLoopFuture that completes on the event loop
         let handler = try await parentChannel.pipeline.handler(type: NIOSSHHandler.self).get()
         self.sshHandler = handler
+        fpDebugLog("Got NIOSSHHandler")
         
         // Create the SFTP child channel
+        // CRITICAL: createChannel MUST be called from the event loop!
+        // NIOSSHHandler.channel has a preconditionInEventLoop() check.
         let channelPromise = parentChannel.eventLoop.makePromise(of: Channel.self)
         
-        handler.createChannel(channelPromise) { [weak self] childChannel, channelType in
-            guard channelType == .session else {
-                return childChannel.eventLoop.makeFailedFuture(
-                    SFTPError.connectionFailed("Unexpected channel type")
+        // Submit createChannel to the event loop to avoid precondition failure
+        let eventLoop = parentChannel.eventLoop
+        fpDebugLog("Submitting createChannel to event loop...")
+        eventLoop.execute { [weak self] in
+            fpDebugLog("Inside eventLoop.execute")
+            handler.createChannel(channelPromise) { childChannel, channelType in
+                fpDebugLog("createChannel callback, type: \(channelType)")
+                guard channelType == .session else {
+                    return childChannel.eventLoop.makeFailedFuture(
+                        SFTPError.connectionFailed("Unexpected channel type")
+                    )
+                }
+                
+                return childChannel.pipeline.addHandler(
+                    SFTPChannelHandler(
+                        onData: { data in
+                            Task { await self?.handleIncomingData(data) }
+                        },
+                        onClose: { error in
+                            Task { await self?.handleChannelClose(error) }
+                        },
+                        onEvent: { event in
+                            fpDebugLog("onEvent callback received: \(type(of: event))")
+                            Task { await self?.handleChannelEvent(event) }
+                        }
+                    )
                 )
             }
-            
-            return childChannel.pipeline.addHandler(
-                SFTPChannelHandler(
-                    onData: { data in
-                        Task { await self?.handleIncomingData(data) }
-                    },
-                    onClose: { error in
-                        Task { await self?.handleChannelClose(error) }
-                    },
-                    onEvent: { event in
-                        Task { await self?.handleChannelEvent(event) }
-                    }
-                )
-            )
         }
         
         // Wait for channel to be created
         let childChannel = try await channelPromise.futureResult.get()
         self.channel = childChannel
+        fpDebugLog("SSH child channel created")
         logger.info("📂 SSH child channel created")
         
         // Request SFTP subsystem and wait for success/failure
+        fpDebugLog("Requesting SFTP subsystem...")
         logger.info("📂 Requesting SFTP subsystem...")
         let subsystemRequest = SSHChannelRequestEvent.SubsystemRequest(
             subsystem: "sftp",
@@ -272,36 +321,48 @@ actor SFTPChannel {
         
         // First send the subsystem request
         try await childChannel.triggerUserOutboundEvent(subsystemRequest).get()
+        fpDebugLog("SFTP subsystem request sent, waiting for response...")
         logger.info("📂 SFTP subsystem request sent, waiting for response...")
         
         // Then wait for success/failure event with timeout
         try await withThrowingTaskGroup(of: Void.self) { group in
             // Task 1: Wait for the event callback to fire
             group.addTask {
+                fpDebugLog("Starting continuation wait task")
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    fpDebugLog("Setting continuation...")
                     // Store continuation - handleChannelEvent will resume it
                     Task { @MainActor in
+                        fpDebugLog("Inside @MainActor task, setting continuation")
                         await self.setSubsystemContinuation(continuation)
+                        fpDebugLog("Continuation set successfully")
                     }
                 }
+                fpDebugLog("Continuation completed!")
             }
             
             // Task 2: Timeout after 10 seconds  
             group.addTask {
+                fpDebugLog("Starting timeout task (10s)")
                 try await Task.sleep(nanoseconds: 10_000_000_000)
+                fpDebugLog("Timeout fired!")
                 throw SFTPError.connectionFailed("Subsystem request timeout (10s)")
             }
             
             // Wait for first task to complete (success or timeout)
+            fpDebugLog("Waiting for first task to complete...")
             try await group.next()
+            fpDebugLog("Task completed, cancelling others")
             group.cancelAll()
         }
         
+        fpDebugLog("Subsystem request succeeded, calling initializeSFTP...")
         logger.info("📂 SFTP subsystem request succeeded")
         
         // Initialize SFTP protocol
         try await initializeSFTP()
         
+        fpDebugLog("SFTP channel ready!")
         isConnected = true
         logger.info("📂 SFTP channel ready (version \(self.protocolVersion))")
     }
@@ -313,20 +374,27 @@ actor SFTPChannel {
     
     /// Set the subsystem continuation (actor-isolated)
     private func setSubsystemContinuation(_ continuation: CheckedContinuation<Void, Error>) {
+        fpDebugLog("setSubsystemContinuation called, storing continuation")
         subsystemContinuation = continuation
     }
 
     /// Handle channel events (subsystem success/failure)
     private func handleChannelEvent(_ event: Any) {
+        fpDebugLog("handleChannelEvent: \(type(of: event))")
         logger.info("📂 Processing channel event: \(type(of: event))")
         
         if event is ChannelSuccessEvent {
+            fpDebugLog("ChannelSuccessEvent! continuation=\(subsystemContinuation != nil)")
             logger.info("📂 Received ChannelSuccessEvent - subsystem request succeeded")
             if let continuation = subsystemContinuation {
                 subsystemContinuation = nil
+                fpDebugLog("Resuming continuation")
                 continuation.resume()
+            } else {
+                fpDebugLog("WARNING: No continuation to resume!")
             }
         } else if event is ChannelFailureEvent {
+            fpDebugLog("ChannelFailureEvent! continuation=\(subsystemContinuation != nil)")
             logger.error("📂 Received ChannelFailureEvent - subsystem request failed")
             if let continuation = subsystemContinuation {
                 subsystemContinuation = nil
@@ -337,6 +405,8 @@ actor SFTPChannel {
     
     /// Initialize the SFTP protocol (version negotiation)
     private func initializeSFTP() async throws {
+        fpDebugLog("initializeSFTP: Building SSH_FXP_INIT packet...")
+        
         // Build SSH_FXP_INIT packet
         var initPacket = Data()
         
@@ -345,17 +415,22 @@ actor SFTPChannel {
         initPacket.append(contentsOf: version.bigEndianBytes)
         
         // Send init packet
+        fpDebugLog("initializeSFTP: Sending INIT packet...")
         try await sendPacket(type: .initialize, data: initPacket)
+        fpDebugLog("initializeSFTP: INIT packet sent, waiting for response...")
         
         // Wait for version response (first packet back)
         let response = try await receiveNextPacket()
+        fpDebugLog("initializeSFTP: Got response, \(response.count) bytes")
         
         guard response.count >= 5 else {
+            fpDebugLog("initializeSFTP: ERROR - Invalid version response size: \(response.count)")
             throw SFTPError.parseError("Invalid version response")
         }
         
         let responseType = response[4]
         guard responseType == SFTPPacketType.version.rawValue else {
+            fpDebugLog("initializeSFTP: ERROR - Expected version response, got type \(responseType)")
             throw SFTPError.parseError("Expected version response, got type \(responseType)")
         }
         
@@ -365,6 +440,7 @@ actor SFTPChannel {
                           UInt32(response[7]) << 8 |
                           UInt32(response[8])
         
+        fpDebugLog("initializeSFTP: Got version \(self.protocolVersion)")
         isInitialized = true
     }
     
@@ -402,14 +478,18 @@ actor SFTPChannel {
     
     /// Handle incoming SFTP data
     private func handleIncomingData(_ data: Data) {
+        fpDebugLog("handleIncomingData: \(data.count) bytes")
+        
         // Parse packet
         guard data.count >= 5 else {
+            fpDebugLog("handleIncomingData: packet too small")
             logger.warning("⚠️ SFTP packet too small: \(data.count) bytes")
             return
         }
         
         // Skip length (4 bytes), get type
         let type = data[4]
+        fpDebugLog("handleIncomingData: type=\(type)")
         
         // For requests with IDs, extract the ID and resume the continuation
         if data.count >= 9 {
@@ -418,14 +498,20 @@ actor SFTPChannel {
                             UInt32(data[7]) << 8 |
                             UInt32(data[8])
             
+            fpDebugLog("handleIncomingData: requestId=\(requestId), pendingCount=\(pendingRequests.count)")
+            
             if let continuation = pendingRequests.removeValue(forKey: requestId) {
+                fpDebugLog("handleIncomingData: found continuation for id \(requestId)")
                 continuation.resume(returning: data)
             } else if type == SFTPPacketType.version.rawValue {
                 // Version response doesn't have request ID
                 // Store for initializeSFTP to pick up
                 if let continuation = pendingRequests.removeValue(forKey: 0) {
+                    fpDebugLog("handleIncomingData: found version continuation")
                     continuation.resume(returning: data)
                 }
+            } else {
+                fpDebugLog("handleIncomingData: NO continuation found for id \(requestId)")
             }
         }
     }
@@ -464,15 +550,17 @@ actor SFTPChannel {
         pendingRequests.removeAll()
     }
     
-    /// Send a request and wait for response
-    private func request(type: SFTPPacketType, data: Data) async throws -> Data {
+    /// Send a request and wait for response with timeout
+    private func request(type: SFTPPacketType, data: Data, timeout: TimeInterval = 30) async throws -> Data {
         guard isConnected else {
             throw SFTPError.notConnected
         }
         
         let id = nextRequestId()
+        fpDebugLog("SFTP request \(id): type=\(type.rawValue)")
         
-        return try await withCheckedThrowingContinuation { continuation in
+        // Store the request and get the response
+        let response = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             pendingRequests[id] = continuation
             
             Task {
@@ -483,7 +571,25 @@ actor SFTPChannel {
                     continuation.resume(throwing: error)
                 }
             }
+            
+            // Schedule timeout
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                // Check if request is still pending
+                if let pendingCont = await self.removePendingRequest(id: id) {
+                    fpDebugLog("SFTP request \(id): timeout!")
+                    pendingCont.resume(throwing: SFTPError.timeout)
+                }
+            }
         }
+        
+        fpDebugLog("SFTP request \(id): complete")
+        return response
+    }
+    
+    /// Remove and return a pending request (for timeout handling)
+    private func removePendingRequest(id: UInt32) -> CheckedContinuation<Data, Error>? {
+        return pendingRequests.removeValue(forKey: id)
     }
     
     /// Get next request ID

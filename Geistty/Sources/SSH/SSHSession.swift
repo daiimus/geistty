@@ -114,6 +114,11 @@ class SSHSession: ObservableObject, Identifiable {
     private var storedProfile: ConnectionProfile?
     private var storedCredential: SSHCredential?
     
+    /// Public accessor for the profile ID (for File Provider refresh signaling)
+    var profileId: String? {
+        storedProfile?.id.uuidString
+    }
+    
     // Reconnection state
     @Published private(set) var isReconnecting: Bool = false
     private var reconnectAttempts: Int = 0

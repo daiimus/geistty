@@ -133,6 +133,61 @@ class FileProviderDomainManager: ObservableObject {
         }
     }
     
+    /// Signals that a connection's content changed (files added/removed via terminal)
+    /// Call this when the user might have modified files via SSH terminal
+    func signalConnectionChanged(connectionId: String) async {
+        let domainId = NSFileProviderDomainIdentifier(rawValue: Self.domainIdentifier)
+        let domain = NSFileProviderDomain(identifier: domainId, displayName: "Geistty")
+        
+        guard let manager = NSFileProviderManager(for: domain) else {
+            logger.warning("📂 No manager for domain")
+            return
+        }
+        
+        do {
+            // Signal the connection folder itself
+            let connectionIdentifier = NSFileProviderItemIdentifier("conn:\(connectionId)")
+            try await manager.signalEnumerator(for: connectionIdentifier)
+            logger.debug("📂 Signaled connection enumerator change: \(connectionId)")
+        } catch {
+            logger.error("📂 Failed to signal connection change: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Signals Files.app to refresh all content for a connection
+    /// This clears cached data and forces re-enumeration
+    func refreshFilesApp(connectionId: String) async {
+        await signalConnectionChanged(connectionId: connectionId)
+        
+        // Also signal the root to ensure the connection folder itself refreshes
+        await signalRootChanged()
+    }
+    
+    /// Refreshes Files.app for all stored connections
+    /// Called when app returns to foreground - catches any changes made while backgrounded
+    func refreshAllConnections() async {
+        let connections = Self.getConnections()
+        
+        guard !connections.isEmpty else {
+            logger.debug("📂 No connections to refresh")
+            return
+        }
+        
+        logger.info("📂 Refreshing \(connections.count) connection(s) in Files.app")
+        
+        // Signal all connections in parallel
+        await withTaskGroup(of: Void.self) { group in
+            for connection in connections {
+                group.addTask {
+                    await self.signalConnectionChanged(connectionId: connection.id)
+                }
+            }
+        }
+        
+        // Signal root once at the end
+        await signalRootChanged()
+    }
+    
     // MARK: - Connection Management (stored in shared UserDefaults)
     
     /// Connection info stored for File Provider access

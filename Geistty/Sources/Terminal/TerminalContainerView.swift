@@ -266,6 +266,14 @@ class TerminalViewModel: ObservableObject {
     
     func disconnect() {
         stopDurationTimer()
+        
+        // Signal Files.app to refresh - user may have made changes via terminal
+        if let profileId = sshSession?.profileId {
+            Task {
+                await FileProviderDomainManager.shared.refreshFilesApp(connectionId: profileId)
+            }
+        }
+        
         sshSession?.disconnect()
         sshSession = nil
         isConnected = false

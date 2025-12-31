@@ -1,14 +1,50 @@
 import SwiftUI
 import GhosttyKit
+import os
+
+private let logger = Logger(subsystem: "com.geistty", category: "AppLifecycle")
 
 /// Wrapper view that creates per-window AppState for multi-window support
 struct WindowContentView: View {
     // Each window gets its own AppState instance
     @StateObject private var appState = AppState()
     
+    // Track scene phase for File Provider sync
+    @Environment(\.scenePhase) private var scenePhase
+    
     var body: some View {
         ContentView()
             .environmentObject(appState)
+            .onChange(of: scenePhase) { oldPhase, newPhase in
+                handleScenePhaseChange(from: oldPhase, to: newPhase)
+            }
+    }
+    
+    /// Handle scene phase changes for File Provider sync
+    /// Following iOS best practices: signal Files.app when returning to foreground
+    private func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
+        switch newPhase {
+        case .active:
+            // App returned to foreground - user may have made changes via Files.app or SSH
+            // Signal Files.app to refresh all active connections
+            if oldPhase == .background || oldPhase == .inactive {
+                logger.info("📂 App became active - signaling Files.app to refresh")
+                Task {
+                    await FileProviderDomainManager.shared.refreshAllConnections()
+                }
+            }
+            
+        case .background:
+            // App going to background - good time to signal any pending changes
+            logger.debug("📂 App entering background")
+            
+        case .inactive:
+            // Transitional state, no action needed
+            break
+            
+        @unknown default:
+            break
+        }
     }
 }
 
