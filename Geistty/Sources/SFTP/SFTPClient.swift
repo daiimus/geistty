@@ -53,6 +53,7 @@ enum SFTPError: LocalizedError {
     case fileNotFound(String)
     case permissionDenied(String)
     case ioError(String)
+    case timeout
     
     var errorDescription: String? {
         switch self {
@@ -64,6 +65,7 @@ enum SFTPError: LocalizedError {
         case .fileNotFound(let path): return "File not found: \(path)"
         case .permissionDenied(let path): return "Permission denied: \(path)"
         case .ioError(let msg): return "I/O error: \(msg)"
+        case .timeout: return "Request timed out"
         }
     }
 }
@@ -110,7 +112,12 @@ actor SFTPClient {
     }
     
     /// Connect the SFTP subsystem
-    func connect(host: String, username: String) async throws {
+    /// - Parameters:
+    ///   - host: Remote hostname for logging
+    ///   - username: Username for fallback home path
+    ///   - resolveHomePath: Whether to call realpath(".") to resolve home directory.
+    ///                      Set to false for File Provider (avoids blocking network call).
+    func connect(host: String, username: String, resolveHomePath: Bool = true) async throws {
         self.host = host
         self.username = username
         
@@ -119,18 +126,53 @@ actor SFTPClient {
         }
         
         logger.info("📂 Connecting SFTP to \(host)...")
+        Self.fpDebugLog("SFTPClient.connect: Opening channel...")
         try await channel.open()
+        Self.fpDebugLog("SFTPClient.connect: Channel opened!")
         
         // Mark connected only after SFTP subsystem successfully opens
         self._isConnected = true
         
-        // Get initial path (home directory)
-        do {
-            currentPath = try await channel.realpath(".")
-            logger.info("📂 SFTP connected, home: \(self.currentPath)")
-        } catch {
+        // Get initial path (home directory) - skip for File Provider to avoid blocking
+        if resolveHomePath {
+            do {
+                Self.fpDebugLog("SFTPClient.connect: Calling realpath(.)...")
+                currentPath = try await channel.realpath(".")
+                Self.fpDebugLog("SFTPClient.connect: realpath returned: \(self.currentPath)")
+                logger.info("📂 SFTP connected, home: \(self.currentPath)")
+            } catch {
+                Self.fpDebugLog("SFTPClient.connect: realpath failed: \(error.localizedDescription)")
+                currentPath = "/home/\(username)"
+                logger.warning("📂 Could not resolve home, using: \(self.currentPath)")
+            }
+        } else {
+            // File Provider mode - use fallback immediately
             currentPath = "/home/\(username)"
-            logger.warning("📂 Could not resolve home, using: \(self.currentPath)")
+            Self.fpDebugLog("SFTPClient.connect: Skipped realpath (File Provider mode)")
+            logger.info("📂 SFTP connected (File Provider mode), defaultPath: \(self.currentPath)")
+        }
+        Self.fpDebugLog("SFTPClient.connect: Complete!")
+    }
+    
+    /// Debug logging to shared file (for File Provider debugging)
+    private static func fpDebugLog(_ message: String) {
+        let groupId = "group.com.geistty.fileprovider"
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupId) else {
+            return
+        }
+        
+        let logFile = containerURL.appendingPathComponent("fileprovider_debug.log")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let entry = "[\(timestamp)] \(message)\n"
+        
+        if FileManager.default.fileExists(atPath: logFile.path) {
+            if let handle = try? FileHandle(forWritingTo: logFile) {
+                handle.seekToEndOfFile()
+                handle.write(entry.data(using: .utf8)!)
+                handle.closeFile()
+            }
+        } else {
+            try? entry.write(to: logFile, atomically: true, encoding: .utf8)
         }
     }
     

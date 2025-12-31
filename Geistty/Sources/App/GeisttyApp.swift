@@ -29,8 +29,8 @@ struct GeisttyApp: App {
         
         // Debug: Log what's stored for File Provider
         Task {
-            // Clear old log
-            FileProviderDomainManager.clearExtensionDebugLog()
+            // Don't clear log on startup - we need to see extension errors
+            // FileProviderDomainManager.clearExtensionDebugLog()
             
             // Check what connections are stored
             let connections = FileProviderDomainManager.getConnections()

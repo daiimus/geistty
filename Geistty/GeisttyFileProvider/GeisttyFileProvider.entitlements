@@ -6,6 +6,8 @@
 	<array>
 		<string>group.com.geistty.fileprovider</string>
 	</array>
+	<key>com.apple.security.network.client</key>
+	<true/>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.geistty.shared</string>

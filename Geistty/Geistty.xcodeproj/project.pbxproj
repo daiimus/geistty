@@ -63,6 +63,8 @@
 		A1000093 /* TmuxGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000093 /* TmuxGateway.swift */; };
 		A1000094 /* TmuxProtocolParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000094 /* TmuxProtocolParser.swift */; };
 		A1000095 /* KittyKeyboardTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000095 /* KittyKeyboardTranslator.swift */; };
+		A1000096 /* CachedItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000096 /* CachedItem.swift */; };
+		A1000097 /* MetadataCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000097 /* MetadataCache.swift */; };
 /* File Provider Extension Build Files */
 		C1000001 /* FileProviderExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001 /* FileProviderExtension.swift */; };
 		C1000004 /* SFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* SFTPClient.swift */; };
@@ -74,6 +76,9 @@
 		C1000013 /* SSHKeyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* SSHKeyParser.swift */; };
 		C1000009 /* SSHKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* SSHKeyManager.swift */; };
 		C1000015 /* FileProviderDomainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* FileProviderDomainManager.swift */; };
+		C1000016 /* CachedItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000096 /* CachedItem.swift */; };
+		C1000017 /* MetadataCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000097 /* MetadataCache.swift */; };
+		C1000018 /* WorkingSet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000018 /* WorkingSet.swift */; };
 		C1000010 /* GeisttyFileProvider.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C2000010 /* GeisttyFileProvider.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C1000011 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = CE000002 /* NIOSSH */; };
 		C1000012 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = CE000003 /* NIOTransportServices */; };
@@ -176,11 +181,14 @@
 		A2000093 /* TmuxGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxGateway.swift; sourceTree = "<group>"; };
 		A2000094 /* TmuxProtocolParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxProtocolParser.swift; sourceTree = "<group>"; };
 		A2000095 /* KittyKeyboardTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyKeyboardTranslator.swift; sourceTree = "<group>"; };
+		A2000096 /* CachedItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedItem.swift; sourceTree = "<group>"; };
+		A2000097 /* MetadataCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataCache.swift; sourceTree = "<group>"; };
 /* File Provider Extension File References */
 		C2000001 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
 		C2000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C2000005 /* GeisttyFileProvider.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GeisttyFileProvider.entitlements; sourceTree = "<group>"; };
 		C2000010 /* GeisttyFileProvider.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GeisttyFileProvider.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C2000018 /* WorkingSet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkingSet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -231,6 +239,7 @@
 			isa = PBXGroup;
 			children = (
 				C2000001 /* FileProviderExtension.swift */,
+				C2000018 /* WorkingSet.swift */,
 				C2000004 /* Info.plist */,
 				C2000005 /* GeisttyFileProvider.entitlements */,
 			);
@@ -327,7 +336,7 @@
 				A2000031 /* ConnectionEditorView.swift */,
 				A20000A2 /* KeyTableIndicatorView.swift */,
 				A2000050 /* SettingsView.swift */,
-			);
+					);
 			path = UI;
 			sourceTree = "<group>";
 		};
@@ -361,6 +370,8 @@
 				A2000040 /* SFTPClient.swift */,
 				A2000042 /* SFTPChannel.swift */,
 				A2000043 /* FileProviderDomainManager.swift */,
+				A2000096 /* CachedItem.swift */,
+				A2000097 /* MetadataCache.swift */,
 			);
 			path = SFTP;
 			sourceTree = "<group>";
@@ -580,6 +591,8 @@
 				A1000040 /* SFTPClient.swift in Sources */,
 				A1000042 /* SFTPChannel.swift in Sources */,
 				A1000043 /* FileProviderDomainManager.swift in Sources */,
+				A1000096 /* CachedItem.swift in Sources */,
+				A1000097 /* MetadataCache.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
 				A10000A2 /* KeyTableIndicatorView.swift in Sources */,
 				A1000060 /* Theme.swift in Sources */,
@@ -603,6 +616,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C1000001 /* FileProviderExtension.swift in Sources */,
+				C1000018 /* WorkingSet.swift in Sources */,
 				C1000004 /* SFTPClient.swift in Sources */,
 				C1000005 /* SFTPChannel.swift in Sources */,
 				C1000006 /* KeychainManager.swift in Sources */,
@@ -612,6 +626,8 @@
 				C1000009 /* SSHKeyManager.swift in Sources */,
 				C1000013 /* SSHKeyParser.swift in Sources */,
 				C1000015 /* FileProviderDomainManager.swift in Sources */,
+				C1000016 /* CachedItem.swift in Sources */,
+				C1000017 /* MetadataCache.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
