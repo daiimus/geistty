@@ -588,3 +588,312 @@ Trace through the call chain:
 - [Mosh: Mobile Shell](https://mosh.org/)
 - [Apple Network.framework](https://developer.apple.com/documentation/network)
 - [SwiftNIO-SSH](https://github.com/apple/swift-nio-ssh) - Pure Swift SSH implementation
+---
+
+## Part 10: File Provider Extension Analysis (Dec 2025)
+
+### 10.1 Problem Statement
+
+The iOS File Provider extension shows "Content Unavailable" when browsing SFTP connections. Debug logs reveal:
+
+1. SSH connection succeeds ✅
+2. SFTP subsystem initializes (VERSION exchange works) ✅
+3. SFTP OPENDIR request sent ✅
+4. Server response (17 bytes) starts arriving ✅
+5. **Extension process killed before response processed** ❌
+
+**Critical Log Pattern:**
+```
+[06:40:43Z] SFTPChannel: SFTP request 1: type=11           ← OPENDIR sent
+[06:40:43Z] SFTPChannel: channelRead: received 17 bytes    ← Response arrived!
+[06:40:43Z] SFTPChannel: processBuffer: buffer has 17 bytes
+[06:40:43Z] Extension init for domain: geistty             ← Process killed/restarted
+```
+
+The response physically arrives but the extension is killed before `handleIncomingData` can resume the continuation waiting for it.
+
+### 10.2 Root Cause Analysis
+
+**iOS File Provider Extension Lifecycle:**
+- Extensions run in a separate process from the main app
+- iOS aggressively manages extension memory and lifetime
+- When enumeration "completes" (observer.finishEnumerating), iOS may kill the process
+- Network I/O in progress is terminated without cleanup
+
+**Our Architecture Issue:**
+- `SFTPConnectionManager` actor holds connection state in memory
+- When extension process is killed, all actor state is lost
+- SwiftNIO event loop is destroyed mid-operation
+- Continuations waiting for responses are never resumed
+
+**Key Insight:** The issue isn't that we're slow - we're actually receiving the response! The process is killed **immediately** after receiving data, before our code can process it.
+
+### 10.3 Reference Implementation: Blink Shell (blinksh/blink)
+
+[Blink Shell](https://github.com/blinksh/blink) is a production iOS SSH terminal app with a **working `NSFileProviderReplicatedExtension` for SFTP** (added ~11 months ago). This is the most relevant reference because it solves the exact same problem we have.
+
+**Key Architecture:**
+
+**1. SQLite Database via [SQLite.swift](https://github.com/stephencelis/SQLite.swift)**
+```swift
+// WorkingSetDatabase.swift - persisted state survives process restarts
+public class WorkingSetDatabase {
+    private let db: Connection
+    private let stateTable = Table("State")
+    
+    // Schema
+    let itemKey          = Expression<String>("Item")
+    let containerKey     = Expression<String>("Container")
+    let versionKey       = Expression<Data>("Version")
+    let isContainerKey   = Expression<Bool>("isContainer")
+    let anchorKey        = Expression<Int>("Anchor")
+    let nameKey          = Expression<String>("Name")
+    let containerPathKey = Expression<String>("ContainerPath")
+}
+```
+
+**2. WorkingSet + Polling for Changes**
+```swift
+// WorkingSet polls for changes every 5 seconds
+DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 5) {
+    self.workingSet.resumeChangesTimerEvery(seconds: 5)
+}
+
+// Timer triggers prepareChangesAndSignalEnumerator()
+func prepareChangesAndSignalEnumerator() {
+    prepareChanges { changes in
+        if !changes.isEmpty {
+            self.anchorIteration += 1
+            self.changes = changes
+            self.signalEnumerator()  // ← Notifies system
+        }
+    }
+}
+```
+
+**3. Network I/O Happens During Enumeration (Critical Difference!)**
+Unlike our assumption, Blink **does** do SFTP during enumeration:
+```swift
+// FileProviderReplicatedEnumerator.swift
+public func enumerateItems(for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
+    enumerateItemsCancellable = self.allItems()  // ← SFTP call here!
+        .tryMap { itemsAttributes -> [FileProviderItem] in
+            try workingSet.commitItemsInContainer(self.blinkIdentifier, itemsAttributes: itemsAttributes)
+        }
+        .sink(...)
+}
+
+func allItems() -> AnyPublisher<[BlinkFiles.FileAttributes], Error> {
+    itemTranslator
+        .flatMap { $0.isDirectory ? $0.directoryFilesAndAttributesWithTargetLinks() : ... }
+        .eraseToAnyPublisher()
+}
+```
+
+**4. Combine Publishers (not async/await)**
+- Uses Combine `AnyPublisher` throughout
+- `AnyCancellable` for lifecycle management
+- Avoids Swift concurrency actor isolation issues
+
+**5. BlinkFiles Translator Pattern**
+- `Translator` protocol abstracts SFTP/Local filesystem
+- `cloneWalkTo(path)` navigates directories
+- `stat()`, `directoryFilesAndAttributesWithTargetLinks()` for metadata
+
+**Why Blink Works But We Don't:**
+
+| Aspect | Blink Shell | Geistty |
+|--------|-------------|---------|
+| SSH Library | libssh2 (C) | SwiftNIO-SSH (Swift) |
+| Async Model | Combine Publishers | Swift async/await + Actors |
+| Event Loop | libssh2's blocking calls | SwiftNIO EventLoopFuture |
+| Process Lifetime | Extension survives long enough | Extension killed mid-NIO-callback |
+
+The key insight: **libssh2 is blocking** - when Blink calls SFTP, it blocks until complete. SwiftNIO is **async** - our code receives data, but the continuation is never resumed because the process is killed before the event loop can schedule it.
+
+### 10.4 Reference Implementation: Cryptomator iOS
+
+[Cryptomator](https://github.com/cryptomator/ios) uses HTTP APIs (not SFTP), but shows good patterns:
+
+**1. GRDB (SQLite) for persistence**
+**2. Promise-based async (not async/await)**
+**3. Task tracking in database (survives restarts)**
+**4. FileProviderAdapter pattern**
+
+### 10.5 Why SFTP Is Harder (Updated)
+
+**Correction:** Blink Shell proves SFTP **can** work in a File Provider extension. The issue is our async model, not the protocol.
+
+**Blink (libssh2) - Blocking I/O:**
+```
+Thread: enumerateItems() called
+Thread: SFTP opendir() - blocks thread until response
+Thread: SFTP readdir() - blocks thread until response  
+Thread: observer.didEnumerate(items)
+Thread: observer.finishEnumerating()
+```
+
+**Geistty (SwiftNIO-SSH) - Async I/O:**
+```
+Thread 1: enumerateItems() called
+Thread 1: SFTP opendir() - schedules on EventLoop, returns immediately
+Thread 1: Returns from enumerateItems() ← Extension thinks we're done
+Thread 2 (EventLoop): Receives OPENDIR response
+Thread 2: Process killed before continuation resumed ← CRASH
+```
+
+### 10.6 Proposed Solutions (Revised)
+
+**Option A: Use libssh2 Instead of SwiftNIO-SSH**
+
+Pros:
+- Proven to work (Blink Shell uses it)
+- Blocking I/O keeps thread alive until complete
+- No actor/continuation issues
+
+Cons:
+- C library, harder to maintain
+- Would need to rebuild SSH layer
+- Loses SwiftNIO benefits (Network.framework, async/await)
+
+**Option B: Keep SwiftNIO but Move SFTP to Main App (Original Recommendation)**
+
+```
+Main App                          File Provider Extension
+─────────                         ─────────────────────────
+SFTP connection (long-lived)
+        │
+        ▼
+Sync to SwiftData cache
+        │
+        ▼
+                                  enumerateItems() called
+                                          │
+                                          ▼
+                                  Read from SwiftData (no network)
+                                          │
+                                          ▼
+                                  Return cached items immediately
+```
+
+**Option C: Block the Thread During SFTP Operations**
+
+Use `DispatchSemaphore` or `RunLoop` to block enumeration until SFTP completes:
+
+```swift
+public func enumerateItems(for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: [FileProviderItem]?
+    var error: Error?
+    
+    Task {
+        do {
+            result = try await sftpClient.listDirectory(path)
+        } catch {
+            error = err
+        }
+        semaphore.signal()
+    }
+    
+    // Block until SFTP completes (like libssh2 does)
+    semaphore.wait()
+    
+    if let items = result {
+        observer.didEnumerate(items)
+        observer.finishEnumerating(upTo: nil)
+    } else {
+        observer.finishEnumeratingWithError(error ?? ...)
+    }
+}
+```
+
+**Option D: Use Combine Publishers Like Blink**
+
+Replace Swift async/await with Combine:
+
+```swift
+// Current (async/await - broken)
+func listDirectory(_ path: String) async throws -> [FileAttributes]
+
+// Blink-style (Combine - works)
+func listDirectory(_ path: String) -> AnyPublisher<[FileAttributes], Error>
+```
+
+### 10.7 Recommended Path Forward
+
+**Immediate Fix (Option C):** Add thread-blocking wrapper around SwiftNIO async calls. This mirrors how libssh2 behaves and should keep the extension alive.
+
+**Long-term (Option D):** Refactor SFTP layer to use Combine publishers, matching Blink's proven architecture.
+
+**Alternative (Option B):** If blocking doesn't work due to NIO EventLoop constraints, move SFTP entirely to main app.
+
+### 10.8 Blink Shell Architecture Details
+
+**Database Location:**
+```swift
+// BlinkPaths.m
++ (NSURL *)fileProviderReplicatedURL {
+    NSString *fileProviderPath = [[self groupContainerPath] 
+        stringByAppendingPathComponent:@"FileProviderReplicated"];
+    return [NSURL fileURLWithPath:fileProviderPath];
+}
+// Database: <AppGroup>/FileProviderReplicated/<reference>.db
+```
+
+**WorkingSet Lifecycle:**
+```swift
+// FileProviderReplicatedExtension.swift
+public required init(domain: NSFileProviderDomain) {
+    // 1. Create database path from domain
+    let dbPath = fileProviderURL.appendingPathComponent("\(domainReference).db")
+    
+    // 2. Initialize WorkingSet with database
+    let db = try WorkingSetDatabase(path: dbPath.path(), reset: false)
+    self.workingSet = try WorkingSet(domain: domain, db: db, logger: logger)
+    
+    // 3. Start polling timer after 5 seconds
+    DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 5) {
+        self.workingSet.resumeChangesTimerEvery(seconds: 5)
+    }
+}
+```
+
+**Enumeration Flow:**
+```
+1. enumerateItems() called by system
+2. FileProviderReplicatedEnumerator.allItems() → itemTranslator (SFTP call)
+3. SFTP directoryFilesAndAttributes() via Combine publisher
+4. Results stored: workingSet.commitItemsInContainer()
+5. observer.didEnumerate(items)
+6. observer.finishEnumerating()
+7. Enumerator added to WorkingSet's active enumerators
+8. Timer polls every 5s: prepareChangesAndSignalEnumerator()
+9. Changes detected → fpm.signalEnumerator()
+```
+
+**Key Files to Study:**
+- `BlinkFileProvider/FileProviderReplicatedExtension.swift` - Main extension
+- `BlinkFileProvider/FileProviderReplicatedEnumerator.swift` - Enumeration + WorkingSet
+- `BlinkFileProvider/WorkingSetDatabase.swift` - SQLite persistence
+- `BlinkFileProvider/FilesTranslatorConnection.swift` - SFTP connection wrapper
+- `BlinkFiles/` - SFTP protocol implementation (Translator pattern)
+
+### 10.9 Implementation Checklist (Revised)
+
+Based on Blink Shell's architecture:
+
+- [ ] **Switch from SwiftData to SQLite.swift** - More control, proven in File Provider
+- [ ] **Add thread-blocking wrapper** - Keep extension alive during SFTP
+- [ ] **Implement WorkingSet pattern** - Track active enumerators, poll for changes
+- [ ] **Use Combine instead of async/await** - Match Blink's proven async model
+- [ ] **Add polling timer** - Detect remote changes every N seconds
+- [ ] **Implement signalEnumerator()** - Notify system of changes
+
+### 10.10 Lessons Learned (Updated)
+
+1. **Blink Shell proves SFTP File Provider works** - The protocol isn't the problem
+2. **SwiftNIO async + File Provider = Trouble** - Extension killed before event loop completes
+3. **Blocking I/O survives extension lifecycle** - libssh2's blocking model works
+4. **SQLite.swift > SwiftData for File Provider** - More predictable, no actor isolation
+5. **Combine > async/await** - Publishers have clearer cancellation/lifecycle
+6. **Study working implementations** - Blink Shell is the gold standard reference

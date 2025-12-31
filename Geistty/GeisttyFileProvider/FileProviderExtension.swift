@@ -4,10 +4,11 @@
 //
 //  NSFileProviderReplicatedExtension implementation for SFTP access via Files.app
 //
-//  Architecture (Shellfish-style):
+//  Architecture:
 //  - ONE "Geistty" domain in Files.app sidebar
 //  - Root shows connections with Files integration enabled as folders
 //  - Each connection folder shows remote files via SFTP
+//  - SwiftData cache enables fast enumeration (return cached, refresh in background)
 //
 //  Item Identifier Format:
 //  - Root: .rootContainer
@@ -19,6 +20,7 @@ import FileProvider
 import NIOCore
 import NIOSSH
 import os.log
+import SwiftData
 import UniformTypeIdentifiers
 
 private let logger = Logger(subsystem: "com.geistty.fileprovider", category: "Extension")
@@ -214,7 +216,8 @@ actor SFTPConnectionManager {
         let client = SFTPClient(parentChannel: parentChannel)
         
         do {
-            try await client.connect(host: conn.host, username: conn.username)
+            // Skip realpath for File Provider - avoids blocking network call
+            try await client.connect(host: conn.host, username: conn.username, resolveHomePath: false)
             Self.debugLog("SFTP connected!")
             NSLog("📂 [FP-MGR] SFTP connected to %@", conn.host)
         } catch let error as SFTPError {
@@ -271,6 +274,17 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         NSFileProviderManager(for: domain)
     }()
     
+    /// Working set for change detection and sync anchors
+    private lazy var workingSet: WorkingSet = {
+        WorkingSet(domain: domain)
+    }()
+    
+    /// Background polling task for change detection
+    private var pollingTask: Task<Void, Never>?
+    
+    /// Polling interval in seconds
+    private let pollingInterval: TimeInterval = 5
+    
     // MARK: - Initialization
     
     required init(domain: NSFileProviderDomain) {
@@ -280,6 +294,9 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         
         // Debug: Write to shared container
         Self.debugLog("Extension init for domain: \(domain.identifier.rawValue)")
+        
+        // Start background polling for change detection
+        startPolling()
     }
     
     /// Write debug info to shared container for debugging
@@ -307,10 +324,199 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     
     func invalidate() {
         NSLog("📂 [FP-EXT] Invalidating extension")
-        // Disconnect all clients via shared manager
+        // Stop polling and invalidate working set
+        pollingTask?.cancel()
+        pollingTask = nil
         Task {
+            await workingSet.invalidate()
             await SFTPConnectionManager.shared.disconnectAll()
         }
+    }
+    
+    // MARK: - Change Detection Polling
+    
+    /// Start background polling for change detection in active folders
+    private func startPolling() {
+        NSLog("🔄 [FP-EXT] startPolling() called")
+        Self.debugLog("Starting change detection polling (interval: \(pollingInterval)s)")
+        
+        pollingTask = Task { [weak self] in
+            NSLog("🔄 [FP-EXT] Polling task started")
+            var pollCount = 0
+            while !Task.isCancelled {
+                // Wait for polling interval
+                try? await Task.sleep(nanoseconds: UInt64(5_000_000_000)) // 5 seconds
+                
+                guard let self = self else { 
+                    NSLog("🔄 [FP-EXT] Polling task: self is nil, breaking")
+                    break 
+                }
+                guard !Task.isCancelled else { 
+                    NSLog("🔄 [FP-EXT] Polling task: cancelled, breaking")
+                    break 
+                }
+                
+                pollCount += 1
+                NSLog("🔄 [FP-EXT] Polling tick #%d", pollCount)
+                await self.pollActiveFolders()
+            }
+            NSLog("🔄 [FP-EXT] Polling task ended")
+        }
+    }
+    
+    /// Poll all active folders for changes
+    private func pollActiveFolders() async {
+        let folders = await workingSet.activeFolders
+        NSLog("🔄 [FP-EXT] pollActiveFolders: %d active folders", folders.count)
+        guard !folders.isEmpty else { 
+            NSLog("🔄 [FP-EXT] No active folders, skipping poll")
+            return 
+        }
+        
+        Self.debugLog("Polling \(folders.count) active folders for changes...")
+        NSLog("🔄 [FP-EXT] Polling folders: %@", folders.map { $0.path }.joined(separator: ", "))
+        
+        var allChanges = DetectedChanges()
+        
+        for folder in folders {
+            do {
+                let changes = try await detectChangesInFolder(folder)
+                allChanges.merge(changes)
+            } catch {
+                Self.debugLog("Error polling \(folder.path): \(error.localizedDescription)")
+            }
+        }
+        
+        // Record any changes we found
+        if !allChanges.isEmpty {
+            Self.debugLog("Detected \(allChanges.count) changes total")
+            await workingSet.recordChanges(allChanges)
+        }
+    }
+    
+    /// Detect changes in a single folder by comparing server state to cache
+    private func detectChangesInFolder(_ folder: ActiveFolder) async throws -> DetectedChanges {
+        var changes = DetectedChanges()
+        
+        // Get SFTP client for this connection
+        let client = try await SFTPConnectionManager.shared.getClient(for: folder.connectionId)
+        
+        // Get current server state
+        let serverEntries = try await client.listDirectory(folder.path)
+        let serverByName = Dictionary(uniqueKeysWithValues: serverEntries.map { ($0.name, $0) })
+        
+        // Get cached state
+        let parentId = folder.path == "/" 
+            ? CachedItem.connectionRootId(folder.connectionId)
+            : CachedItem.remoteItemId(connectionId: folder.connectionId, path: folder.path)
+        let cachedItems = try await MetadataCache.shared.getChildren(parentId: parentId)
+        let cachedByName = Dictionary(uniqueKeysWithValues: cachedItems.map { ($0.name, $0) })
+        
+        // Check for new or modified items
+        for (name, entry) in serverByName {
+            // Skip . and ..
+            guard name != "." && name != ".." else { continue }
+            
+            let itemPath = folder.path == "/" ? "/\(name)" : "\(folder.path)/\(name)"
+            let itemId = CachedItem.remoteItemId(connectionId: folder.connectionId, path: itemPath)
+            let identifier = NSFileProviderItemIdentifier(itemId)
+            
+            if let cached = cachedByName[name] {
+                // Check if modified (size or mtime changed)
+                let serverMtime = entry.modificationDate ?? Date.distantPast
+                let cachedMtime = cached.modificationDate ?? Date.distantPast
+                
+                if Int64(entry.size) != cached.size ||
+                   abs(serverMtime.timeIntervalSince(cachedMtime)) > 1 {
+                    Self.debugLog("Update detected: \(name)")
+                    changes.updates.append(identifier)
+                    
+                    // Update cache
+                    let newCached = CachedItem(
+                        id: itemId,
+                        connectionId: folder.connectionId,
+                        path: itemPath,
+                        parentId: parentId,
+                        name: name,
+                        size: Int64(entry.size),
+                        isDirectory: entry.isDirectory,
+                        modificationDate: entry.modificationDate
+                    )
+                    try await MetadataCache.shared.upsert(newCached)
+                }
+            } else {
+                // New item
+                Self.debugLog("Create detected: \(name)")
+                changes.creates.append(identifier)
+                
+                // Add to cache
+                let newCached = CachedItem(
+                    id: itemId,
+                    connectionId: folder.connectionId,
+                    path: itemPath,
+                    parentId: parentId,
+                    name: name,
+                    size: Int64(entry.size),
+                    isDirectory: entry.isDirectory,
+                    modificationDate: entry.modificationDate
+                )
+                try await MetadataCache.shared.upsert(newCached)
+            }
+        }
+        
+        // Check for deleted items
+        for (name, cached) in cachedByName {
+            if serverByName[name] == nil {
+                Self.debugLog("Deletion detected: \(name)")
+                changes.deletions.append(NSFileProviderItemIdentifier(cached.id))
+                
+                // Remove from cache
+                try await MetadataCache.shared.delete(id: cached.id)
+            }
+        }
+        
+        return changes
+    }
+    
+    // MARK: - Error Conversion
+    
+    /// Convert various errors to user-friendly NSFileProviderError
+    private func toFileProviderError(_ error: Error) -> Error {
+        // Already a file provider error
+        if error is NSFileProviderError {
+            return error
+        }
+        
+        let message = error.localizedDescription.lowercased()
+        
+        // Connection/network errors
+        if message.contains("connection") || message.contains("network") || 
+           message.contains("timeout") || message.contains("refused") ||
+           message.contains("unreachable") || message.contains("offline") {
+            return NSFileProviderError(.serverUnreachable)
+        }
+        
+        // Authentication errors
+        if message.contains("auth") || message.contains("permission denied") ||
+           message.contains("access denied") || message.contains("credential") {
+            return NSFileProviderError(.notAuthenticated)
+        }
+        
+        // File not found
+        if message.contains("no such file") || message.contains("not found") ||
+           message.contains("does not exist") {
+            return NSFileProviderError(.noSuchItem)
+        }
+        
+        // Disk full / quota
+        if message.contains("disk full") || message.contains("quota") ||
+           message.contains("no space") {
+            return NSFileProviderError(.insufficientQuota)
+        }
+        
+        // Default: wrap as server error with description
+        NSLog("⚠️ [FP-EXT] Unmapped error: %@", error.localizedDescription)
+        return NSFileProviderError(.serverUnreachable)
     }
     
     // MARK: - Item Identifier Parsing
@@ -390,7 +596,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 }
             } catch {
                 NSLog("❌ [FP-EXT] item(for:) error: %@", error.localizedDescription)
-                completionHandler(nil, error)
+                completionHandler(nil, self.toFileProviderError(error))
             }
             progress.completedUnitCount = 1
         }
@@ -438,7 +644,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 
             } catch {
                 NSLog("❌ [FP-EXT] fetchContents error: %@", error.localizedDescription)
-                completionHandler(nil, nil, error)
+                completionHandler(nil, nil, self.toFileProviderError(error))
             }
             progress.completedUnitCount = 100
         }
@@ -482,11 +688,18 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 }
                 
                 let attrs = try await client.stat(remotePath)
-                completionHandler(RemoteItem(connectionId: connId, path: remotePath, attributes: attrs), [], false, nil)
+                let newItem = RemoteItem(connectionId: connId, path: remotePath, attributes: attrs)
+                
+                // Signal parent to refresh
+                if let manager = NSFileProviderManager(for: self.domain) {
+                    try? await manager.signalEnumerator(for: itemTemplate.parentItemIdentifier)
+                }
+                
+                completionHandler(newItem, [], false, nil)
                 
             } catch {
                 NSLog("❌ [FP-EXT] createItem error: %@", error.localizedDescription)
-                completionHandler(nil, [], false, error)
+                completionHandler(nil, [], false, self.toFileProviderError(error))
             }
             progress.completedUnitCount = 100
         }
@@ -538,11 +751,18 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 }
                 
                 let attrs = try await client.stat(remotePath)
-                completionHandler(RemoteItem(connectionId: connId, path: remotePath, attributes: attrs), [], false, nil)
+                let modifiedItem = RemoteItem(connectionId: connId, path: remotePath, attributes: attrs)
+                
+                // Signal parent to refresh
+                if let manager = NSFileProviderManager(for: self.domain) {
+                    try? await manager.signalEnumerator(for: item.parentItemIdentifier)
+                }
+                
+                completionHandler(modifiedItem, [], false, nil)
                 
             } catch {
                 NSLog("❌ [FP-EXT] modifyItem error: %@", error.localizedDescription)
-                completionHandler(nil, [], false, error)
+                completionHandler(nil, [], false, self.toFileProviderError(error))
             }
             progress.completedUnitCount = 100
         }
@@ -569,11 +789,30 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 
                 let client = try await ensureConnected(connectionId: connId)
                 try await client.delete(path)
+                
+                // Invalidate cache and signal parent to refresh
+                let parentParsed = self.parseIdentifier(identifier)
+                let parentId: NSFileProviderItemIdentifier
+                if let remotePath = parentParsed.remotePath {
+                    let parentPath = (remotePath as NSString).deletingLastPathComponent
+                    if parentPath == "/" || parentPath.isEmpty {
+                        parentId = self.makeConnectionIdentifier(connId)
+                    } else {
+                        parentId = self.makeRemoteItemIdentifier(connectionId: connId, path: parentPath)
+                    }
+                } else {
+                    parentId = .rootContainer
+                }
+                
+                if let manager = NSFileProviderManager(for: self.domain) {
+                    try? await manager.signalEnumerator(for: parentId)
+                }
+                
                 completionHandler(nil)
                 
             } catch {
                 NSLog("❌ [FP-EXT] deleteItem error: %@", error.localizedDescription)
-                completionHandler(error)
+                completionHandler(self.toFileProviderError(error))
             }
             progress.completedUnitCount = 1
         }
@@ -589,8 +828,8 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let parsed = parseIdentifier(containerItemIdentifier)
         
         if containerItemIdentifier == .workingSet {
-            // Working set - return all connections
-            return ConnectionsEnumerator()
+            // Working set - use proper WorkingSetEnumerator with change tracking
+            return WorkingSetEnumerator(workingSet: workingSet)
         }
         
         if parsed.isRoot {
@@ -601,7 +840,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         if let connId = parsed.connectionId {
             // Connection or subfolder - list remote items
             let path = parsed.remotePath ?? "/"
-            return RemoteEnumerator(connectionId: connId, path: path)
+            return RemoteEnumerator(connectionId: connId, path: path, domain: domain, workingSet: workingSet)
         }
         
         throw NSFileProviderError(.noSuchItem)
@@ -720,6 +959,117 @@ class RemoteItem: NSObject, NSFileProviderItem {
 
 // MARK: - Enumerators
 
+/// Enumerates the working set with proper change detection.
+/// This is what iOS calls to detect changes to files/folders.
+class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
+    let workingSet: WorkingSet
+    
+    init(workingSet: WorkingSet) {
+        self.workingSet = workingSet
+    }
+    
+    func invalidate() {
+        // Nothing to clean up
+    }
+    
+    func enumerateItems(for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
+        Self.debugLog("enumerateItems called for working set")
+        
+        // Working set enumeration returns all items we're tracking.
+        // For now, return empty - we handle changes via enumerateChanges.
+        // In a full implementation, we'd return all cached items.
+        Task {
+            do {
+                // Return all cached items as the working set
+                let items = try await MetadataCache.shared.getAllItems()
+                Self.debugLog("Returning \(items.count) items in working set")
+                
+                // Group by connection to get connectionId
+                for item in items {
+                    // Extract connectionId from the item id
+                    if let connectionId = Self.extractConnectionId(from: item.id) {
+                        let remoteItem = CachedRemoteItem(cachedItem: item, connectionId: connectionId)
+                        observer.didEnumerate([remoteItem])
+                    }
+                }
+                
+                observer.finishEnumerating(upTo: nil)
+            } catch {
+                Self.debugLog("Failed to enumerate working set: \(error.localizedDescription)")
+                observer.finishEnumerating(upTo: nil)
+            }
+        }
+    }
+    
+    func enumerateChanges(for observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
+        Self.debugLog("enumerateChanges called from anchor: \(String(data: anchor.rawValue, encoding: .utf8) ?? "invalid")")
+        
+        Task {
+            let (changes, newAnchor, expired) = await workingSet.getChanges(since: anchor)
+            
+            if expired {
+                Self.debugLog("Anchor expired - telling iOS to re-enumerate")
+                observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
+                return
+            }
+            
+            if changes.isEmpty {
+                Self.debugLog("No changes to report")
+                observer.finishEnumeratingChanges(upTo: newAnchor, moreComing: false)
+                return
+            }
+            
+            Self.debugLog("Reporting \(changes.count) changes")
+            
+            // Report deletions
+            if !changes.deletions.isEmpty {
+                Self.debugLog("Reporting \(changes.deletions.count) deletions")
+                observer.didDeleteItems(withIdentifiers: changes.deletions)
+            }
+            
+            // Report creates and updates by fetching the items from cache
+            let itemIds = changes.creates + changes.updates
+            if !itemIds.isEmpty {
+                Self.debugLog("Fetching \(itemIds.count) items for creates/updates")
+                do {
+                    for itemId in itemIds {
+                        if let cachedItem = try await MetadataCache.shared.getItem(id: itemId.rawValue),
+                           let connectionId = Self.extractConnectionId(from: cachedItem.id) {
+                            let remoteItem = CachedRemoteItem(cachedItem: cachedItem, connectionId: connectionId)
+                            observer.didUpdate([remoteItem])
+                        }
+                    }
+                } catch {
+                    Self.debugLog("Failed to fetch items: \(error.localizedDescription)")
+                }
+            }
+            
+            observer.finishEnumeratingChanges(upTo: newAnchor, moreComing: false)
+        }
+    }
+    
+    func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
+        Task {
+            let anchor = await workingSet.currentAnchor
+            Self.debugLog("currentSyncAnchor: returning \(String(data: anchor.rawValue, encoding: .utf8) ?? "invalid")")
+            completionHandler(anchor)
+        }
+    }
+    
+    // MARK: - Helpers
+    
+    /// Extract connectionId from item ID format: "sftp:connection-id:path"
+    private static func extractConnectionId(from itemId: String) -> String? {
+        let parts = itemId.components(separatedBy: ":")
+        guard parts.count >= 2, parts[0] == "sftp" else { return nil }
+        return parts[1]
+    }
+    
+    private static func debugLog(_ message: String) {
+        NSLog("🔄 [WS-ENUM] %@", message)
+    }
+}
+
 /// Enumerates connections (root level)
 class ConnectionsEnumerator: NSObject, NSFileProviderEnumerator {
     func invalidate() {}
@@ -778,58 +1128,273 @@ class ConnectionsEnumerator: NSObject, NSFileProviderEnumerator {
     }
     
     func enumerateChanges(for observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
+        // For connections list, we don't track incremental changes.
+        // Just report no changes - iOS will re-enumerate when needed.
         observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
     }
     
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
-        completionHandler(NSFileProviderSyncAnchor(Data()))
+        // Return nil to force fresh enumeration on each visit.
+        // Connection list can change when user adds/removes connections.
+        completionHandler(nil)
     }
 }
 
-/// Enumerates remote files/folders
+/// Enumerates remote files/folders - always fetches fresh data
 class RemoteEnumerator: NSObject, NSFileProviderEnumerator {
     let connectionId: String
     let path: String
+    let domain: NSFileProviderDomain
+    let workingSet: WorkingSet
     
-    init(connectionId: String, path: String) {
-        self.connectionId = connectionId
-        self.path = path
+    /// Item identifier for this folder
+    private var itemIdentifier: NSFileProviderItemIdentifier {
+        if path == "/" {
+            return NSFileProviderItemIdentifier(CachedItem.connectionRootId(connectionId))
+        }
+        return NSFileProviderItemIdentifier(CachedItem.remoteItemId(connectionId: connectionId, path: path))
     }
     
-    func invalidate() {}
+    /// Parent item identifier for cache lookups
+    private var parentId: String {
+        if path == "/" {
+            return CachedItem.connectionRootId(connectionId)
+        }
+        return CachedItem.remoteItemId(connectionId: connectionId, path: path)
+    }
+    
+    init(connectionId: String, path: String, domain: NSFileProviderDomain, workingSet: WorkingSet) {
+        self.connectionId = connectionId
+        self.path = path
+        self.domain = domain
+        self.workingSet = workingSet
+    }
+    
+    func invalidate() {
+        // Unregister from active folders when enumerator is invalidated
+        Task {
+            await workingSet.unregisterActiveFolder(connectionId: connectionId, path: path)
+        }
+    }
     
     func enumerateItems(for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
         NSLog("📂 [FP-EXT] Enumerating remote path: %@ for conn: %@", path, connectionId)
+        Self.debugLog("enumerateItems START: path=\(path), parentId=\(parentId)")
         
+        // Register this folder as active for change detection polling
+        NSLog("📂 [FP-EXT] Registering active folder: %@ (conn: %@)", path, connectionId)
+        Task {
+            await workingSet.registerActiveFolder(connectionId: connectionId, path: path, identifier: itemIdentifier)
+            let count = await workingSet.activeFolders.count
+            NSLog("📂 [FP-EXT] After registration, active folder count: %d", count)
+        }
+        
+        // STRATEGY: Always fetch fresh from server for best UX.
+        // Cache is only used as fallback on network error.
         Task {
             do {
-                // Use shared connection manager for efficient connection reuse
-                let client = try await SFTPConnectionManager.shared.getClient(for: connectionId)
-                
-                let entries = try await client.listDirectory(path)
-                NSLog("📂 [FP-EXT] Found %d items in %@", entries.count, path)
-                
-                let items = entries.compactMap { entry -> RemoteItem? in
-                    guard entry.name != "." && entry.name != ".." else { return nil }
-                    let itemPath = (path as NSString).appendingPathComponent(entry.name)
-                    return RemoteItem(connectionId: connectionId, path: itemPath, attributes: entry)
-                }
-                
-                observer.didEnumerate(items)
-                observer.finishEnumerating(upTo: nil)
-                
+                // Try to fetch fresh data from server
+                Self.debugLog("Fetching fresh from server...")
+                try await refreshFromServer(observer: observer)
+                Self.debugLog("enumerateItems COMPLETE (fresh data)")
             } catch {
-                NSLog("❌ [FP-EXT] Enumerate error: %@", error.localizedDescription)
-                observer.finishEnumeratingWithError(error)
+                // Server fetch failed - try cache as fallback
+                Self.debugLog("Server error: \(error.localizedDescription), trying cache...")
+                
+                do {
+                    let cached = try await MetadataCache.shared.getChildren(parentId: parentId)
+                    
+                    if !cached.isEmpty {
+                        Self.debugLog("Cache fallback: \(cached.count) items")
+                        let items = cached.map { CachedRemoteItem(cachedItem: $0, connectionId: connectionId) }
+                        observer.didEnumerate(items)
+                        observer.finishEnumerating(upTo: nil)
+                    } else {
+                        // No cache either - report the original error
+                        Self.debugLog("No cache available, reporting error")
+                        observer.finishEnumeratingWithError(Self.toFileProviderError(error))
+                    }
+                } catch {
+                    Self.debugLog("Cache error: \(error.localizedDescription)")
+                    observer.finishEnumeratingWithError(Self.toFileProviderError(error))
+                }
             }
         }
     }
     
+    /// Convert errors to user-friendly NSFileProviderError
+    private static func toFileProviderError(_ error: Error) -> Error {
+        if error is NSFileProviderError {
+            return error
+        }
+        
+        let message = error.localizedDescription.lowercased()
+        
+        if message.contains("connection") || message.contains("network") || 
+           message.contains("timeout") || message.contains("refused") {
+            return NSFileProviderError(.serverUnreachable)
+        }
+        
+        if message.contains("auth") || message.contains("permission denied") {
+            return NSFileProviderError(.notAuthenticated)
+        }
+        
+        if message.contains("no such file") || message.contains("not found") {
+            return NSFileProviderError(.noSuchItem)
+        }
+        
+        return NSFileProviderError(.serverUnreachable)
+    }
+    
+    /// Refresh cache from server
+    private func refreshFromServer(observer: NSFileProviderEnumerationObserver?) async throws {
+        Self.debugLog("refreshFromServer START: hasObserver=\(observer != nil)")
+        
+        Self.debugLog("Getting SFTP client...")
+        let client = try await SFTPConnectionManager.shared.getClient(for: connectionId)
+        Self.debugLog("Got client, listing directory \(path)...")
+        
+        let entries = try await client.listDirectory(path)
+        
+        Self.debugLog("Server returned \(entries.count) items")
+        NSLog("📂 [FP-EXT] Server returned %d items in %@", entries.count, path)
+        
+        // Convert to CachedItem and store
+        let cachedItems = entries.compactMap { entry -> CachedItem? in
+            guard entry.name != "." && entry.name != ".." else { return nil }
+            let itemPath = (path as NSString).appendingPathComponent(entry.name)
+            let itemId = CachedItem.remoteItemId(connectionId: connectionId, path: itemPath)
+            
+            return CachedItem(
+                id: itemId,
+                connectionId: connectionId,
+                path: itemPath,
+                parentId: parentId,
+                name: entry.name,
+                size: Int64(entry.size),
+                isDirectory: entry.isDirectory,
+                permissions: Int32(entry.permissions),
+                modificationDate: entry.modificationDate,
+                isSymlink: entry.isSymlink
+            )
+        }
+        
+        Self.debugLog("Created \(cachedItems.count) cached items")
+        
+        // Update cache
+        try await MetadataCache.shared.upsertBatch(cachedItems, parentId: parentId)
+        Self.debugLog("Cache updated")
+        
+        // If we have an observer (cache miss case), return results now
+        if let observer = observer {
+            Self.debugLog("Reporting \(cachedItems.count) items to observer")
+            let items = cachedItems.map { CachedRemoteItem(cachedItem: $0, connectionId: connectionId) }
+            observer.didEnumerate(items)
+            observer.finishEnumerating(upTo: nil)
+            Self.debugLog("Observer finished")
+        } else {
+            // Signal that cache was updated (system will re-enumerate)
+            if let manager = NSFileProviderManager(for: domain) {
+                Self.debugLog("Signaling enumerator for \(parentId)")
+                try? await manager.signalEnumerator(for: NSFileProviderItemIdentifier(parentId))
+            }
+        }
+        
+        Self.debugLog("refreshFromServer COMPLETE")
+    }
+    
+    private static func debugLog(_ message: String) {
+        let groupId = FileProviderDomainManager.appGroupIdentifier
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupId) else { return }
+        
+        let logFile = containerURL.appendingPathComponent("fileprovider_debug.log")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let entry = "[\(timestamp)] RemoteEnumerator: \(message)\n"
+        
+        if FileManager.default.fileExists(atPath: logFile.path) {
+            if let handle = try? FileHandle(forWritingTo: logFile) {
+                handle.seekToEndOfFile()
+                handle.write(entry.data(using: .utf8)!)
+                handle.closeFile()
+            }
+        } else {
+            try? entry.write(to: logFile, atomically: true, encoding: .utf8)
+        }
+    }
+    
     func enumerateChanges(for observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
-        observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
+        // For remote folders, we always want fresh data.
+        // Return syncAnchorExpired to force iOS to call enumerateItems() again.
+        NSLog("📂 [FP-EXT] RemoteEnumerator.enumerateChanges - returning syncAnchorExpired")
+        Self.debugLog("enumerateChanges: returning syncAnchorExpired to force re-enumeration")
+        observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
     }
     
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
-        completionHandler(NSFileProviderSyncAnchor(Data()))
+        // Return a unique timestamp anchor each time.
+        // This tells iOS our state has changed, which triggers enumerateChanges().
+        // Since enumerateChanges returns syncAnchorExpired, iOS will call enumerateItems().
+        let timestamp = Date().timeIntervalSince1970
+        let anchorData = "remote-\(timestamp)".data(using: .utf8)!
+        let anchor = NSFileProviderSyncAnchor(anchorData)
+        NSLog("📂 [FP-EXT] RemoteEnumerator.currentSyncAnchor: %f", timestamp)
+        Self.debugLog("currentSyncAnchor: returning timestamp \(timestamp)")
+        completionHandler(anchor)
+    }
+}
+
+// MARK: - CachedRemoteItem
+
+/// NSFileProviderItem backed by CachedItem from SwiftData
+class CachedRemoteItem: NSObject, NSFileProviderItem {
+    let cachedItem: CachedItem
+    let connectionId: String
+    
+    init(cachedItem: CachedItem, connectionId: String) {
+        self.cachedItem = cachedItem
+        self.connectionId = connectionId
+    }
+    
+    var itemIdentifier: NSFileProviderItemIdentifier {
+        NSFileProviderItemIdentifier(cachedItem.id)
+    }
+    
+    var parentItemIdentifier: NSFileProviderItemIdentifier {
+        NSFileProviderItemIdentifier(cachedItem.parentId)
+    }
+    
+    var filename: String {
+        cachedItem.name
+    }
+    
+    var contentType: UTType {
+        cachedItem.isDirectory ? .folder : UTType(filenameExtension: (cachedItem.name as NSString).pathExtension) ?? .data
+    }
+    
+    var documentSize: NSNumber? {
+        NSNumber(value: cachedItem.size)
+    }
+    
+    var creationDate: Date? {
+        cachedItem.modificationDate
+    }
+    
+    var contentModificationDate: Date? {
+        cachedItem.modificationDate
+    }
+    
+    var capabilities: NSFileProviderItemCapabilities {
+        if cachedItem.isDirectory {
+            return [.allowsReading, .allowsWriting, .allowsContentEnumerating, .allowsAddingSubItems, .allowsDeleting, .allowsRenaming]
+        } else {
+            return [.allowsReading, .allowsWriting, .allowsDeleting, .allowsRenaming]
+        }
+    }
+    
+    var itemVersion: NSFileProviderItemVersion {
+        let modTime = cachedItem.modificationDate?.timeIntervalSince1970 ?? 0
+        let contentVer = "\(cachedItem.size):\(modTime)".data(using: .utf8)!
+        let metaVer = "\(modTime)".data(using: .utf8)!
+        return NSFileProviderItemVersion(contentVersion: contentVer, metadataVersion: metaVer)
     }
 }

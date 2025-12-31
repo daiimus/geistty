@@ -111,6 +111,89 @@ triggering correctly.
 
 ---
 
+### 🔬 File Provider Analysis (Dec 29-30, 2025)
+
+**Status:** ✅ **WORKING** (Dec 30, 2025) - Browse directories, preview files via Files.app!
+
+#### Feature Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Browse directories | ✅ Working | `RemoteEnumerator.enumerateItems()` |
+| View/preview files | ✅ Working | `fetchContents()` downloads to temp |
+| Create folders | ✅ Implemented | `createItem()` → `mkdir()` |
+| Upload files | ✅ Implemented | `createItem()` → `writeFile()` |
+| Delete files/folders | ✅ Implemented | `deleteItem()` → `delete()` |
+| Rename/move | ✅ Implemented | `modifyItem()` → `rename()` |
+| Metadata cache | ✅ SwiftData | `CachedItem` model |
+| **Sync anchors** | 🔲 → ✅ | Timestamp-based change tracking |
+| **Force refresh** | 🔲 → ✅ | Always fetch fresh on browse |
+| **Error handling** | 🔲 → ✅ | User-friendly error messages |
+| **Thumbnails** | 🔲 Planned | `NSFileProviderThumbnailing` |
+| Working Set | ⚠️ Basic | Returns connections only |
+| Remote polling | 🔲 Future | Detect server-side changes |
+| Offline queue | 🔲 Future | Queue changes when disconnected |
+
+#### Phase 1: Essential Polish (Dec 30, 2025)
+
+**Tasks:**
+- [x] Sync anchor tracking with timestamps
+- [x] Always fetch fresh data (cache as fallback only)
+- [x] Better error messages for network failures
+- [x] Signal enumerator after modifications
+
+#### Fixes Applied (Dec 30, 2025)
+
+| Fix | File | Issue |
+|-----|------|-------|
+| Keep observer open until SFTP completes | `FileProviderExtension.swift` | Was calling `finishEnumerating()` before fetch |
+| Fix Data subscript crash | `SFTPChannel.swift` | `receiveBuffer[0]` crashed after `removeFirst()` |
+
+**Data subscript bug:** After `Data.removeFirst()`, the startIndex may not be 0, but we were accessing `receiveBuffer[0]`. Fixed with `withUnsafeBytes` and proper `Data(...)` resets.
+
+---
+
+#### Previous Debug Progress (Reference)
+| Step | Status |
+|------|--------|
+| SSH key parsing | ✅ Fixed (`readBytes()` vs `readString()` for binary) |
+| SSH authentication | ✅ Working |
+| SFTP subsystem request | ✅ ChannelSuccessEvent received |
+| SFTP version negotiation | ✅ Version 3 negotiated |
+| `channel.open()` | ✅ "SFTP channel ready!" logged |
+| `realpath(".")` | ⏳ May be hanging - no log after this |
+| Directory enumeration | ❌ Never reached before iOS kills extension |
+
+#### Background: Apple's Design Assumptions
+
+From File Provider documentation:
+> "The system tracks the state of each item, distinguishing between **dataless** (exists only as metadata) and **materialized** (has content on disk) items."
+
+This means:
+- **Enumeration should return metadata only** - no network calls for content
+- Content is fetched lazily via `fetchContents(for:)` when user opens a file
+- The Working Set contains items of interest for Spotlight indexing
+
+#### Future Optimizations (After Basic Pattern Works)
+
+1. **Add metadata cache** - SwiftData for previously-seen items (faster cold starts)
+2. **Background refresh** - Update cache asynchronously, call `signalEnumerator()`
+3. **Skip `realpath`** - Navigate from known paths
+4. **Connection warming** - Pre-establish connections from main app
+
+#### Reference: Blink Shell (For Future Optimization)
+
+**Repository:** https://github.com/blinksh/blink (GPL-3.0, 6.5k stars)
+
+*Note: Blink uses libssh2 (blocking C library) + Combine, not SwiftNIO-SSH. Their architecture differs but their caching patterns are useful reference for future optimization.*
+
+**Useful Patterns for Later:**
+- `WorkingSetDatabase.swift` - SQLite for tracking synced items
+- Background polling via timer for change detection
+- Lazy connection establishment
+
+---
+
 ### ✅ Architecture: tmux Layer Alignment - COMPLETE (Dec 28, 2025)
 
 **Summary:** Migrated from @MainActor TmuxControlClient to actor-based TmuxGateway.
@@ -771,13 +854,14 @@ Config file (`ghostty.conf`) is now the source of truth.
   - [x] SFTPChannel protocol implementation (Dec 29, 2025)
   - [x] SFTPClient async API (kept for File Provider)
   - [x] ~~In-App Browser~~ (Removed Dec 29, 2025 - iOS Files.app does this better)
-  - [ ] **File Provider Extension** (The Right Way™)
-    - [ ] NSFileProviderReplicatedExtension (iOS 16+ replicated provider)
-    - [ ] Shared Framework for SFTP code (used by app + extension)
-    - [ ] Shared Keychain access group for credentials
+  - [ ] **File Provider Extension** (The Right Way™) - See [Analysis](#-file-provider-analysis-dec-29-2025)
+    - [x] NSFileProviderReplicatedExtension skeleton
+    - [x] SSH/SFTP connection working in extension
+    - [ ] **Metadata cache** (SQLite, like Blink Shell's WorkingSetDatabase)
+    - [ ] **Fast enumeration** (return cached immediately, refresh async)
+    - [ ] **Background polling** + `signalEnumerator()` for changes
+    - [ ] Skip `realpath(".")` for File Provider use case
     - [ ] Per-server "Show in Files.app" toggle in connection settings
-    - [ ] Appear in Files.app Locations sidebar (like Shellfish, OneDrive)
-    - [ ] Real file URLs (NSFileProviderItem) for drag/drop, Share Sheet, Open In
     - [ ] Offline cache with sync badges
     - [ ] Thumbnail generation for images/videos
     - [ ] Background upload/download support
