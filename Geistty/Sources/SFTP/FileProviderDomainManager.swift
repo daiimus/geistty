@@ -95,6 +95,74 @@ class FileProviderDomainManager: ObservableObject {
         }
     }
     
+    /// Clears all pending resolvable errors for the Geistty domain.
+    /// Call this on app launch to clear "Syncing Paused" state from previous sessions.
+    /// iOS persists these errors until explicitly cleared via signalErrorResolved().
+    func clearPendingErrors() async {
+        let domainId = NSFileProviderDomainIdentifier(rawValue: Self.domainIdentifier)
+        
+        do {
+            let domains = try await NSFileProviderManager.domains()
+            guard let domain = domains.first(where: { $0.identifier == domainId }),
+                  let manager = NSFileProviderManager(for: domain) else {
+                logger.info("📂 No domain found for clearing errors")
+                return
+            }
+            
+            // Clear both resolvable error types
+            let resolvableErrors: [NSFileProviderError.Code] = [.notAuthenticated, .serverUnreachable]
+            
+            for errorCode in resolvableErrors {
+                let error = NSFileProviderError(errorCode)
+                do {
+                    try await manager.signalErrorResolved(error)
+                    logger.info("📂 Cleared pending error: \(errorCode.rawValue)")
+                } catch {
+                    // Error type wasn't pending - that's fine
+                }
+            }
+            
+            logger.info("📂 Cleared all pending errors")
+        } catch {
+            logger.error("📂 Failed to clear pending errors: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Completely resets the File Provider domain to clear any stuck state.
+    /// This removes the domain, clears metadata, and re-adds the domain fresh.
+    /// Use this to fix "Syncing Paused" states that persist after code fixes.
+    ///
+    /// WARNING: This will clear all cached metadata and active folder tracking.
+    /// Files.app will need to re-enumerate all content after this reset.
+    func resetDomain() async throws {
+        logger.info("📂 Starting File Provider domain reset...")
+        
+        let domainId = NSFileProviderDomainIdentifier(rawValue: Self.domainIdentifier)
+        
+        // Step 1: Remove the domain if it exists
+        let domains = try await NSFileProviderManager.domains()
+        if let existingDomain = domains.first(where: { $0.identifier == domainId }) {
+            logger.info("📂 Removing existing domain...")
+            try await NSFileProviderManager.remove(existingDomain)
+            isDomainRegistered = false
+        }
+        
+        // Step 2: Clear metadata store and reset anchor
+        logger.info("📂 Clearing metadata store...")
+        try await MetadataStore.shared.resetForDomainClear()
+        
+        // Step 3: Wait a moment for iOS to process removal
+        try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+        
+        // Step 4: Re-add the domain
+        logger.info("📂 Re-adding domain...")
+        let newDomain = NSFileProviderDomain(identifier: domainId, displayName: "Geistty")
+        try await NSFileProviderManager.add(newDomain)
+        isDomainRegistered = true
+        
+        logger.info("✅ File Provider domain reset complete")
+    }
+    
     /// Removes legacy domains from previous implementation
     /// Call this on app launch to clean up old per-connection domains
     static func cleanupLegacyDomains() {
@@ -379,5 +447,52 @@ class FileProviderDomainManager: ObservableObject {
         }
         let logFile = containerURL.appendingPathComponent("fileprovider_debug.log")
         try? FileManager.default.removeItem(at: logFile)
+    }
+    
+    // MARK: - Error Resolution
+    
+    /// Signals that previous File Provider errors are resolved.
+    /// Call this when a connection succeeds - it clears "Syncing Paused" state.
+    ///
+    /// When the File Provider extension throws `.notAuthenticated` or `.serverUnreachable`,
+    /// iOS marks the domain as having a "resolvable error" and shows "Syncing Paused".
+    /// This state persists until we explicitly signal that the error is resolved.
+    func signalErrorsResolved() async {
+        let domainId = NSFileProviderDomainIdentifier(rawValue: Self.domainIdentifier)
+        let domain = NSFileProviderDomain(identifier: domainId, displayName: "Geistty")
+        
+        guard let manager = NSFileProviderManager(for: domain) else {
+            logger.warning("📂 No manager for domain - cannot signal error resolved")
+            return
+        }
+        
+        // Signal all resolvable error types as resolved
+        let resolvableErrors: [NSFileProviderError.Code] = [
+            .notAuthenticated,
+            .serverUnreachable
+        ]
+        
+        for errorCode in resolvableErrors {
+            let error = NSFileProviderError(errorCode)
+            do {
+                try await manager.signalErrorResolved(error)
+                logger.info("📂 Signaled error resolved: \(errorCode.rawValue)")
+            } catch {
+                // Ignore errors - the error type might not be pending
+                logger.debug("📂 Could not signal error resolved: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - Domain Reset
+    
+    /// Completely resets the File Provider domain to clear "Syncing Paused" state.
+    /// This removes and re-adds the domain, clearing all cached state.
+    ///
+    /// Use this as a last resort when signalErrorsResolved doesn't work.
+    /// The user should re-enable connections in Settings after this.
+    func resetDomainLegacy() async throws {
+        // This is the old method - use resetDomain() instead
+        try await resetDomain()
     }
 }

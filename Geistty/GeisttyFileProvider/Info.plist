@@ -24,6 +24,8 @@
 		<string>group.com.geistty.fileprovider</string>
 		<key>NSExtensionFileProviderSupportsEnumeration</key>
 		<true/>
+		<key>NSExtensionFileProviderSupportsPickingFolders</key>
+		<true/>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.fileprovider-nonui</string>
 		<key>NSExtensionPrincipalClass</key>

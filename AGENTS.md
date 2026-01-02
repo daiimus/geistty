@@ -20,12 +20,29 @@ We're open to bleeding-edge solutions, but **favor approaches that align with th
 
 ### Building Geistty
 ```bash
+# Quick CI build (simulator, no signing)
+cd Geistty && ./ci.sh build
+
 # Build for device
 xcodebuild -project Geistty/Geistty.xcodeproj -scheme Geistty -destination "id=DEVICE_ID" -allowProvisioningUpdates
 
 # Build for simulator
-xcodebuild -project Geistty/Geistty.xcodeproj -scheme Geistty -destination "platform=iOS Simulator,name=iPhone 15"
+xcodebuild -project Geistty/Geistty.xcodeproj -scheme Geistty -destination "platform=iOS Simulator,name=iPhone 17 Pro"
 ```
+
+### Testing
+```bash
+# Run all CI checks (build + lint)
+cd Geistty && ./ci.sh all
+
+# Run unit tests
+cd Geistty && ./ci.sh test
+
+# Run UI tests
+cd Geistty && ./ci.sh ui-test
+```
+
+See [TESTING.md](TESTING.md) for detailed testing documentation.
 
 ### Rebuilding GhosttyKit (when Ghostty changes)
 ```bash
@@ -186,6 +203,59 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 - Don't modify `GhosttyKit.xcframework` directly - rebuild from ghostty repo
 - Don't use `print()` for logging - use `Logger` pattern
 - Don't assume `log stream --device` exists - use `xcrun devicectl ... --console`
+
+---
+
+## ⚠️ File Provider Development
+
+**STOP. Before touching ANY File Provider code:**
+
+1. Read `FILE_PROVIDER_IMPLEMENTATION.md` completely
+2. Check which enumerator is active in `FileProviderExtension.swift` (`enumerator(for:)` method)
+3. State your understanding before making changes
+
+### DO NOT (File Provider specific)
+
+- **Do NOT add debug logging as a first step** - the code is already instrumented
+- **Do NOT test on device before understanding the problem** - write unit tests first
+- **Do NOT repeat failed approaches** - check the "Failed Approaches" section below
+
+### Current State (Jan 2, 2026)
+
+| Question | Answer |
+|----------|--------|
+| **Active enumerator** | `MetadataStoreEnumerator` (for working set) |
+| **Bug Fixed** | Item filtering bug - subfolder items were dropped (Jan 2, 2026) |
+| **Needs Device Testing** | Yes - verify "Syncing Paused" is resolved |
+
+### Bug Fix History (Jan 2, 2026)
+
+**Problem**: Files in subfolders weren't being reported to iOS when their parent folder wasn't also modified.
+
+**Root Cause**: `MetadataStoreEnumerator.enumerateChanges()` had a filter that only included items whose parent was also in the modified set.
+
+**Fix**: Removed the filter. All modified items are now reported to iOS.
+
+**Test**: `testSubfolderFileChangesAreReported()` in `MetadataStoreEnumeratorTests.swift`
+
+### Failed Approaches
+
+1. **Adding more logging** - Created diagnostic bloat, didn't identify root cause
+2. **Signaling errors resolved** - `signalErrorResolved()` after SFTP connect - no effect
+3. **Async Task{} in callbacks** - Apple docs say async is allowed, Cryptomator does it, didn't help
+4. **Parent-in-modified-set filter** - **REMOVED** - caused subfolder items to be dropped
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `FileProviderExtension.swift` | Main extension, `enumerator(for:)` returns which enumerator |
+| `MetadataStoreEnumerator.swift` | Working set enumerator (current) |
+| `MetadataStoreEnumeratorTests.swift` | Unit tests for enumerator behavior |
+| `MetadataStore.swift` | SwiftData actor, anchor cache |
+| `FILE_PROVIDER_IMPLEMENTATION.md` | Full context, history, architecture |
+
+---
 
 ## Architecture Decisions
 
