@@ -33,6 +33,17 @@
             parallelizable = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "D6000001"
+               BuildableName = "GeisttyTests.xctest"
+               BlueprintName = "GeisttyTests"
+               ReferencedContainer = "container:Geistty.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "B6000001"
                BuildableName = "GeisttyUITests.xctest"
                BlueprintName = "GeisttyUITests"

@@ -97,6 +97,21 @@ actor MetadataCache {
         return try context.fetch(descriptor).first
     }
     
+    /// Get a specific cached item synchronously (for File Provider callbacks)
+    /// WARNING: This blocks the calling thread. Only use in File Provider synchronous callbacks.
+    nonisolated func getItemSync(id: String) -> CachedItem? {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: CachedItem?
+        
+        Task {
+            result = try? await self.getItem(id: id)
+            semaphore.signal()
+        }
+        
+        semaphore.wait()
+        return result
+    }
+    
     /// Get all cached items for a connection
     func getItems(connectionId: String) async throws -> [CachedItem] {
         let container = try getContainer()

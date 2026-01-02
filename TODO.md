@@ -130,9 +130,27 @@ triggering correctly.
 | **Force refresh** | 🔲 → ✅ | Always fetch fresh on browse |
 | **Error handling** | 🔲 → ✅ | User-friendly error messages |
 | **Thumbnails** | 🔲 Planned | `NSFileProviderThumbnailing` |
-| Working Set | ⚠️ Basic | Returns connections only |
-| Remote polling | 🔲 Future | Detect server-side changes |
+| Working Set | ✅ Fixed | Returns cached files (Dec 30 - fixed ID parsing bug) |
+| Remote polling | ✅ Implemented | 5s interval for active folders |
 | Offline queue | 🔲 Future | Queue changes when disconnected |
+| **Syncing Paused** | ⏳ Fix Implemented | `signalErrorsResolved()` added - needs device test |
+
+#### Phase 2: "Syncing Paused" Fix (Jan 1, 2026)
+
+**Root Cause Analysis:**
+- Files.app shows "Syncing Paused" with alert icon when **resolvable errors** persist
+- Extension throws `.notAuthenticated` / `.serverUnreachable` when not connected
+- These errors persist until `signalErrorResolved()` is called
+- Only main app was calling this, but extension throws the errors!
+
+**Fixes Applied:**
+| Fix | Location | Description |
+|-----|----------|-------------|
+| Cache-first in `item(for:)` | `FileProviderExtension.swift` | Check MetadataCache before requiring server |
+| Signal errors resolved | `SFTPConnectionManager` | Call `signalErrorsResolved()` after SFTP connection |
+| New method | `SFTPConnectionManager.signalErrorsResolved()` | Signals `.notAuthenticated` + `.serverUnreachable` as resolved |
+
+**Status:** All 57+ unit tests pass. **Needs device testing to verify fix.**
 
 #### Phase 1: Essential Polish (Dec 30, 2025)
 
@@ -141,6 +159,7 @@ triggering correctly.
 - [x] Always fetch fresh data (cache as fallback only)
 - [x] Better error messages for network failures
 - [x] Signal enumerator after modifications
+- [x] Fix WorkingSetEnumerator ID parsing (was using "sftp:" prefix, should be "conn:")
 
 #### Fixes Applied (Dec 30, 2025)
 

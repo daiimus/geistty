@@ -23,6 +23,12 @@ struct GeisttyApp: App {
         // (We used to create one domain per connection, now we use a single "geistty" domain)
         FileProviderDomainManager.cleanupLegacyDomains()
         
+        // Clear any pending resolvable errors from previous sessions
+        // This clears "Syncing Paused" state that persists until explicitly resolved
+        Task { @MainActor in
+            await FileProviderDomainManager.shared.clearPendingErrors()
+        }
+        
         // Sync File Provider domains for all saved connection profiles
         // This ensures servers appear in Files.app sidebar
         ConnectionProfileManager.shared.syncFileProviderDomains()
