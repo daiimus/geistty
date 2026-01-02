@@ -9,7 +9,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.geistty.app", category: "TmuxSplitTree")
+private let logger = Logger(subsystem: "com.geistty", category: "TmuxSplitTree")
 
 // MARK: - TmuxSplitTree
 

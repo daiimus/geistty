@@ -483,6 +483,10 @@ class ConnectionProfileManager: ObservableObject {
                         sshKeyName: profile.sshKeyName
                     )
                 }
+                
+                // Clear any stale "Syncing Paused" state from previous session errors
+                // This gives the user a fresh start when opening the app
+                await FileProviderDomainManager.shared.signalErrorsResolved()
             }
         }
         #endif

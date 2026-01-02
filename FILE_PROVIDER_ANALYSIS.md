@@ -4,99 +4,48 @@
 
 After extensive research on Apple's NSFileProviderReplicatedExtension documentation and best practices, I've identified **several critical issues** in the current implementation that would cause the "Authentication Required" error.
 
+**Status Update (Dec 30, 2025):** Most issues have been fixed. See individual issue sections for current status.
+
 ---
 
-## Issue #1: `isConnected` Check is Incorrect (HIGH PRIORITY)
+## Issue #1: `isConnected` Check is Incorrect (HIGH PRIORITY) - ✅ FIXED
 
-### The Problem
+### The Problem (Was)
 
-In `SFTPConnectionManager.getClient()`:
+`SFTPClient.isConnected` only checked if the channel object exists.
 
-```swift
-if let client = sftpClients[connectionId], await client.isConnected {
-    return client
-}
-```
+### The Fix (Applied)
 
-But `SFTPClient.isConnected` only checks if the channel object exists:
-
-```swift
-var isConnected: Bool {
-    channel != nil  // ❌ This doesn't verify the channel is ACTUALLY working
-}
-```
-
-After `connectForSFTP()`, the SSH channel exists but:
-1. The SFTP subsystem channel hasn't been opened yet
-2. The channel might be in a broken state
-3. There's no actual connectivity test
-
-### The Fix
-
-`SFTPClient` needs to track whether `connect()` successfully completed SFTP initialization:
+`SFTPClient` now tracks whether `connect()` successfully completed SFTP initialization:
 
 ```swift
 private var _isConnected = false
 
 var isConnected: Bool {
-    channel != nil && _isConnected
+    _isConnected && channel != nil  // ✅ Only true after channel.open() succeeds
 }
 
-func connect(host: String, username: String) async throws {
-    // ... existing code ...
-    _isConnected = true  // Set ONLY after successful SFTP init
-}
-```
-
----
-
-## Issue #2: `SFTPChannel.channel` vs Real Connectivity (HIGH PRIORITY)
-
-### The Problem
-
-`SFTPClient.isConnected` checks if `channel` (the underlying `SFTPChannel`) exists:
-
-```swift
-var isConnected: Bool {
-    channel != nil
-}
-```
-
-But `SFTPChannel` is created in `init(parentChannel:)` without opening anything:
-
-```swift
-init(parentChannel: Channel) {
-    self.parentChannel = parentChannel  // Just stores reference
-    // channel property remains nil until open() is called!
-}
-```
-
-So after `SFTPClient(parentChannel: parentChannel)`, we have:
-- `SFTPClient.channel` = SFTPChannel instance (exists)
-- `SFTPChannel.channel` = nil (not opened yet)
-- `SFTPChannel.isConnected` = false
-
-When `SFTPClient.connect()` is called, it should:
-1. Call `channel.open()` to create SFTP subsystem
-2. Set `SFTPChannel.isConnected = true`
-
-But `SFTPClient.isConnected` only checks if the `SFTPChannel` instance exists, not if it's actually connected.
-
-### The Fix
-
-```swift
-// In SFTPClient
-var isConnected: Bool {
-    get async {
-        guard let channel = channel else { return false }
-        return channel.isConnected  // Delegate to SFTPChannel's state
-    }
+func connect(...) async throws {
+    try await channel.open()
+    self._isConnected = true  // ✅ Set ONLY after successful SFTP init
 }
 ```
 
 ---
 
-## Issue #3: Working Set Enumeration Returns Connections (MEDIUM)
+## Issue #2: `SFTPChannel.channel` vs Real Connectivity (HIGH PRIORITY) - ✅ FIXED
+
+### The Problem (Was)
+
+`SFTPClient.isConnected` only checked if the `SFTPChannel` instance exists, not if it's actually connected.
+
+### The Fix (Applied)
+
+Now properly tracked via `_isConnected` flag set after `channel.open()` succeeds. See Issue #1.
+
+---
+
+## Issue #3: Working Set Enumeration Returns Connections (MEDIUM) - ✅ FIXED (Dec 30, 2025)
 
 ### The Problem
 
@@ -104,16 +53,20 @@ From Apple docs:
 > "The working set is a list of items that the user may find particularly interesting."
 > "Your file provider must maintain its own working set... typically includes recently used items, tagged items, favorites, shared items, recently deleted items."
 
-Current implementation:
+Original implementation returned `ConnectionsEnumerator()` for the working set.
+
+### The Fix (Applied)
+
+1. Created `WorkingSetEnumerator` that returns cached items from `MetadataCache.shared.getAllItems()`
+2. **Bug Fixed (Dec 30)**: `extractConnectionId()` was parsing with wrong format (`"sftp:"` instead of `"conn:"`)
+3. Now uses `CachedItem.parseConnectionId()` for consistent ID parsing
+
 ```swift
-if containerItemIdentifier == .workingSet {
-    return ConnectionsEnumerator()  // ❌ Returns same as root
+// WorkingSetEnumerator.extractConnectionId - FIXED
+private static func extractConnectionId(from itemId: String) -> String? {
+    return CachedItem.parseConnectionId(from: itemId)  // Uses "conn:" format
 }
 ```
-
-The working set should contain **actual remote files** the user has accessed, not connection folders.
-
-### The Fix
 
 For a simple implementation, the working set can return empty results initially:
 
@@ -201,36 +154,36 @@ The enumerator is supposed to be lightweight and return quickly. Heavy network o
 
 ---
 
-## Issue #6: `connectForSFTP()` May Not Wait for Auth (HIGH PRIORITY)
+## Issue #6: `connectForSFTP()` May Not Wait for Auth (HIGH PRIORITY) - ✅ FIXED
 
-### The Problem
+### The Problem (Was)
 
-Looking at `connectForSFTP()`:
+`connectForSFTP()` returned before SSH authentication completed because `bootstrap.connect()` returns when TCP is connected.
+
+### The Fix (Applied)
+
+Added `verifyAuthentication()` method that creates a test channel to verify auth:
 
 ```swift
 public func connectForSFTP(authMethod: SSHAuthMethod) async throws {
     // ... bootstrap setup ...
-    
     let channel = try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
-    self.channel = channel
     
-    // For SFTP, we DON'T open a shell channel - the SFTPChannel will create its own
+    // CRITICAL: Verify auth completed
+    try await verifyAuthentication(on: channel)  // ✅ Opens test channel, closes it
+    
     state = .channelOpen
     health = .healthy
 }
+
+private func verifyAuthentication(on channel: Channel) async throws {
+    let sshHandler = try channel.pipeline.handler(type: NIOSSHHandler.self).wait()
+    let channelPromise = channel.eventLoop.makePromise(of: Channel.self)
+    sshHandler.createChannel(channelPromise) { ... }  // Will fail if auth not complete
+    let testChannel = try await channelPromise.futureResult.get()
+    try await testChannel.close().get()  // Success = auth verified
+}
 ```
-
-The SSH handshake includes authentication, but we're not waiting for auth completion. The `bootstrap.connect()` returns when TCP is connected, but SSH authentication happens asynchronously via the `NIOSSHHandler`.
-
-In the original `connect()` method, we wait for `openShellChannel()` which implicitly waits for auth because you can't open a channel without being authenticated. But `connectForSFTP()` skips this.
-
-### The Fix
-
-Need to wait for SSH authentication to complete before returning from `connectForSFTP()`. Either:
-
-1. Open a dummy channel and close it (confirms auth works)
-2. Use NIOSSH's auth completion callback
-3. Try to get the NIOSSHHandler and wait for auth state
 
 ---
 
@@ -298,23 +251,141 @@ This creates Tasks that capture `self` weakly. If `SFTPChannel` is deallocated b
 
 ---
 
-## Root Cause Hypothesis
+## Status Summary (Dec 30, 2025)
 
-The most likely root cause is **Issue #6**: `connectForSFTP()` returns before SSH authentication actually completes. The TCP connection is established, but:
+| Issue | Priority | Status |
+|-------|----------|--------|
+| #1 - `isConnected` check | HIGH | ✅ Fixed - uses `_isConnected` flag |
+| #2 - `SFTPChannel` connectivity | HIGH | ✅ Fixed - see #1 |
+| #3 - Working set returns connections | MEDIUM | ✅ Fixed - returns cached files, ID parsing bug fixed |
+| #4 - Error mapping | MEDIUM | ✅ Implemented - `toFileProviderError()` |
+| #5 - Auth at enumeration time | ARCH | ℹ️ By design - cache fallback mitigates |
+| #6 - `connectForSFTP()` auth wait | HIGH | ✅ Fixed - `verifyAuthentication()` |
+| #7 - Network entitlements | LOW | ℹ️ Automatic for File Provider extensions |
+| #8 - Async in sync closures | LOW | ⚠️ Known - weak self mitigates |
 
-1. SSH handshake hasn't finished
-2. `parentChannel` is returned immediately
-3. `SFTPChannel.open()` tries to use `NIOSSHHandler.createChannel()`
-4. This fails because auth isn't complete yet
-5. Error is caught and mapped to `.notAuthenticated`
-
-**Proof**: The original `connect()` method works because `openShellChannel()` forces waiting for auth. `connectForSFTP()` was added without this synchronization.
-
+**Current State:** File Provider is functional with browse, view, create, delete, rename operations working. Working set now correctly returns cached files. Change detection via polling is implemented.
 ---
 
-## Immediate Fix Priority
+## Issue #9: "Syncing Paused" Warning - ✅ FIX IMPLEMENTED (Jan 1, 2026)
 
-1. **HIGH**: Fix `connectForSFTP()` to wait for SSH auth completion
-2. **HIGH**: Fix `SFTPClient.isConnected` to actually verify SFTP subsystem is open
-3. **MEDIUM**: Map errors correctly (`.serverUnreachable` vs `.notAuthenticated`)
-4. **LOW**: Fix working set enumeration
+### Problem
+
+The Files.app shows "Syncing with Geistty Paused" warning with an alert icon, even though browsing and file operations work correctly.
+
+### Root Cause Analysis
+
+After deep investigation of Apple's documentation, the issue is **resolvable errors** (`.notAuthenticated`, `.serverUnreachable`) persisting until explicitly cleared:
+
+> "The system displays an alert... and pauses syncing until the error is resolved."
+> "To clear the error, call `signalErrorResolved(_:)`."
+
+The File Provider extension was throwing these errors when not connected to a server, but never clearing them when connections succeeded.
+
+### Fixes Applied (Jan 1, 2026)
+
+| Fix | Location | Description |
+|-----|----------|-------------|
+| Cache-first in `item(for:)` | `FileProviderExtension.swift` L590-640 | Check `MetadataCache` before requiring server connection |
+| Signal errors resolved | `FileProviderExtension.swift` L224 | Call `signalErrorsResolved()` after SFTP connection |
+| New `signalErrorsResolved()` | `SFTPConnectionManager` L268-298 | Signals both `.notAuthenticated` and `.serverUnreachable` as resolved |
+
+### Key Insight
+
+Previously, only the **main app** called `signalErrorsResolved()` (in `FileProviderDomainManager`). But the **extension** is what throws the errors, so the **extension** must also signal when they're resolved.
+
+### Status: Needs Device Testing
+
+All unit tests pass (57+). Needs on-device verification to confirm "Syncing Paused" clears.
+
+### Research Findings
+
+After extensive analysis of Apple's documentation and Blink Shell's implementation, here are the key findings:
+
+#### What Causes "Syncing Paused"
+
+The message appears when iOS determines that synchronization cannot proceed. Common causes:
+
+1. **Pending operations with errors** - If `createItem`, `modifyItem`, `deleteItem`, or `fetchContents` return errors, iOS may pause syncing
+2. **Extension instability** - Frequent extension restarts (observed in logs: many "Extension init for domain: geistty" entries)
+3. **Inconsistent sync anchor state** - The working set enumerator's sync anchor handling may confuse iOS
+4. **Not returning items that iOS expects** - If materialized items aren't in the working set
+
+#### Blink's Implementation Pattern
+
+Blink Shell's File Provider (which works without "Syncing Paused"):
+
+1. **WorkingSetEnumerator**:
+   - `currentSyncAnchor()` returns an ACTUAL anchor (incremented iteration counter)
+   - `enumerateItems()` returns `finishEnumerating(upTo: nil)` immediately (no items)
+   - `enumerateChanges()` actually reports creates/updates/deletions from a database
+
+2. **Folder Enumerators**:
+   - `currentSyncAnchor()` returns `nil` (stateless)
+   - Content comes from actual SFTP enumeration
+
+3. **State Tracking**:
+   - Uses SQLite database to track item state
+   - Tracks sync anchor iterations
+   - Records commits to working set
+
+#### Key Difference from Our Implementation
+
+| Aspect | Blink | Geistty |
+|--------|-------|---------|
+| WorkingSet anchor | Real iteration counter | `nil` |
+| WorkingSet changes | Tracked in SQLite | Not tracked |
+| Folder anchors | `nil` | `nil` |
+| Change detection | Timer + DB comparison | Timer + SFTP comparison |
+
+#### Hypothesis
+
+The "Syncing Paused" warning may be caused by:
+
+1. **WorkingSet returning `nil` for sync anchor** - iOS may interpret this as "can't track state"
+2. **Extension restarts** - Each restart loses state; iOS sees inconsistent behavior
+3. **No pending item resolution** - If iOS has pending operations but we never resolve them
+
+### Potential Solutions
+
+#### Option A: Implement Proper Sync Anchor (Blink-style)
+
+Create a persistent sync anchor counter that increments with each change:
+
+```swift
+class WorkingSetEnumerator: NSFileProviderEnumerator {
+    private static var anchorIteration: UInt64 = 0
+    
+    func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
+        let anchor = NSFileProviderSyncAnchor("geistty-\(Self.anchorIteration)".data(using: .utf8)!)
+        completionHandler(anchor)
+    }
+    
+    func enumerateChanges(for observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
+        // If anchor matches current, no changes
+        // Otherwise, enumerate all changes since that anchor
+        observer.finishEnumeratingChanges(upTo: currentAnchor, moreComing: false)
+    }
+}
+```
+
+#### Option B: Use Non-Replicated Extension
+
+If syncing isn't needed (pure remote browsing), consider using the simpler `NSFileProviderExtension` instead of `NSFileProviderReplicatedExtension`. However, this is deprecated and may not be available long-term.
+
+#### Option C: Signal Error Resolution
+
+If there are pending operations with errors, use `signalErrorResolved(_:completionHandler:)` to clear them.
+
+### Current Status
+
+- Multiple approaches tried (returning `nil` for all anchors, matching Blink's pattern)
+- Warning persists
+- Need to determine exact iOS condition triggering the warning
+
+### Next Steps
+
+1. Capture full extension lifecycle logs to see if operations are failing
+2. Check if `enumeratorForPendingItems()` shows stuck operations
+3. Consider implementing proper anchor tracking with persistence
+4. Test with a minimal working set implementation

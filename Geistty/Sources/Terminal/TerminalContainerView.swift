@@ -240,6 +240,10 @@ class TerminalViewModel: ObservableObject {
                 isConnected = true
                 startDurationTimer()
                 
+                // Signal File Provider that any previous errors are resolved
+                // This clears "Syncing Paused" state in Files.app
+                await FileProviderDomainManager.shared.signalErrorsResolved()
+                
                 // Send initial terminal size
                 logger.info("📡 Setting terminal size: \(cols)x\(rows)")
                 sshSession?.resize(cols: cols, rows: rows)
@@ -258,6 +262,12 @@ class TerminalViewModel: ObservableObject {
         sshSession?.delegate = self
         isConnected = true
         startDurationTimer()
+        
+        // Signal File Provider that any previous errors are resolved
+        // This clears "Syncing Paused" state in Files.app
+        Task {
+            await FileProviderDomainManager.shared.signalErrorsResolved()
+        }
         
         // Send initial terminal size
         logger.info("📡 Setting terminal size: \(cols)x\(rows)")

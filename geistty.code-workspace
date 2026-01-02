@@ -11,7 +11,75 @@
 		{
 			"name": "libxev-ios",
 			"path": "../libxev-ios"
+		},
+		{
+			"name": "swift-nio-ssh",
+			"path": "../swift-nio-ssh-fork"
 		}
 	],
-	"settings": {}
+	"settings": {},
+	"launch": {
+		"configurations": [
+			{
+				"type": "swift",
+				"request": "launch",
+				"args": [],
+				"cwd": "${workspaceFolder:swift-nio-ssh}",
+				"name": "Debug NIOSSHServer (swift-nio-ssh)",
+				"target": "NIOSSHServer",
+				"configuration": "debug",
+				"preLaunchTask": "swift: Build Debug NIOSSHServer (swift-nio-ssh)"
+			},
+			{
+				"type": "swift",
+				"request": "launch",
+				"args": [],
+				"cwd": "${workspaceFolder:swift-nio-ssh}",
+				"name": "Release NIOSSHServer (swift-nio-ssh)",
+				"target": "NIOSSHServer",
+				"configuration": "release",
+				"preLaunchTask": "swift: Build Release NIOSSHServer (swift-nio-ssh)"
+			},
+			{
+				"type": "swift",
+				"request": "launch",
+				"args": [],
+				"cwd": "${workspaceFolder:swift-nio-ssh}",
+				"name": "Debug NIOSSHPerformanceTester (swift-nio-ssh)",
+				"target": "NIOSSHPerformanceTester",
+				"configuration": "debug",
+				"preLaunchTask": "swift: Build Debug NIOSSHPerformanceTester (swift-nio-ssh)"
+			},
+			{
+				"type": "swift",
+				"request": "launch",
+				"args": [],
+				"cwd": "${workspaceFolder:swift-nio-ssh}",
+				"name": "Release NIOSSHPerformanceTester (swift-nio-ssh)",
+				"target": "NIOSSHPerformanceTester",
+				"configuration": "release",
+				"preLaunchTask": "swift: Build Release NIOSSHPerformanceTester (swift-nio-ssh)"
+			},
+			{
+				"type": "swift",
+				"request": "launch",
+				"args": [],
+				"cwd": "${workspaceFolder:swift-nio-ssh}",
+				"name": "Debug NIOSSHClient (swift-nio-ssh)",
+				"target": "NIOSSHClient",
+				"configuration": "debug",
+				"preLaunchTask": "swift: Build Debug NIOSSHClient (swift-nio-ssh)"
+			},
+			{
+				"type": "swift",
+				"request": "launch",
+				"args": [],
+				"cwd": "${workspaceFolder:swift-nio-ssh}",
+				"name": "Release NIOSSHClient (swift-nio-ssh)",
+				"target": "NIOSSHClient",
+				"configuration": "release",
+				"preLaunchTask": "swift: Build Release NIOSSHClient (swift-nio-ssh)"
+			}
+		]
+	}
 }
