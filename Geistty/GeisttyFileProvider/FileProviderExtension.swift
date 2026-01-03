@@ -461,7 +461,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 do {
                     let hadChanges = try await detectChangesInFolderNew(connectionId: folder.connectionId, remotePath: folder.remotePath)
                     if hadChanges {
-                        foldersWithChanges.append(CachedItem.remoteItemId(connectionId: folder.connectionId, path: folder.remotePath))
+                        foldersWithChanges.append(CachedFileMetadata.remoteItemId(connectionId: folder.connectionId, path: folder.remotePath))
                         anyChanges = true
                     }
                 } catch {
@@ -505,15 +505,15 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         
         // Build parent ID
         let parentId = remotePath == "/" 
-            ? CachedItem.connectionRootId(connectionId)
-            : CachedItem.remoteItemId(connectionId: connectionId, path: remotePath)
+            ? CachedFileMetadata.connectionRootId(connectionId)
+            : CachedFileMetadata.remoteItemId(connectionId: connectionId, path: remotePath)
         
         // Build items list for MetadataStore
         let items = serverEntries.compactMap { entry -> (id: String, connId: String, path: String, parentId: String, name: String, size: Int64, isDir: Bool, perms: Int32, modDate: Date?, isSymlink: Bool)? in
             guard entry.name != "." && entry.name != ".." else { return nil }
             
             let itemPath = remotePath == "/" ? "/\(entry.name)" : "\(remotePath)/\(entry.name)"
-            let itemId = CachedItem.remoteItemId(connectionId: connectionId, path: itemPath)
+            let itemId = CachedFileMetadata.remoteItemId(connectionId: connectionId, path: itemPath)
             
             return (
                 id: itemId,
@@ -648,13 +648,13 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                         completionHandler(nil, NSFileProviderError(.noSuchItem))
                     }
                 } else if let connId = parsed.connectionId, let path = parsed.remotePath {
-                    // Remote item - try cache first for offline support
+                    // Remote item - try MetadataStore first for offline support
                     let itemId = identifier.rawValue
                     
-                    // Check cache first - this doesn't require a server connection
-                    if let cachedItem = try? await MetadataCache.shared.getItem(id: itemId) {
+                    // Check MetadataStore first - this doesn't require a server connection
+                    if let metadata = try? await MetadataStore.shared.item(id: itemId) {
                         // Return cached data immediately
-                        completionHandler(CachedRemoteItem(cachedItem: cachedItem, connectionId: connId), nil)
+                        completionHandler(CachedMetadataItem(metadata: metadata), nil)
                     } else {
                         // No cache - try server
                         do {
@@ -766,9 +766,24 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 let attrs = try await client.stat(remotePath)
                 let newItem = RemoteItem(connectionId: connId, path: remotePath, attributes: attrs)
                 
-                // Signal parent to refresh
+                // Commit to MetadataStore for change tracking (Blink pattern)
+                try await MetadataStore.shared.upsert(
+                    itemIdentifier: newItem.itemIdentifier.rawValue,
+                    connectionId: connId,
+                    remotePath: remotePath,
+                    parentIdentifier: itemTemplate.parentItemIdentifier.rawValue,
+                    filename: itemTemplate.filename,
+                    size: Int64(attrs.size),
+                    isDirectory: itemTemplate.contentType == .folder,
+                    permissions: Int32(attrs.permissions & 0o777),
+                    modificationDate: attrs.modificationDate,
+                    isSymlink: attrs.isSymlink
+                )
+                
+                // Signal parent and working set to refresh
                 if let manager = NSFileProviderManager(for: self.domain) {
                     try? await manager.signalEnumerator(for: itemTemplate.parentItemIdentifier)
+                    try? await manager.signalEnumerator(for: .workingSet)
                 }
                 
                 completionHandler(newItem, [], false, nil)
@@ -829,9 +844,24 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 let attrs = try await client.stat(remotePath)
                 let modifiedItem = RemoteItem(connectionId: connId, path: remotePath, attributes: attrs)
                 
-                // Signal parent to refresh
+                // Commit to MetadataStore for change tracking (Blink pattern)
+                try await MetadataStore.shared.upsert(
+                    itemIdentifier: modifiedItem.itemIdentifier.rawValue,
+                    connectionId: connId,
+                    remotePath: remotePath,
+                    parentIdentifier: item.parentItemIdentifier.rawValue,
+                    filename: item.filename,
+                    size: Int64(attrs.size),
+                    isDirectory: attrs.isDirectory,
+                    permissions: Int32(attrs.permissions & 0o777),
+                    modificationDate: attrs.modificationDate,
+                    isSymlink: attrs.isSymlink
+                )
+                
+                // Signal parent and working set to refresh
                 if let manager = NSFileProviderManager(for: self.domain) {
                     try? await manager.signalEnumerator(for: item.parentItemIdentifier)
+                    try? await manager.signalEnumerator(for: .workingSet)
                 }
                 
                 completionHandler(modifiedItem, [], false, nil)
@@ -866,22 +896,22 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 let client = try await ensureConnected(connectionId: connId)
                 try await client.delete(path)
                 
-                // Invalidate cache and signal parent to refresh
-                let parentParsed = self.parseIdentifier(identifier)
+                // Mark deleted in MetadataStore for change tracking (Blink pattern)
+                try await MetadataStore.shared.markDeleted(id: identifier.rawValue)
+                
+                // Calculate parent identifier for signaling
                 let parentId: NSFileProviderItemIdentifier
-                if let remotePath = parentParsed.remotePath {
-                    let parentPath = (remotePath as NSString).deletingLastPathComponent
-                    if parentPath == "/" || parentPath.isEmpty {
-                        parentId = self.makeConnectionIdentifier(connId)
-                    } else {
-                        parentId = self.makeRemoteItemIdentifier(connectionId: connId, path: parentPath)
-                    }
+                let parentPath = (path as NSString).deletingLastPathComponent
+                if parentPath == "/" || parentPath.isEmpty {
+                    parentId = self.makeConnectionIdentifier(connId)
                 } else {
-                    parentId = .rootContainer
+                    parentId = self.makeRemoteItemIdentifier(connectionId: connId, path: parentPath)
                 }
                 
+                // Signal parent and working set to refresh
                 if let manager = NSFileProviderManager(for: self.domain) {
                     try? await manager.signalEnumerator(for: parentId)
+                    try? await manager.signalEnumerator(for: .workingSet)
                 }
                 
                 completionHandler(nil)
@@ -1195,17 +1225,17 @@ class RemoteEnumerator: NSObject, NSFileProviderEnumerator {
     /// Item identifier for this folder
     private var itemIdentifier: NSFileProviderItemIdentifier {
         if path == "/" {
-            return NSFileProviderItemIdentifier(CachedItem.connectionRootId(connectionId))
+            return NSFileProviderItemIdentifier(CachedFileMetadata.connectionRootId(connectionId))
         }
-        return NSFileProviderItemIdentifier(CachedItem.remoteItemId(connectionId: connectionId, path: path))
+        return NSFileProviderItemIdentifier(CachedFileMetadata.remoteItemId(connectionId: connectionId, path: path))
     }
     
     /// Parent item identifier for cache lookups
     private var parentId: String {
         if path == "/" {
-            return CachedItem.connectionRootId(connectionId)
+            return CachedFileMetadata.connectionRootId(connectionId)
         }
-        return CachedItem.remoteItemId(connectionId: connectionId, path: path)
+        return CachedFileMetadata.remoteItemId(connectionId: connectionId, path: path)
     }
     
     init(connectionId: String, path: String, domain: NSFileProviderDomain) {
@@ -1250,15 +1280,15 @@ class RemoteEnumerator: NSObject, NSFileProviderEnumerator {
                 try await refreshFromServer(observer: observer)
                 Self.debugLog("enumerateItems COMPLETE (fresh data)")
             } catch {
-                // Server fetch failed - try cache as fallback
-                Self.debugLog("Server error: \(error.localizedDescription), trying cache...")
+                // Server fetch failed - try MetadataStore as fallback
+                Self.debugLog("Server error: \(error.localizedDescription), trying MetadataStore...")
                 
                 do {
-                    let cached = try await MetadataCache.shared.getChildren(parentId: parentId)
+                    let cached = try await MetadataStore.shared.items(inFolder: parentId)
                     
                     if !cached.isEmpty {
                         Self.debugLog("Cache fallback: \(cached.count) items")
-                        let items = cached.map { CachedRemoteItem(cachedItem: $0, connectionId: connectionId) }
+                        let items = cached.map { CachedMetadataItem(metadata: $0) }
                         observer.didEnumerate(items)
                         observer.finishEnumerating(upTo: nil)
                     } else {
@@ -1311,38 +1341,20 @@ class RemoteEnumerator: NSObject, NSFileProviderEnumerator {
         Self.debugLog("Server returned \(entries.count) items")
         NSLog("📂 [FP-EXT] Server returned %d items in %@", entries.count, path)
         
-        // Convert to CachedItem and store
-        let cachedItems = entries.compactMap { entry -> CachedItem? in
+        // Convert to MetadataStore format
+        let metadataItems = entries.compactMap { entry -> (id: String, connId: String, path: String, parentId: String, name: String, size: Int64, isDir: Bool, perms: Int32, modDate: Date?, isSymlink: Bool)? in
             guard entry.name != "." && entry.name != ".." else { return nil }
-            let itemPath = (path as NSString).appendingPathComponent(entry.name)
-            let itemId = CachedItem.remoteItemId(connectionId: connectionId, path: itemPath)
+            let itemPath = (self.path as NSString).appendingPathComponent(entry.name)
+            let itemId = CachedFileMetadata.remoteItemId(connectionId: connectionId, path: itemPath)
             
-            return CachedItem(
-                id: itemId,
-                connectionId: connectionId,
-                path: itemPath,
-                parentId: parentId,
-                name: entry.name,
-                size: Int64(entry.size),
-                isDirectory: entry.isDirectory,
-                permissions: Int32(entry.permissions),
-                modificationDate: entry.modificationDate,
-                isSymlink: entry.isSymlink
-            )
+            return (id: itemId, connId: connectionId, path: itemPath, parentId: parentId,
+                    name: entry.name, size: Int64(entry.size), isDir: entry.isDirectory,
+                    perms: Int32(entry.permissions), modDate: entry.modificationDate, isSymlink: entry.isSymlink)
         }
         
-        Self.debugLog("Created \(cachedItems.count) cached items")
+        Self.debugLog("Created \(metadataItems.count) items for MetadataStore")
         
-        // Update cache
-        try await MetadataCache.shared.upsertBatch(cachedItems, parentId: parentId)
-        Self.debugLog("MetadataCache updated")
-        
-        // Also update MetadataStore for working set change tracking
-        let metadataItems = cachedItems.map { item in
-            (id: item.id, connId: item.connectionId, path: item.path, parentId: item.parentId,
-             name: item.name, size: item.size, isDir: item.isDirectory, perms: item.permissions,
-             modDate: item.modificationDate, isSymlink: item.isSymlink)
-        }
+        // Update MetadataStore (single source of truth)
         let hasChanges = try await MetadataStore.shared.upsertBatch(items: metadataItems, parentId: parentId)
         Self.debugLog("MetadataStore updated - hasChanges=\(hasChanges)")
         
@@ -1352,16 +1364,12 @@ class RemoteEnumerator: NSObject, NSFileProviderEnumerator {
             try? await manager.signalEnumerator(for: .workingSet)
         }
         
-        // NOTE: Do NOT call recordChanges() here! 
-        // Change detection happens in pollActiveFolders() which compares server state to cache.
-        // Calling recordChanges() on every enumeration would flood the change system and
-        // cause "Syncing Paused" because the anchor keeps incrementing.
-        
-        // If we have an observer (cache miss case), return results now
+        // If we have an observer, return results now
         if let observer = observer {
-            Self.debugLog("Reporting \(cachedItems.count) items to observer")
-            let items = cachedItems.map { CachedRemoteItem(cachedItem: $0, connectionId: connectionId) }
-            observer.didEnumerate(items)
+            // Fetch fresh from MetadataStore to get proper CachedFileMetadata objects
+            let items = try await MetadataStore.shared.items(inFolder: parentId)
+            Self.debugLog("Reporting \(items.count) items to observer")
+            observer.didEnumerate(items.map { CachedMetadataItem(metadata: $0) })
             observer.finishEnumerating(upTo: nil)
             Self.debugLog("Observer finished")
         } else {
@@ -1396,84 +1404,6 @@ class RemoteEnumerator: NSObject, NSFileProviderEnumerator {
         NSLog("📂 [FP-EXT] RemoteEnumerator.currentSyncAnchor: returning nil (folder enumerator)")
         Self.debugLog("currentSyncAnchor: returning nil (folder enumerator)")
         completionHandler(nil)
-    }
-}
-
-// MARK: - CachedRemoteItem
-
-/// NSFileProviderItem backed by CachedItem from SwiftData
-class CachedRemoteItem: NSObject, NSFileProviderItem {
-    let cachedItem: CachedItem
-    let connectionId: String
-    
-    init(cachedItem: CachedItem, connectionId: String) {
-        self.cachedItem = cachedItem
-        self.connectionId = connectionId
-    }
-    
-    var itemIdentifier: NSFileProviderItemIdentifier {
-        NSFileProviderItemIdentifier(cachedItem.id)
-    }
-    
-    var parentItemIdentifier: NSFileProviderItemIdentifier {
-        NSFileProviderItemIdentifier(cachedItem.parentId)
-    }
-    
-    var filename: String {
-        cachedItem.name
-    }
-    
-    var contentType: UTType {
-        cachedItem.isDirectory ? .folder : UTType(filenameExtension: (cachedItem.name as NSString).pathExtension) ?? .data
-    }
-    
-    var documentSize: NSNumber? {
-        NSNumber(value: cachedItem.size)
-    }
-    
-    var creationDate: Date? {
-        cachedItem.modificationDate
-    }
-    
-    var contentModificationDate: Date? {
-        cachedItem.modificationDate
-    }
-    
-    var capabilities: NSFileProviderItemCapabilities {
-        if cachedItem.isDirectory {
-            return [.allowsReading, .allowsWriting, .allowsContentEnumerating, .allowsAddingSubItems, .allowsDeleting, .allowsRenaming]
-        } else {
-            return [.allowsReading, .allowsWriting, .allowsDeleting, .allowsRenaming]
-        }
-    }
-    
-    var itemVersion: NSFileProviderItemVersion {
-        let modTime = cachedItem.modificationDate?.timeIntervalSince1970 ?? 0
-        let contentVer = "\(cachedItem.size):\(modTime)".data(using: .utf8)!
-        let metaVer = "\(modTime)".data(using: .utf8)!
-        return NSFileProviderItemVersion(contentVersion: contentVer, metadataVersion: metaVer)
-    }
-    
-    // MARK: - Transfer Status
-    
-    /// Folders show as downloaded for browsing. Files are streamed on demand.
-    var isDownloaded: Bool {
-        cachedItem.isDirectory
-    }
-    
-    /// All cached items exist on server (this is cached server state)
-    var isUploaded: Bool {
-        true
-    }
-    
-    /// No active downloads tracked here
-    var isDownloading: Bool {
-        false
-    }
-    
-    /// No uploads (read-only cached state)
-    var isUploading: Bool {
-        false
     }
 }
 
