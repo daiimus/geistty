@@ -6,33 +6,57 @@ This document captures the research, best practices, and implementation details 
 
 ---
 
-## Current Status (Jan 2, 2026)
+## Current Status (Jan 3, 2026)
 
 | Question | Answer |
 |----------|--------|
 | **Active enumerator** | `MetadataStoreEnumerator` (for working set) |
 | **Symptom** | "Syncing with Geistty Paused" in Files.app |
 | **Browsing works?** | Yes - can navigate folders, see files |
-| **Changes reflect?** | Pending device test after `itemVersion` fix |
-| **Unit Tests** | All passing |
+| **Changes reflect?** | 🔄 Testing after dual-cache fix |
+| **Alert gone?** | ✅ Yes - the error alert is gone |
+| **Unit Tests** | All 97 passing (+ 27 skipped device-only tests) |
 | **Protocol Coverage** | All required properties ✅ |
 | **Domain Reset** | ✅ Available via `FileProviderDomainManager.resetDomain()` |
-| **Code Audit** | ✅ See [FILE_PROVIDER_CODE_AUDIT.md](FILE_PROVIDER_CODE_AUDIT.md) |
+| **Code Audit** | ✅ Phase 1, 2 & 3 cleanup complete (~1100 lines removed) |
 
-### ⚠️ Technical Debt Warning
+### 🎯 Root Cause #2: Dual Cache Systems (Jan 3, 2026)
 
-A comprehensive code audit (Jan 2, 2026) revealed **~700+ lines of dead code** from previous troubleshooting iterations:
+**Discovery:** TWO PARALLEL CACHE SYSTEMS existed, causing stale data:
 
-- **3 enumerators** exist but only `MetadataStoreEnumerator` is used
-- **2 anchor caches** exist but only `MetadataAnchorCache` is used  
-- **2 persistence formats** (VERSION-ITERATION vs UInt64) cause potential confusion
-- `WorkingSet.swift` (542 lines) is entirely unused dead code
+1. **MetadataCache + CachedItem** (~500 lines) - Used by `RemoteEnumerator` for directory browsing
+2. **MetadataStore + CachedFileMetadata** - Used by `MetadataStoreEnumerator` for working set
 
-**See [FILE_PROVIDER_CODE_AUDIT.md](FILE_PROVIDER_CODE_AUDIT.md) for full analysis and cleanup plan.**
+**Problem:** When items were created/modified/deleted, they were committed to `MetadataStore` but directory browsing used `MetadataCache` which held stale data. This caused:
+- Files created not appearing in directory listings
+- Deleted folders still showing
+- General "stale data" behavior
 
-### Domain Reset Function (Jan 2, 2026) ✅
+**Fix Applied (Jan 3, 2026):**
+- Updated `item(for:)` to use `MetadataStore.shared.item(id:)` instead of `MetadataCache`
+- Updated `enumerateItems` fallback to use `MetadataStore.shared.items(inFolder:)` instead of `MetadataCache`
+- Rewrote `refreshFromServer()` to only update `MetadataStore`, returning `CachedMetadataItem` objects
+- Added full write capabilities to `CachedMetadataItem.capabilities`
+- **DELETED** `MetadataCache.swift` (359 lines)
+- **DELETED** `CachedItem.swift` (137 lines)
+- **DELETED** `CachedRemoteItem` class
 
-Added `FileProviderDomainManager.resetDomain()` to clear stuck "Syncing Paused" states.
+**Total code removed in this fix:** ~500 lines of duplicate dead code
+
+### Previous Fix: MetadataStore Commits (Jan 2, 2026)
+
+**Hypothesis:** Items created via `createItem()` were NOT committed to MetadataStore.
+
+**Fix Applied:**
+- Added `MetadataStore.shared.upsert()` call in `createItem()` after successful remote creation
+- Added `MetadataStore.shared.upsert()` call in `modifyItem()` after successful modification
+- Added `MetadataStore.shared.markDeleted()` call in `deleteItem()` after successful deletion
+- Added `signalEnumerator(for: .workingSet)` after all operations (Blink pattern)
+
+**Device Test Result (Jan 2, 2026):** Partial success
+- Error alert is gone (improvement)
+- "Syncing Paused" banner still shows
+- Directory still doesn't reflect changes → led to discovery of dual cache issue
 
 **Root Cause Analysis:**
 - iOS persists File Provider domain state even after code fixes
@@ -87,6 +111,71 @@ The third condition was the bug: files in subfolders would be filtered out when 
 **Fix:** Removed the filter entirely. Now all modified items are reported to iOS. iOS handles parent resolution gracefully - if a parent doesn't exist yet, the item just won't display until the parent is enumerated.
 
 **Test:** `MetadataStoreEnumeratorTests.testSubfolderFileChangesAreReported()` - verifies files in subfolders are reported even when parent wasn't modified.
+
+### 🔍 Research Findings: Comparing with Blink Shell (Jan 2, 2026)
+
+Analyzed [Blink Shell](https://github.com/blinksh/blink)'s File Provider implementation for reference.
+
+#### Key Finding: Items Must Be Committed to MetadataStore
+
+**Blink's pattern:**
+```swift
+// Every createItem/modifyItem commits to WorkingSet database
+return self.workingSet.commitItemInSet(itemPath: itemPath) {
+    // ... create/modify file on remote ...
+    return createdItem
+}
+```
+
+**Geistty's current pattern:**
+```swift
+// createItem does NOT commit to MetadataStore!
+func createItem(...) {
+    // 1. Create on remote server ✅
+    // 2. Return item to iOS ✅
+    // 3. Signal parent enumerator ✅
+    // 4. Commit to MetadataStore ❌ MISSING!
+}
+```
+
+#### Impact on "Syncing Paused"
+
+1. iOS creates an item through our extension
+2. We create it on the remote server and return success
+3. iOS may call `enumerateChanges` for the working set
+4. `MetadataStoreEnumerator` queries MetadataStore for changes
+5. **The newly created item is NOT in MetadataStore**
+6. iOS gets confused - it just created an item but we don't report it in changes
+
+#### Fix Required
+
+Add MetadataStore commits in:
+- `createItem()` - after successful remote creation
+- `modifyItem()` - after successful remote modification
+- `deleteItem()` - after successful remote deletion (to track deletion)
+
+```swift
+// In createItem, after remote success:
+let metadata = CachedFileMetadata(
+    itemIdentifier: newItem.itemIdentifier.rawValue,
+    parentIdentifier: itemTemplate.parentItemIdentifier.rawValue,
+    filename: itemTemplate.filename,
+    isDirectory: itemTemplate.contentType == .folder,
+    size: Int64(attrs.size),
+    modificationDate: attrs.modificationTime
+)
+_ = try await MetadataStore.shared.upsert(metadata)
+```
+
+#### Other Blink Patterns
+
+| Pattern | Blink | Geistty |
+|---------|-------|---------|
+| WorkingSet database | SQLite | SwiftData ✅ |
+| Empty enumerateItems | ✅ Returns empty + nil | ✅ Same |
+| Commit on create | ✅ Always | ❌ Missing |
+| Signal after ops | ✅ Parent + workingSet | ⚠️ Parent only |
+| Active enumerator tracking | ✅ PollCoordinator | ⚠️ ActiveFolder in store |
 
 ### Failed Approaches (Do Not Repeat)
 

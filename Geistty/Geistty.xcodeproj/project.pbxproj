@@ -65,8 +65,6 @@
 		A1000093 /* TmuxGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000093 /* TmuxGateway.swift */; };
 		A1000094 /* TmuxProtocolParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000094 /* TmuxProtocolParser.swift */; };
 		A1000095 /* KittyKeyboardTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000095 /* KittyKeyboardTranslator.swift */; };
-		A1000096 /* CachedItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000096 /* CachedItem.swift */; };
-		A1000097 /* MetadataCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000097 /* MetadataCache.swift */; };
 		A1000098 /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000098 /* SyncState.swift */; };
 		A1000099 /* CachedFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000099 /* CachedFileMetadata.swift */; };
 		A100009A /* MetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009A /* MetadataStore.swift */; };
@@ -84,8 +82,6 @@
 		C1000013 /* SSHKeyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* SSHKeyParser.swift */; };
 		C1000009 /* SSHKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* SSHKeyManager.swift */; };
 		C1000015 /* FileProviderDomainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* FileProviderDomainManager.swift */; };
-		C1000016 /* CachedItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000096 /* CachedItem.swift */; };
-		C1000017 /* MetadataCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000097 /* MetadataCache.swift */; };
 		C1000019 /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000098 /* SyncState.swift */; };
 		C100001A /* CachedFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000099 /* CachedFileMetadata.swift */; };
 		C100001B /* MetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009A /* MetadataStore.swift */; };
@@ -206,8 +202,6 @@
 		A2000093 /* TmuxGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxGateway.swift; sourceTree = "<group>"; };
 		A2000094 /* TmuxProtocolParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxProtocolParser.swift; sourceTree = "<group>"; };
 		A2000095 /* KittyKeyboardTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyKeyboardTranslator.swift; sourceTree = "<group>"; };
-		A2000096 /* CachedItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedItem.swift; sourceTree = "<group>"; };
-		A2000097 /* MetadataCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataCache.swift; sourceTree = "<group>"; };
 		A2000098 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
 		A2000099 /* CachedFileMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedFileMetadata.swift; sourceTree = "<group>"; };
 		A200009A /* MetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataStore.swift; sourceTree = "<group>"; };
@@ -415,8 +409,6 @@
 				A2000044 /* MockSFTPClient.swift */,
 				A2000042 /* SFTPChannel.swift */,
 				A2000043 /* FileProviderDomainManager.swift */,
-				A2000096 /* CachedItem.swift */,
-				A2000097 /* MetadataCache.swift */,
 			);
 			path = SFTP;
 			sourceTree = "<group>";
@@ -687,8 +679,6 @@
 				A1000044 /* MockSFTPClient.swift in Sources */,
 				A1000042 /* SFTPChannel.swift in Sources */,
 				A1000043 /* FileProviderDomainManager.swift in Sources */,
-				A1000096 /* CachedItem.swift in Sources */,
-				A1000097 /* MetadataCache.swift in Sources */,
 				A1000098 /* SyncState.swift in Sources */,
 				A1000099 /* CachedFileMetadata.swift in Sources */,
 				A100009A /* MetadataStore.swift in Sources */,
@@ -727,8 +717,6 @@
 				C1000009 /* SSHKeyManager.swift in Sources */,
 				C1000013 /* SSHKeyParser.swift in Sources */,
 				C1000015 /* FileProviderDomainManager.swift in Sources */,
-				C1000016 /* CachedItem.swift in Sources */,
-				C1000017 /* MetadataCache.swift in Sources */,
 				C1000019 /* SyncState.swift in Sources */,
 				C100001A /* CachedFileMetadata.swift in Sources */,
 				C100001B /* MetadataStore.swift in Sources */,
