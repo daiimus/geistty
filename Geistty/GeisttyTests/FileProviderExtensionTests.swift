@@ -678,8 +678,10 @@ final class CachedMetadataItemTests: XCTestCase {
         // So we can only check that the reading capability is present
         XCTAssertTrue(item.capabilities.contains(.allowsReading), "File should allow reading")
         
-        // Files should NOT have writing capabilities
-        XCTAssertFalse(item.capabilities.contains(.allowsWriting), "Files should not allow writing in this implementation")
+        // Files should have writing capabilities for proper sync
+        XCTAssertTrue(item.capabilities.contains(.allowsWriting), "Files should allow writing for proper sync")
+        XCTAssertTrue(item.capabilities.contains(.allowsDeleting), "Files should allow deleting")
+        XCTAssertTrue(item.capabilities.contains(.allowsRenaming), "Files should allow renaming")
     }
     
     func testDirectoryItemProperties() async throws {

@@ -220,23 +220,42 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 - **Do NOT test on device before understanding the problem** - write unit tests first
 - **Do NOT repeat failed approaches** - check the "Failed Approaches" section below
 
-### Current State (Jan 2, 2026)
+### Current State (Jan 3, 2026)
 
 | Question | Answer |
 |----------|--------|
 | **Active enumerator** | `MetadataStoreEnumerator` (for working set) |
-| **Bug Fixed** | Item filtering bug - subfolder items were dropped (Jan 2, 2026) |
-| **Needs Device Testing** | Yes - verify "Syncing Paused" is resolved |
+| **Symptom** | "Syncing with Geistty Paused" - testing after dual-cache fix |
+| **Alert gone?** | ✅ Yes - error alert no longer appears |
+| **Changes reflect?** | 🔄 Testing after dual-cache fix |
+| **Last fix applied** | Dual cache consolidation (Jan 3, 2026) |
+| **Code removed** | ~500 lines (MetadataCache.swift, CachedItem.swift deleted) |
 
-### Bug Fix History (Jan 2, 2026)
+### Bug Fix History (Jan 3, 2026)
 
-**Problem**: Files in subfolders weren't being reported to iOS when their parent folder wasn't also modified.
+**Fix #2: Dual Cache Consolidation** - 🔄 Testing
+- **Root cause discovered:** TWO PARALLEL CACHE SYSTEMS existed:
+  - `MetadataCache` + `CachedItem` (~500 lines) - used by RemoteEnumerator for browsing
+  - `MetadataStore` + `CachedFileMetadata` - used by MetadataStoreEnumerator
+- Directory browsing used `MetadataCache` which held stale data
+- **Fix:**
+  - Updated `item(for:)` to use `MetadataStore.shared.item(id:)`
+  - Updated `enumerateItems` fallback to use `MetadataStore.shared.items(inFolder:)`
+  - Rewrote `refreshFromServer()` to only update `MetadataStore`
+  - Added full write capabilities to `CachedMetadataItem`
+  - **DELETED** `MetadataCache.swift` (359 lines)
+  - **DELETED** `CachedItem.swift` (137 lines)
+  - **DELETED** `CachedRemoteItem` class
 
-**Root Cause**: `MetadataStoreEnumerator.enumerateChanges()` had a filter that only included items whose parent was also in the modified set.
+**Fix #1: MetadataStore Commits (Jan 2, 2026)** - ✅ Partial success
+- Added `upsert()` calls in `createItem()` and `modifyItem()`
+- Added `markDeleted()` call in `deleteItem()`
+- Added `signalEnumerator(for: .workingSet)` after all operations
+- **Result:** Error alert gone, but stale data issue led to discovery of dual caches
 
-**Fix**: Removed the filter. All modified items are now reported to iOS.
-
-**Test**: `testSubfolderFileChangesAreReported()` in `MetadataStoreEnumeratorTests.swift`
+**Earlier Fix: Item Filtering Bug** - ✅ Fixed
+- Removed filter that dropped subfolder items
+- Test: `testSubfolderFileChangesAreReported()`
 
 ### Failed Approaches
 
@@ -252,7 +271,8 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 | `FileProviderExtension.swift` | Main extension, `enumerator(for:)` returns which enumerator |
 | `MetadataStoreEnumerator.swift` | Working set enumerator (current) |
 | `MetadataStoreEnumeratorTests.swift` | Unit tests for enumerator behavior |
-| `MetadataStore.swift` | SwiftData actor, anchor cache |
+| `MetadataStore.swift` | SwiftData actor, anchor cache - **ONLY source of truth** |
+| `CachedFileMetadata.swift` | SwiftData @Model for file metadata |
 | `FILE_PROVIDER_IMPLEMENTATION.md` | Full context, history, architecture |
 
 ---

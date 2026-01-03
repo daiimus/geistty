@@ -160,9 +160,9 @@ final class CachedMetadataItem: NSObject, NSFileProviderItem {
     
     var capabilities: NSFileProviderItemCapabilities {
         if metadata.isDirectory {
-            return [.allowsReading, .allowsContentEnumerating]
+            return [.allowsReading, .allowsWriting, .allowsContentEnumerating, .allowsAddingSubItems, .allowsDeleting, .allowsRenaming]
         }
-        return [.allowsReading]
+        return [.allowsReading, .allowsWriting, .allowsDeleting, .allowsRenaming]
     }
     
     var filename: String {
