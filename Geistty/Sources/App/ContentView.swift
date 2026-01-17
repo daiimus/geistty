@@ -20,26 +20,19 @@ struct WindowContentView: View {
             }
     }
     
-    /// Handle scene phase changes for File Provider sync
-    /// Following iOS best practices: signal Files.app when returning to foreground
+    /// Handle scene phase changes
+    /// App lifecycle handling for potential future features
     private func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
         switch newPhase {
         case .active:
-            // App returned to foreground - user may have made changes via Files.app or SSH
-            // Signal Files.app to refresh all active connections
             if oldPhase == .background || oldPhase == .inactive {
-                logger.info("📂 App became active - signaling Files.app to refresh")
-                Task {
-                    await FileProviderDomainManager.shared.refreshAllConnections()
-                }
+                logger.info("📱 App became active")
             }
             
         case .background:
-            // App going to background - good time to signal any pending changes
-            logger.debug("📂 App entering background")
+            logger.debug("📱 App entering background")
             
         case .inactive:
-            // Transitional state, no action needed
             break
             
         @unknown default:

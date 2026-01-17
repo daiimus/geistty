@@ -240,10 +240,6 @@ class TerminalViewModel: ObservableObject {
                 isConnected = true
                 startDurationTimer()
                 
-                // Signal File Provider that any previous errors are resolved
-                // This clears "Syncing Paused" state in Files.app
-                await FileProviderDomainManager.shared.signalErrorsResolved()
-                
                 // Send initial terminal size
                 logger.info("📡 Setting terminal size: \(cols)x\(rows)")
                 sshSession?.resize(cols: cols, rows: rows)
@@ -263,12 +259,6 @@ class TerminalViewModel: ObservableObject {
         isConnected = true
         startDurationTimer()
         
-        // Signal File Provider that any previous errors are resolved
-        // This clears "Syncing Paused" state in Files.app
-        Task {
-            await FileProviderDomainManager.shared.signalErrorsResolved()
-        }
-        
         // Send initial terminal size
         logger.info("📡 Setting terminal size: \(cols)x\(rows)")
         sshSession?.resize(cols: cols, rows: rows)
@@ -276,13 +266,6 @@ class TerminalViewModel: ObservableObject {
     
     func disconnect() {
         stopDurationTimer()
-        
-        // Signal Files.app to refresh - user may have made changes via terminal
-        if let profileId = sshSession?.profileId {
-            Task {
-                await FileProviderDomainManager.shared.refreshFilesApp(connectionId: profileId)
-            }
-        }
         
         sshSession?.disconnect()
         sshSession = nil

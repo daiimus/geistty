@@ -19,38 +19,8 @@ struct GeisttyApp: App {
         // Also set for UIView to catch any edge cases
         // UIView.appearance().backgroundColor = bgColor  // Too aggressive, breaks other UI
         
-        // Clean up legacy File Provider domains from previous architecture
-        // (We used to create one domain per connection, now we use a single "geistty" domain)
-        FileProviderDomainManager.cleanupLegacyDomains()
-        
-        // Clear any pending resolvable errors from previous sessions
-        // This clears "Syncing Paused" state that persists until explicitly resolved
-        Task { @MainActor in
-            await FileProviderDomainManager.shared.clearPendingErrors()
-        }
-        
-        // Sync File Provider domains for all saved connection profiles
-        // This ensures servers appear in Files.app sidebar
-        ConnectionProfileManager.shared.syncFileProviderDomains()
-        
-        // Debug: Log what's stored for File Provider
-        Task {
-            // Don't clear log on startup - we need to see extension errors
-            // FileProviderDomainManager.clearExtensionDebugLog()
-            
-            // Check what connections are stored
-            let connections = FileProviderDomainManager.getConnections()
-            print("📂 [DEBUG] Stored File Provider connections: \(connections.count)")
-            for conn in connections {
-                print("📂 [DEBUG] - \(conn.name): \(conn.host):\(conn.port) user=\(conn.username)")
-                print("📂 [DEBUG]   authMethod=\(conn.authMethod), hasSSHKey=\(conn.sshKeyData != nil), hasPassword=\(conn.password != nil)")
-            }
-            
-            // Check for extension debug log
-            if let log = FileProviderDomainManager.readExtensionDebugLog() {
-                print("📂 [DEBUG] Extension log:\n\(log)")
-            }
-        }
+        // NOTE: File Provider support has been archived (Jan 2026)
+        // See FILE_PROVIDER_LEARNINGS.md and branch archive/file-provider-jan-2026
     }
     
     var body: some Scene {
