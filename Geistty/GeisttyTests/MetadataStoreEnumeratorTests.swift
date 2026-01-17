@@ -14,6 +14,14 @@ import Foundation
 import XCTest
 @testable import Geistty
 
+// MARK: - Helper Functions
+
+/// Create a versioned anchor for testing (V{version}-{iteration})
+private func makeVersionedAnchor(iteration: UInt64 = 0) -> NSFileProviderSyncAnchor {
+    let anchorString = "V\(SyncState.currentVersion)-\(iteration)"
+    return NSFileProviderSyncAnchor(anchorString.data(using: .utf8)!)
+}
+
 /// Mock observer for testing enumerateItems
 final class MockEnumerationObserver: NSObject, NSFileProviderEnumerationObserver {
     var enumeratedItems: [NSFileProviderItemProtocol] = []
@@ -87,13 +95,24 @@ final class MetadataChangeObserver: NSObject, NSFileProviderChangeObserver {
 final class MetadataStoreEnumeratorTests: XCTestCase {
     
     override func setUp() async throws {
-        // Reset the MetadataStore and anchor cache before each test
+        // Reset the MetadataStore before each test
+        // NOTE: MetadataAnchorCache was removed in Option B simplification (Jan 5, 2026)
+        // SwiftData is now the only source of truth for anchors
         try await MetadataStore.shared.clearAll()
-        MetadataAnchorCache.shared.refresh()
     }
     
     override func tearDown() async throws {
         try await MetadataStore.shared.clearAll()
+    }
+    
+    // MARK: - Helper to get current anchor synchronously via Task
+    
+    private func getCurrentAnchor() async throws -> UInt64 {
+        try await MetadataStore.shared.currentAnchor
+    }
+    
+    private func getCurrentSyncAnchor() async throws -> NSFileProviderSyncAnchor {
+        try await MetadataStore.shared.currentSyncAnchor
     }
     
     // MARK: - enumerateItems Tests
@@ -130,12 +149,14 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         wait(for: [exp], timeout: 1.0)
         
         XCTAssertNotNil(receivedAnchor, "currentSyncAnchor should return an anchor")
-        XCTAssertEqual(receivedAnchor?.rawValue.count, 8, "Anchor should be 8 bytes (UInt64)")
         
-        // Parse anchor value
-        if let anchor = receivedAnchor {
-            let value = anchor.rawValue.withUnsafeBytes { $0.load(as: UInt64.self) }
-            XCTAssertGreaterThanOrEqual(value, 1, "Anchor value should be >= 1")
+        // Parse anchor value using new versioned format
+        if let anchor = receivedAnchor,
+           let (version, iteration) = SyncState.parseAnchor(from: anchor) {
+            XCTAssertEqual(version, SyncState.currentVersion, "Anchor version should match current")
+            XCTAssertGreaterThanOrEqual(iteration, 1, "Anchor iteration should be >= 1")
+        } else if let anchor = receivedAnchor {
+            XCTFail("Failed to parse anchor: \(anchor.rawValue.count) bytes")
         }
     }
     
@@ -145,8 +166,8 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     func testEnumerateChangesWithCurrentAnchorReturnsNoChanges() async throws {
         let enumerator = MetadataStoreEnumerator()
         
-        // Get current anchor
-        let currentAnchor = MetadataAnchorCache.shared.syncAnchor
+        // Get current anchor via MetadataStore directly
+        let currentAnchor = try await getCurrentSyncAnchor()
         
         let exp = expectation(description: "enumerateChanges completes")
         let observer = MetadataChangeObserver(expectation: exp)
@@ -192,14 +213,13 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        // Refresh cache after upserts
-        MetadataAnchorCache.shared.refresh()
+        // Anchor now updates automatically when upsert is called
+        // No need to manually refresh cache
         
         let enumerator = MetadataStoreEnumerator()
         
         // Create anchor with value 0
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         let exp = expectation(description: "enumerateChanges completes")
         let observer = MetadataChangeObserver(expectation: exp)
@@ -233,14 +253,13 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        // Get anchor before deletion
-        let beforeAnchor = MetadataAnchorCache.shared.syncAnchor
+        // Get anchor before deletion via MetadataStore directly
+        let beforeAnchor = try await getCurrentSyncAnchor()
         
         // Delete the item
         try await MetadataStore.shared.markDeleted(id: "test:delete-me")
         
-        // Refresh cache
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -260,26 +279,20 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         )
     }
     
-    /// enumerateChanges should always complete (never hang)
+    /// enumerateChanges should always complete successfully (never hang, never error)
+    /// Legacy/invalid anchors now enumerate all items instead of returning errors
     func testEnumerateChangesAlwaysCompletes() async throws {
         let enumerator = MetadataStoreEnumerator()
         
-        // Try various anchor formats to ensure none cause hangs
-        let testCases: [(String, Data)] = [
-            ("zero", {
-                var v: UInt64 = 0
-                return Data(bytes: &v, count: 8)
-            }()),
-            ("one", {
-                var v: UInt64 = 1
-                return Data(bytes: &v, count: 8)
-            }()),
-            ("large", {
-                var v: UInt64 = 999999
-                return Data(bytes: &v, count: 8)
-            }()),
-            ("empty", Data()),
-            ("string", "VERSION-1".data(using: .utf8)!),
+        // Try various anchor formats - ALL should complete successfully
+        // (we changed behavior to never return syncAnchorExpired to avoid "Syncing Paused")
+        let testCases: [String: Data] = [
+            "legacy-zero": { var v: UInt64 = 0; return Data(bytes: &v, count: 8) }(),
+            "legacy-one": { var v: UInt64 = 1; return Data(bytes: &v, count: 8) }(),
+            "legacy-large": { var v: UInt64 = 999999; return Data(bytes: &v, count: 8) }(),
+            "empty": Data(),
+            "malformed-string": "VERSION-1".data(using: .utf8)!,
+            "versioned": "V1-0".data(using: .utf8)!,
         ]
         
         for (name, anchorData) in testCases {
@@ -293,7 +306,8 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             await fulfillment(of: [exp], timeout: 2.0)
             
             XCTAssertTrue(observer.didFinish, "enumerateChanges should complete for anchor: \(name)")
-            XCTAssertNil(observer.finishedWithError, "enumerateChanges should not error for anchor: \(name)")
+            // All anchors should now complete WITHOUT error (to avoid "Syncing Paused")
+            XCTAssertNil(observer.finishedWithError, "Should complete without error: \(name)")
         }
     }
     
@@ -301,7 +315,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     
     /// Anchor should increase after changes
     func testAnchorProgressesAfterChanges() async throws {
-        let initialAnchor = MetadataAnchorCache.shared.currentAnchor
+        let initialAnchor = try await getCurrentAnchor()
         
         // Make a change
         _ = try await MetadataStore.shared.upsert(
@@ -317,10 +331,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        // Refresh cache
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        let newAnchor = MetadataAnchorCache.shared.currentAnchor
+        let newAnchor = try await getCurrentAnchor()
         
         XCTAssertGreaterThan(newAnchor, initialAnchor, "Anchor should increase after changes")
     }
@@ -344,9 +357,8 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        // Get anchor AFTER folder creation
-        MetadataAnchorCache.shared.refresh()
-        let beforeFileAnchor = MetadataAnchorCache.shared.syncAnchor
+        // Get anchor AFTER folder creation (no cache refresh needed)
+        let beforeFileAnchor = try await getCurrentSyncAnchor()
         
         // Now add a file IN the subfolder (parent is the subfolder, not connection root)
         _ = try await MetadataStore.shared.upsert(
@@ -362,7 +374,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         // Enumerate changes since before the file was added
         let enumerator = MetadataStoreEnumerator()
@@ -408,9 +420,8 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             )
         }
         
-        // Get anchor AFTER folder creation
-        MetadataAnchorCache.shared.refresh()
-        let beforeFileAnchor = MetadataAnchorCache.shared.syncAnchor
+        // Get anchor AFTER folder creation (no cache refresh needed)
+        let beforeFileAnchor = try await getCurrentSyncAnchor()
         
         // Add a file 5 levels deep
         _ = try await MetadataStore.shared.upsert(
@@ -426,7 +437,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         // Enumerate changes
         let enumerator = MetadataStoreEnumerator()
@@ -476,8 +487,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
-        let beforeAnchor = MetadataAnchorCache.shared.syncAnchor
+        let beforeAnchor = try await getCurrentSyncAnchor()
         
         // Add files at multiple depths in the same batch
         _ = try await MetadataStore.shared.upsert(
@@ -519,7 +529,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -543,7 +553,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     
     /// Enumerator should handle many items efficiently
     func testLargeBatchOfChanges() async throws {
-        let beforeAnchor = MetadataAnchorCache.shared.syncAnchor
+        let beforeAnchor = try await getCurrentSyncAnchor()
         
         // Add 100 items
         for i in 0..<100 {
@@ -561,7 +571,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             )
         }
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -599,10 +609,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             )
         }
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         // Start 5 concurrent enumerations
         let expectations = (0..<5).map { expectation(description: "Enumeration \($0)") }
@@ -631,7 +640,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     
     /// Files with unicode names should be handled correctly
     func testUnicodeFilenames() async throws {
-        let beforeAnchor = MetadataAnchorCache.shared.syncAnchor
+        let beforeAnchor = try await getCurrentSyncAnchor()
         
         // Add files with various unicode characters
         let unicodeNames = [
@@ -659,7 +668,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             )
         }
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -686,7 +695,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     
     /// Symlinks should be reported with correct type
     func testSymlinkReporting() async throws {
-        let beforeAnchor = MetadataAnchorCache.shared.syncAnchor
+        let beforeAnchor = try await getCurrentSyncAnchor()
         
         // Add a symlink
         _ = try await MetadataStore.shared.upsert(
@@ -702,7 +711,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: true
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -725,7 +734,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     
     /// Rapid successive changes should all be captured
     func testRapidSuccessiveChanges() async throws {
-        let beforeAnchor = MetadataAnchorCache.shared.syncAnchor
+        let beforeAnchor = try await getCurrentSyncAnchor()
         
         // Make 50 rapid changes
         for i in 0..<50 {
@@ -744,7 +753,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             // No delay between changes - stress test
         }
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -780,10 +789,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -837,10 +845,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -882,10 +889,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -923,7 +929,8 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        let beforeAnchor = MetadataAnchorCache.shared.syncAnchor
+        // Get anchor before making changes
+        let beforeAnchor = try await getCurrentSyncAnchor()
         
         // Now delete the item
         try await MetadataStore.shared.markDeleted(id: "conn:test:path:/order-test-delete.txt")
@@ -942,7 +949,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         // Track order of callbacks
         var callbackOrder: [String] = []
@@ -975,7 +982,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     
     // MARK: - Anchor Edge Cases
     
-    /// Empty anchor data should be handled gracefully
+    /// Empty anchor data should complete successfully (returns all items)
     func testEmptyAnchorDataHandled() async throws {
         let enumerator = MetadataStoreEnumerator()
         let emptyAnchor = NSFileProviderSyncAnchor(Data())
@@ -988,14 +995,15 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         await fulfillment(of: [exp], timeout: 2.0)
         
         XCTAssertTrue(observer.didFinish, "Should complete even with empty anchor")
-        XCTAssertNil(observer.finishedWithError, "Should not error on empty anchor")
+        // Empty anchor now completes successfully (returns all items to avoid "Syncing Paused")
+        XCTAssertNil(observer.finishedWithError, "Empty anchor should not return error")
     }
     
-    /// Very large anchor values should be handled
+    /// Very large legacy anchor values should complete successfully
     func testLargeAnchorValueHandled() async throws {
         let enumerator = MetadataStoreEnumerator()
         
-        // Use UInt64.max
+        // Legacy UInt64.max format - now handled gracefully (returns all items)
         var maxValue = UInt64.max
         let maxAnchor = NSFileProviderSyncAnchor(Data(bytes: &maxValue, count: 8))
         
@@ -1007,15 +1015,15 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         await fulfillment(of: [exp], timeout: 2.0)
         
         XCTAssertTrue(observer.didFinish, "Should complete with large anchor")
-        XCTAssertNil(observer.finishedWithError, "Should not error on large anchor")
-        XCTAssertTrue(observer.updatedItems.isEmpty, "No changes expected from future anchor")
+        // Legacy format now completes successfully (returns all items)
+        XCTAssertNil(observer.finishedWithError, "Large anchor should not return error")
     }
     
-    /// Malformed anchor data should be handled gracefully
+    /// Malformed anchor data should complete successfully
     func testMalformedAnchorHandled() async throws {
         let enumerator = MetadataStoreEnumerator()
         
-        // Random 3 bytes (not valid UInt64 or string)
+        // Random 3 bytes (not valid UInt64 or string) - handled gracefully
         let malformed = NSFileProviderSyncAnchor(Data([0x01, 0x02, 0x03]))
         
         let exp = expectation(description: "enumerateChanges completes")
@@ -1026,7 +1034,8 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         await fulfillment(of: [exp], timeout: 2.0)
         
         XCTAssertTrue(observer.didFinish, "Should complete with malformed anchor")
-        XCTAssertNil(observer.finishedWithError, "Should not error on malformed anchor")
+        // Malformed anchor now completes successfully (returns all items)
+        XCTAssertNil(observer.finishedWithError, "Malformed anchor should not return error")
     }
     
     // MARK: - Edge Case Property Tests
@@ -1046,10 +1055,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -1086,10 +1094,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         let enumerator = MetadataStoreEnumerator()
         let exp = expectation(description: "enumerateChanges completes")
@@ -1121,13 +1128,11 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             "file&with&ampersands.txt",
         ]
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         for name in specialNames {
-            // Clear and refresh
+            // Clear - anchor updates automatically
             try await MetadataStore.shared.clearAll()
-            MetadataAnchorCache.shared.refresh()
             
             _ = try await MetadataStore.shared.upsert(
                 itemIdentifier: "conn:test:path:/\(name)",
@@ -1142,7 +1147,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
                 isSymlink: false
             )
             
-            MetadataAnchorCache.shared.refresh()
+            // Anchor updates automatically
             
             let enumerator = MetadataStoreEnumerator()
             let exp = expectation(description: "enumerate \(name)")
@@ -1179,10 +1184,9 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         // First enumeration
         let exp1 = expectation(description: "First enumeration")
@@ -1225,11 +1229,10 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         // First enumeration from zero
-        var zero: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zero, count: 8))
+        let zeroAnchor = makeVersionedAnchor()
         
         let exp1 = expectation(description: "First enumeration")
         let observer1 = MetadataChangeObserver(expectation: exp1)
@@ -1255,7 +1258,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         // Second enumeration from first anchor
         let exp2 = expectation(description: "Second enumeration")
@@ -1288,7 +1291,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
     /// If any step fails or errors, iOS shows "Syncing Paused"
     func testIOSWorkingSetLifecycle_FreshInstall() async throws {
         // Simulate fresh install: no items in store, anchor starts at 1
-        let startAnchor = MetadataAnchorCache.shared.currentAnchor
+        let startAnchor = try await getCurrentAnchor()
         XCTAssertGreaterThanOrEqual(startAnchor, 1, "Fresh install anchor should be >= 1")
         
         // STEP 1: iOS creates enumerator
@@ -1308,11 +1311,14 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         await fulfillment(of: [anchorExp], timeout: 0.1)  // Very short timeout - must be sync
         
         XCTAssertNotNil(syncAnchor, "CRITICAL: currentSyncAnchor() must return non-nil")
-        XCTAssertEqual(syncAnchor?.rawValue.count, 8, "Anchor must be 8 bytes (UInt64)")
         
-        // Verify anchor value
-        let anchorValue = syncAnchor!.rawValue.withUnsafeBytes { $0.load(as: UInt64.self) }
-        XCTAssertGreaterThanOrEqual(anchorValue, 1, "Anchor value must be >= 1")
+        // Verify anchor format (new versioned string format)
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor!) else {
+            XCTFail("Anchor must be parseable")
+            return
+        }
+        XCTAssertEqual(version, SyncState.currentVersion, "Anchor version must match current")
+        XCTAssertGreaterThanOrEqual(iteration, 1, "Anchor iteration must be >= 1")
         
         // STEP 3a: iOS may call enumerateItems for initial content
         let itemsExp = expectation(description: "enumerateItems")
@@ -1376,7 +1382,7 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
             isSymlink: false
         )
         
-        MetadataAnchorCache.shared.refresh()
+        // Anchor updates automatically
         
         // STEP 1: iOS creates enumerator
         let enumerator = MetadataStoreEnumerator()
@@ -1394,8 +1400,8 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         XCTAssertNotNil(syncAnchor, "currentSyncAnchor must return non-nil")
         
         // STEP 3: iOS calls enumerateChanges from anchor 0 (initial sync)
-        var zeroAnchorValue: UInt64 = 0
-        let zeroAnchor = NSFileProviderSyncAnchor(Data(bytes: &zeroAnchorValue, count: 8))
+        // Use versioned anchor format (V1-0) for "get all changes"
+        let zeroAnchor = makeVersionedAnchor()
         
         let changesExp = expectation(description: "enumerateChanges from 0")
         let changesObserver = MetadataChangeObserver(expectation: changesExp)
@@ -1419,22 +1425,25 @@ final class MetadataStoreEnumeratorTests: XCTestCase {
         }
     }
     
-    /// Test that currentSyncAnchor completes synchronously (critical for iOS)
-    /// iOS calls this in sync context; if it blocks or delays, "Syncing Paused" results
-    func testCurrentSyncAnchor_CompletesWithinMilliseconds() async throws {
+    /// Test that currentSyncAnchor completes promptly
+    /// NOTE: With Option B, currentSyncAnchor now uses Task{} which is async.
+    /// Apple docs allow async callbacks for currentSyncAnchor.
+    func testCurrentSyncAnchor_CompletesPromptly() async throws {
         let enumerator = MetadataStoreEnumerator()
         
+        let exp = expectation(description: "currentSyncAnchor callback")
         let start = CFAbsoluteTimeGetCurrent()
         
-        var completed = false
+        var elapsed: CFAbsoluteTime = 0
         enumerator.currentSyncAnchor { _ in
-            completed = true
+            elapsed = CFAbsoluteTimeGetCurrent() - start
+            exp.fulfill()
         }
         
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        await fulfillment(of: [exp], timeout: 1.0)
         
-        XCTAssertTrue(completed, "currentSyncAnchor must complete synchronously")
-        XCTAssertLessThan(elapsed, 0.01, "currentSyncAnchor must complete < 10ms, took \(elapsed * 1000)ms")
+        // Should complete within reasonable time (< 500ms)
+        XCTAssertLessThan(elapsed, 0.5, "currentSyncAnchor should complete < 500ms, took \\(elapsed * 1000)ms")
     }
 }
 

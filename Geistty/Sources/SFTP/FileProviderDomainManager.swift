@@ -109,8 +109,14 @@ class FileProviderDomainManager: ObservableObject {
                 return
             }
             
-            // Clear both resolvable error types
-            let resolvableErrors: [NSFileProviderError.Code] = [.notAuthenticated, .serverUnreachable]
+            // Clear ALL resolvable error types
+            let resolvableErrors: [NSFileProviderError.Code] = [
+                .notAuthenticated,
+                .serverUnreachable,
+                .syncAnchorExpired,
+                .cannotSynchronize,
+                .insufficientQuota
+            ]
             
             for errorCode in resolvableErrors {
                 let error = NSFileProviderError(errorCode)
@@ -122,9 +128,30 @@ class FileProviderDomainManager: ObservableObject {
                 }
             }
             
+            // Enumerate and evict pending items (failed uploads)
+            logger.info("📂 Checking for pending items...")
+            await evictPendingItems(manager: manager)
+            
+            // Force reimport to clear any stuck state
+            logger.info("📂 Forcing reimport to clear cached state...")
+            try await manager.reimportItems(below: .rootContainer)
+            logger.info("📂 Reimport initiated")
+            
             logger.info("📂 Cleared all pending errors")
         } catch {
             logger.error("📂 Failed to clear pending errors: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Evict all pending items to clear stuck upload errors
+    private func evictPendingItems(manager: NSFileProviderManager) async {
+        let pendingEnumerator = manager.enumeratorForPendingItems()
+        
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let observer = PendingItemsEvictObserver(manager: manager) {
+                continuation.resume()
+            }
+            pendingEnumerator.enumerateItems(for: observer, startingAt: NSFileProviderPage.initialPageSortedByDate as NSFileProviderPage)
         }
     }
     
@@ -494,5 +521,42 @@ class FileProviderDomainManager: ObservableObject {
     func resetDomainLegacy() async throws {
         // This is the old method - use resetDomain() instead
         try await resetDomain()
+    }
+}
+
+// MARK: - Pending Items Observer
+
+/// Observer that evicts all pending items to clear stuck upload errors
+private class PendingItemsEvictObserver: NSObject, NSFileProviderEnumerationObserver {
+    private let manager: NSFileProviderManager
+    private let completion: () -> Void
+    private let logger = Logger(subsystem: "com.geistty", category: "FileProviderDomain")
+    
+    init(manager: NSFileProviderManager, completion: @escaping () -> Void) {
+        self.manager = manager
+        self.completion = completion
+    }
+    
+    func didEnumerate(_ updatedItems: [any NSFileProviderItemProtocol]) {
+        for item in updatedItems {
+            logger.info("📂 Found pending item: \(item.itemIdentifier.rawValue) - evicting")
+            // Evict the item to remove it from pending state
+            manager.evictItem(identifier: item.itemIdentifier) { error in
+                if let error = error {
+                    self.logger.warning("📂 Failed to evict \(item.itemIdentifier.rawValue): \(error.localizedDescription)")
+                } else {
+                    self.logger.info("📂 Evicted pending item: \(item.itemIdentifier.rawValue)")
+                }
+            }
+        }
+    }
+    
+    func finishEnumerating(upTo nextPage: NSFileProviderPage?) {
+        completion()
+    }
+    
+    func finishEnumeratingWithError(_ error: any Error) {
+        logger.warning("📂 Failed to enumerate pending items: \(error.localizedDescription)")
+        completion()
     }
 }

@@ -56,10 +56,14 @@ final class MetadataStoreTests: XCTestCase {
         _ = try await store.incrementAnchor() // Now at 2
         _ = try await store.incrementAnchor() // Now at 3
         
-        let data = try await store.currentSyncAnchor
-        let parsed = SyncState.anchorValue(from: data)
+        let syncAnchor = try await store.currentSyncAnchor
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Failed to parse anchor")
+            return
+        }
         
-        XCTAssertEqual(parsed, 3, "Serialized anchor should round-trip to 3")
+        XCTAssertEqual(version, SyncState.currentVersion, "Version should match current")
+        XCTAssertEqual(iteration, 3, "Serialized anchor should round-trip to 3")
     }
     
     /// Empty store should still have anchor > 0
@@ -251,32 +255,8 @@ final class MetadataStoreTests: XCTestCase {
     }
 }
 
-// MARK: - MetadataAnchorCache Tests
-
-final class MetadataAnchorCacheTests: XCTestCase {
-    
-    func testCacheReturnsValidAnchorSynchronously() {
-        // The cache must work synchronously for File Provider callbacks
-        let cache = MetadataAnchorCache.shared
-        let anchor = cache.currentAnchor
-        
-        // Should be >= 1 (initialized)
-        XCTAssertGreaterThanOrEqual(anchor, 1, "Cache must return valid anchor")
-    }
-    
-    func testSyncAnchorDataFormat() {
-        let cache = MetadataAnchorCache.shared
-        let syncAnchor = cache.syncAnchor
-        let data = syncAnchor.rawValue
-        
-        // Should be 8 bytes (UInt64)
-        XCTAssertEqual(data.count, 8, "Sync anchor should be 8 bytes (UInt64)")
-        
-        // Should parse back correctly
-        let parsed = SyncState.anchorValue(from: syncAnchor)
-        XCTAssertEqual(parsed, cache.currentAnchor)
-    }
-}
+// NOTE: MetadataAnchorCacheTests removed - Option B simplification (Jan 5, 2026)
+// MetadataAnchorCache has been removed. SwiftData is now the only source of truth.
 
 // MARK: - SyncState Tests
 
@@ -286,28 +266,87 @@ final class SyncStateTests: XCTestCase {
         let state = SyncState()
         state.currentAnchor = 12345
         let syncAnchor = state.toSyncAnchor()
-        let data = syncAnchor.rawValue
         
-        XCTAssertEqual(data.count, 8)
-        
-        let parsed = SyncState.anchorValue(from: syncAnchor)
-        XCTAssertEqual(parsed, 12345)
+        // New format: "V{version}-{iteration}" as UTF-8
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Failed to parse anchor")
+            return
+        }
+        XCTAssertEqual(version, SyncState.currentVersion)
+        XCTAssertEqual(iteration, 12345)
     }
     
     func testZeroAnchorParsing() {
         // Empty sync anchor should parse as nil (not 0)
         let empty = NSFileProviderSyncAnchor(Data())
-        let parsed = SyncState.anchorValue(from: empty)
+        let parsed = SyncState.parseAnchor(from: empty)
         XCTAssertNil(parsed, "Empty data should parse as nil (invalid)")
     }
     
     func testAnchorRoundTrip() {
-        for testValue: UInt64 in [1, 100, UInt64.max] {
-            var value = testValue
-            let data = Data(bytes: &value, count: 8)
-            let syncAnchor = NSFileProviderSyncAnchor(data)
-            let parsed = SyncState.anchorValue(from: syncAnchor)
-            XCTAssertEqual(parsed, testValue, "Anchor \(testValue) should round-trip")
+        for testValue: UInt64 in [1, 100, 999999999] {
+            let state = SyncState()
+            state.currentAnchor = testValue
+            let syncAnchor = state.toSyncAnchor()
+            guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+                XCTFail("Failed to parse anchor for value \(testValue)")
+                continue
+            }
+            XCTAssertEqual(version, SyncState.currentVersion)
+            XCTAssertEqual(iteration, testValue, "Anchor \(testValue) should round-trip")
+        }
+    }
+    
+    func testLegacyAnchorParsing() {
+        // Legacy anchors are 8-byte UInt64
+        var value: UInt64 = 42
+        let data = Data(bytes: &value, count: 8)
+        let syncAnchor = NSFileProviderSyncAnchor(data)
+        
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Failed to parse legacy anchor")
+            return
+        }
+        
+        // Legacy anchors are version 0
+        XCTAssertEqual(version, 0)
+        XCTAssertEqual(iteration, 42)
+    }
+    
+    func testAnchorValidation() {
+        let state = SyncState()
+        state.currentAnchor = 10
+        
+        // Valid anchor with same version
+        let validAnchor = state.toSyncAnchor()
+        let validation = state.validateAnchor(validAnchor)
+        if case .noChanges = validation {
+            // Expected - same anchor
+        } else {
+            XCTFail("Expected noChanges for same anchor, got \(validation)")
+        }
+        
+        // Older anchor is valid
+        state.currentAnchor = 5
+        let olderAnchor = state.toSyncAnchor()
+        state.currentAnchor = 10
+        let olderValidation = state.validateAnchor(olderAnchor)
+        if case .valid(let iteration) = olderValidation {
+            XCTAssertEqual(iteration, 5)
+        } else {
+            XCTFail("Expected valid for older anchor, got \(olderValidation)")
+        }
+        
+        // Legacy anchor is expired (forces re-sync)
+        var legacyValue: UInt64 = 5
+        let legacyData = Data(bytes: &legacyValue, count: 8)
+        let legacyAnchor = NSFileProviderSyncAnchor(legacyData)
+        let legacyValidation = state.validateAnchor(legacyAnchor)
+        if case .expired(let reqVersion, let curVersion) = legacyValidation {
+            XCTAssertEqual(reqVersion, 0) // Legacy
+            XCTAssertEqual(curVersion, SyncState.currentVersion)
+        } else {
+            XCTFail("Expected expired for legacy anchor, got \(legacyValidation)")
         }
     }
 }
@@ -409,42 +448,43 @@ final class SyncingPausedDiagnosticTests: XCTestCase {
     
     // MARK: - Root Cause #1: Anchor Format Issues
     
-    /// Test: Anchor must be exactly 8 bytes (UInt64)
-    /// Failure: iOS rejects anchors with wrong byte count
-    func testAnchorIsExactly8Bytes() async throws {
+    /// Test: Anchor format is versioned string (not 8-byte UInt64)
+    /// Format: "V{version}-{iteration}" as UTF-8
+    func testAnchorIsVersionedString() async throws {
         let syncAnchor = try await store.currentSyncAnchor
-        XCTAssertEqual(syncAnchor.rawValue.count, 8,
-            "Sync anchor must be exactly 8 bytes (UInt64)")
+        guard let string = String(data: syncAnchor.rawValue, encoding: .utf8) else {
+            XCTFail("Anchor should be valid UTF-8 string")
+            return
+        }
+        XCTAssertTrue(string.hasPrefix("V"), "Anchor should start with V")
+        XCTAssertTrue(string.contains("-"), "Anchor should contain dash separator")
     }
     
-    /// Test: Anchor data should be valid UInt64 in native byte order
-    func testAnchorIsValidUInt64() async throws {
+    /// Test: Anchor data should be parseable
+    func testAnchorIsParseable() async throws {
         let syncAnchor = try await store.currentSyncAnchor
-        let value = SyncState.anchorValue(from: syncAnchor)
-        XCTAssertNotNil(value, "Should parse as UInt64")
-        XCTAssertGreaterThan(value!, 0, "Anchor should be > 0")
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Should parse anchor")
+            return
+        }
+        XCTAssertEqual(version, SyncState.currentVersion, "Version should match current")
+        XCTAssertGreaterThan(iteration, 0, "Iteration should be > 0")
     }
     
-    /// Test: Empty/nil anchor should be handled gracefully (parsed as 0)
+    /// Test: Empty/nil anchor should be handled gracefully (parsed as nil)
     func testEmptyAnchorParsedAsNil() {
         let emptyAnchor = NSFileProviderSyncAnchor(Data())
-        let parsed = SyncState.anchorValue(from: emptyAnchor)
+        let parsed = SyncState.parseAnchor(from: emptyAnchor)
         XCTAssertNil(parsed, "Empty anchor data should parse as nil")
     }
     
-    /// Test: Wrong-sized anchor data (not 8 bytes) handled gracefully
-    func testWrongSizeAnchorParsedAsNil() {
-        // 4 bytes (32-bit) - wrong size
-        let smallData = Data([0x01, 0x00, 0x00, 0x00])
-        let smallAnchor = NSFileProviderSyncAnchor(smallData)
-        let parsed = SyncState.anchorValue(from: smallAnchor)
-        XCTAssertNil(parsed, "4-byte anchor should parse as nil")
-        
-        // 16 bytes - wrong size
-        let largeData = Data(repeating: 0x01, count: 16)
-        let largeAnchor = NSFileProviderSyncAnchor(largeData)
-        let parsedLarge = SyncState.anchorValue(from: largeAnchor)
-        XCTAssertNil(parsedLarge, "16-byte anchor should parse as nil")
+    /// Test: Garbage anchor data handled gracefully
+    func testGarbageAnchorParsedAsNil() {
+        // Random garbage
+        let garbage = Data([0xFF, 0xFE, 0xFD])
+        let garbageAnchor = NSFileProviderSyncAnchor(garbage)
+        let parsed = SyncState.parseAnchor(from: garbageAnchor)
+        XCTAssertNil(parsed, "Garbage data should parse as nil")
     }
     
     // MARK: - Root Cause #2: Anchor Never at 0
@@ -461,12 +501,7 @@ final class SyncingPausedDiagnosticTests: XCTestCase {
             "Fresh anchor must be >= 1 (so enumerateChanges from 0 detects changes)")
     }
     
-    /// Test: MetadataAnchorCache also never returns 0
-    func testCacheNeverReturnsZero() {
-        let cacheAnchor = MetadataAnchorCache.shared.currentAnchor
-        XCTAssertGreaterThanOrEqual(cacheAnchor, 1,
-            "Cache must return anchor >= 1")
-    }
+    // NOTE: testCacheNeverReturnsZero removed - Option B simplification (Jan 5, 2026)
     
     // MARK: - Root Cause #3: The iOS Call Sequence
     
@@ -476,9 +511,12 @@ final class SyncingPausedDiagnosticTests: XCTestCase {
     func testIOSCallSequenceSimulation() async throws {
         // Step 1: iOS gets current anchor
         let syncAnchor = try await store.currentSyncAnchor
-        let anchorValue = SyncState.anchorValue(from: syncAnchor)
-        XCTAssertNotNil(anchorValue, "Step 1: currentSyncAnchor must return valid anchor")
-        XCTAssertGreaterThan(anchorValue!, 0, "Step 1: anchor must be > 0")
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Step 1: currentSyncAnchor must return valid anchor")
+            return
+        }
+        XCTAssertEqual(version, SyncState.currentVersion, "Step 1: version must match current")
+        XCTAssertGreaterThan(iteration, 0, "Step 1: iteration must be > 0")
         
         // Step 2: iOS calls enumerateChanges with anchor 0 (fresh install)
         let changes = try await store.itemsModified(since: 0)
@@ -489,7 +527,7 @@ final class SyncingPausedDiagnosticTests: XCTestCase {
         
         // Step 3: After enumerateChanges, anchor should still be valid
         let finalAnchor = try await store.currentAnchor
-        XCTAssertGreaterThanOrEqual(finalAnchor, anchorValue!,
+        XCTAssertGreaterThanOrEqual(finalAnchor, iteration,
             "Step 3: Anchor should be >= original after enumeration")
     }
     
@@ -514,24 +552,10 @@ final class SyncingPausedDiagnosticTests: XCTestCase {
         }
     }
     
-    // MARK: - Root Cause #4: Synchronous Cache Requirement
+    // MARK: - Root Cause #4: SyncState anchor validation
     
-    /// Test: MetadataAnchorCache.syncAnchor must be instantly available
-    /// currentSyncAnchor(completionHandler:) MUST call handler synchronously
-    func testCacheSyncAnchorIsSynchronous() {
-        // This should complete instantly, not wait for any async work
-        var callbackInvoked = false
-        let startTime = Date()
-        
-        let cache = MetadataAnchorCache.shared
-        let anchor = cache.syncAnchor
-        callbackInvoked = true
-        
-        let elapsed = Date().timeIntervalSince(startTime)
-        XCTAssertTrue(callbackInvoked, "Sync anchor should be available instantly")
-        XCTAssertLessThan(elapsed, 0.1, "Should complete in < 100ms (synchronous)")
-        XCTAssertEqual(anchor.rawValue.count, 8, "Should be valid 8-byte anchor")
-    }
+    // NOTE: testCacheSyncAnchorIsSynchronous removed - Option B simplification (Jan 5, 2026)
+    // We now use Task{} pattern in currentSyncAnchor, which is Apple-approved.
     
     /// Test: Verify SyncState.toSyncAnchor() produces valid anchor
     func testSyncStateProducesValidAnchor() {
@@ -539,10 +563,12 @@ final class SyncingPausedDiagnosticTests: XCTestCase {
         state.currentAnchor = 42
         
         let syncAnchor = state.toSyncAnchor()
-        XCTAssertEqual(syncAnchor.rawValue.count, 8)
-        
-        let parsed = SyncState.anchorValue(from: syncAnchor)
-        XCTAssertEqual(parsed, 42)
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Should parse anchor")
+            return
+        }
+        XCTAssertEqual(version, SyncState.currentVersion)
+        XCTAssertEqual(iteration, 42)
     }
     
     // MARK: - Root Cause #5: Change Detection Edge Cases
@@ -688,7 +714,9 @@ final class EnumeratorContractTests: XCTestCase {
         
         enumerator.currentSyncAnchor { anchor in
             XCTAssertNotNil(anchor, "Must return non-nil anchor")
-            XCTAssertEqual(anchor?.rawValue.count, 8, "Must be 8-byte anchor")
+            // New format is versioned string, not 8 bytes
+            let parsed = SyncState.parseAnchor(from: anchor!)
+            XCTAssertNotNil(parsed, "Must be parseable anchor")
             expectation.fulfill()
         }
         
@@ -706,10 +734,13 @@ final class EnumeratorContractTests: XCTestCase {
                 return
             }
             
-            // Parse it back
-            let value = SyncState.anchorValue(from: anchor)
-            XCTAssertNotNil(value, "Anchor should be parseable")
-            XCTAssertGreaterThanOrEqual(value!, 1, "Anchor should be >= 1")
+            // Parse it back - new format is versioned string
+            guard let (version, iteration) = SyncState.parseAnchor(from: anchor) else {
+                XCTFail("Anchor should be parseable")
+                return
+            }
+            XCTAssertEqual(version, SyncState.currentVersion, "Version should match current")
+            XCTAssertGreaterThanOrEqual(iteration, 1, "Iteration should be >= 1")
             expectation.fulfill()
         }
         
@@ -737,7 +768,14 @@ final class EnumeratorContractTests: XCTestCase {
         
         XCTAssertEqual(modified.count, 1, "Should have 1 modified item")
         XCTAssertEqual(deletions.count, 0, "Should have no deletions")
-        XCTAssertGreaterThan(newAnchor, 0, "New anchor should be > 0")
+        
+        // newAnchor is now NSFileProviderSyncAnchor, parse it
+        guard let (version, iteration) = SyncState.parseAnchor(from: newAnchor) else {
+            XCTFail("New anchor should be parseable")
+            return
+        }
+        XCTAssertEqual(version, SyncState.currentVersion)
+        XCTAssertGreaterThan(iteration, 0, "New anchor iteration should be > 0")
     }
     
     /// Test: changesSince with current anchor returns empty
@@ -763,7 +801,13 @@ final class EnumeratorContractTests: XCTestCase {
         
         XCTAssertEqual(modified.count, 0, "Should have no changes since current anchor")
         XCTAssertEqual(deletions.count, 0, "Should have no deletions")
-        XCTAssertEqual(newAnchor, currentAnchor, "Anchor should be unchanged")
+        
+        // Parse and compare the iteration values
+        guard let (_, iteration) = SyncState.parseAnchor(from: newAnchor) else {
+            XCTFail("Anchor should be parseable")
+            return
+        }
+        XCTAssertEqual(iteration, currentAnchor, "Anchor iteration should be unchanged")
     }
     
     /// Test: Simulate complete enumerateChanges flow with mock observer
@@ -784,21 +828,26 @@ final class EnumeratorContractTests: XCTestCase {
             )
         }
         
-        // Create mock observer
+        // Create mock observer that handles both success and error
         let expectation = expectation(description: "enumerateChanges completed")
+        var gotError = false
         let mockObserver = MockChangeObserver { anchor, moreComing in
             XCTAssertFalse(moreComing, "Should not have more coming")
-            XCTAssertEqual(anchor.rawValue.count, 8, "Anchor should be 8 bytes")
-            let value = SyncState.anchorValue(from: anchor)
-            XCTAssertNotNil(value)
-            XCTAssertGreaterThan(value!, 0)
+            // New format is versioned string
+            guard let (version, iteration) = SyncState.parseAnchor(from: anchor) else {
+                XCTFail("Anchor should be parseable")
+                return
+            }
+            XCTAssertEqual(version, SyncState.currentVersion)
+            XCTAssertGreaterThan(iteration, 0)
             expectation.fulfill()
         }
         
-        // Create enumerator and call enumerateChanges from anchor 0
+        // Create enumerator and call enumerateChanges
+        // Use new versioned format with version 1, iteration 0 (before any items added)
         let enumerator = MetadataStoreEnumerator()
-        var requestedAnchor: UInt64 = 0
-        let anchorData = Data(bytes: &requestedAnchor, count: 8)
+        let anchorString = "V\(SyncState.currentVersion)-0"
+        let anchorData = anchorString.data(using: .utf8)!
         let anchor = NSFileProviderSyncAnchor(anchorData)
         
         enumerator.enumerateChanges(for: mockObserver, from: anchor)

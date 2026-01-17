@@ -448,16 +448,15 @@ enum MetadataStoreSelfTest {
         XCTAssertEqual(deletions.count, 0, "No deletions on fresh install (expected)")
     }
     
-    /// Tests that MetadataAnchorCache initializes correctly
-    func testAnchorCacheInitialization() async throws {
-        // After clearAll, the cache should have anchor = 1
+    /// Tests that MetadataStore anchor initializes correctly
+    /// NOTE: MetadataAnchorCache was removed in Option B simplification (Jan 5, 2026)
+    func testAnchorInitialization() async throws {
+        // After clearAll, the store should have anchor = 1
         try await store.clearAll()
         
-        let cacheAnchor = MetadataAnchorCache.shared.currentAnchor
         let storeAnchor = try await store.currentAnchor
         
-        XCTAssertEqual(cacheAnchor, storeAnchor, "Cache and store anchors must match")
-        XCTAssertEqual(cacheAnchor, 1, "Cache anchor should be 1 after clearAll")
+        XCTAssertEqual(storeAnchor, 1, "Store anchor should be 1 after clearAll")
     }
     
     /// Tests that changes are detectable from anchor 0
@@ -504,15 +503,18 @@ enum MetadataStoreSelfTest {
         // Anchor must be non-nil and valid
         XCTAssertNotNil(receivedAnchor, "currentSyncAnchor must return non-nil anchor")
         
-        let anchorData = receivedAnchor!.rawValue
-        XCTAssertEqual(anchorData.count, 8, "Anchor must be exactly 8 bytes (UInt64)")
+        // Parse anchor using new versioned format
+        guard let (version, iteration) = SyncState.parseAnchor(from: receivedAnchor!) else {
+            XCTFail("Anchor must be parseable")
+            return
+        }
+        XCTAssertEqual(version, SyncState.currentVersion, "Anchor version should match current")
+        XCTAssertEqual(iteration, 1, "Fresh install anchor iteration should be 1")
         
-        let anchorValue = anchorData.withUnsafeBytes { $0.load(as: UInt64.self) }
-        XCTAssertEqual(anchorValue, 1, "Fresh install anchor should be 1")
-        
-        // === STEP 2: iOS calls enumerateChanges with anchor 0 (initial sync) ===
-        // This is the CRITICAL path - iOS sends anchor 0 on first sync
-        let initialAnchor = NSFileProviderSyncAnchor(Data(repeating: 0, count: 8))
+        // === STEP 2: iOS calls enumerateChanges with anchor V1-0 (initial sync) ===
+        // Using new versioned format: V{version}-0 means "give me all changes"
+        let anchorString = "V\(SyncState.currentVersion)-0"
+        let initialAnchor = NSFileProviderSyncAnchor(anchorString.data(using: .utf8)!)
         
         let changesExpectation = expectation(description: "enumerateChanges completes")
         var changesCompleted = false
@@ -534,12 +536,13 @@ enum MetadataStoreSelfTest {
         XCTAssertTrue(changesCompleted, "enumerateChanges must call finishEnumeratingChanges")
         XCTAssertNotNil(finalAnchor, "Final anchor must be provided")
         
-        // Final anchor must match our current anchor
-        let finalAnchorData = finalAnchor!.rawValue
-        XCTAssertEqual(finalAnchorData.count, 8, "Final anchor must be 8 bytes")
-        
-        let finalAnchorValue = finalAnchorData.withUnsafeBytes { $0.load(as: UInt64.self) }
-        XCTAssertEqual(finalAnchorValue, 1, "Final anchor should be 1 (our current anchor)")
+        // Final anchor must be parseable with new format
+        guard let (finalVersion, finalIteration) = SyncState.parseAnchor(from: finalAnchor!) else {
+            XCTFail("Final anchor must be parseable")
+            return
+        }
+        XCTAssertEqual(finalVersion, SyncState.currentVersion, "Final anchor version should match current")
+        XCTAssertEqual(finalIteration, 1, "Final anchor iteration should be 1 (our current anchor)")
         
         enumerator.invalidate()
     }
