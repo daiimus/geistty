@@ -231,55 +231,13 @@ class ConnectionProfileManager: ObservableObject {
     func addProfile(_ profile: ConnectionProfile) {
         profiles.append(profile)
         saveProfiles()
-        
-        // Add to File Provider if enabled
-        #if !FILEPROVIDER_EXTENSION
-        if profile.enableFilesIntegration {
-            Task { @MainActor in
-                await FileProviderDomainManager.shared.addConnection(
-                    profileId: profile.id.uuidString,
-                    name: profile.name.isEmpty ? "\(profile.username)@\(profile.host)" : profile.name,
-                    host: profile.host,
-                    port: profile.port,
-                    username: profile.username,
-                    authMethod: profile.authMethod.rawValue,
-                    sshKeyName: profile.sshKeyName
-                )
-            }
-        }
-        #endif
     }
     
     /// Update an existing profile
     func updateProfile(_ profile: ConnectionProfile) {
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-            let oldProfile = profiles[index]
             profiles[index] = profile
             saveProfiles()
-            
-            // Update File Provider
-            #if !FILEPROVIDER_EXTENSION
-            Task { @MainActor in
-                // Handle toggling off
-                if oldProfile.enableFilesIntegration && !profile.enableFilesIntegration {
-                    await FileProviderDomainManager.shared.removeConnection(
-                        profileId: profile.id.uuidString
-                    )
-                }
-                // Handle toggling on or updating
-                else if profile.enableFilesIntegration {
-                    await FileProviderDomainManager.shared.addConnection(
-                        profileId: profile.id.uuidString,
-                        name: profile.name.isEmpty ? "\(profile.username)@\(profile.host)" : profile.name,
-                        host: profile.host,
-                        port: profile.port,
-                        username: profile.username,
-                        authMethod: profile.authMethod.rawValue,
-                        sshKeyName: profile.sshKeyName
-                    )
-                }
-            }
-            #endif
         }
     }
     
@@ -287,38 +245,12 @@ class ConnectionProfileManager: ObservableObject {
     func deleteProfile(_ profile: ConnectionProfile) {
         profiles.removeAll { $0.id == profile.id }
         saveProfiles()
-        
-        // Remove from File Provider if it was enabled
-        #if !FILEPROVIDER_EXTENSION
-        if profile.enableFilesIntegration {
-            Task { @MainActor in
-                await FileProviderDomainManager.shared.removeConnection(
-                    profileId: profile.id.uuidString
-                )
-            }
-        }
-        #endif
     }
     
     /// Delete profiles by ID
     func deleteProfiles(at offsets: IndexSet) {
-        let profilesToDelete = offsets.map { profiles[$0] }
         profiles.remove(atOffsets: offsets)
         saveProfiles()
-        
-        // Remove File Provider for deleted connections
-        #if !FILEPROVIDER_EXTENSION
-        let profilesWithFilesIntegration = profilesToDelete.filter { $0.enableFilesIntegration }
-        if !profilesWithFilesIntegration.isEmpty {
-            Task { @MainActor in
-                for profile in profilesWithFilesIntegration {
-                    await FileProviderDomainManager.shared.removeConnection(
-                        profileId: profile.id.uuidString
-                    )
-                }
-            }
-        }
-        #endif
     }
     
     /// Mark a profile as recently connected
@@ -454,41 +386,7 @@ class ConnectionProfileManager: ObservableObject {
         mergeFromiCloud()
     }
     
-    // MARK: - File Provider Integration
-    
-    /// Syncs all saved profiles to File Provider
-    /// Call this on app launch to ensure the domain is registered and connections are synced
-    func syncFileProviderDomains() {
-        #if !FILEPROVIDER_EXTENSION
-        Task { @MainActor in
-            // Get all profiles with Files integration enabled
-            let enabledProfiles = profiles.filter { $0.enableFilesIntegration }
-            
-            if enabledProfiles.isEmpty {
-                // No profiles with Files integration - remove domain
-                try? await FileProviderDomainManager.shared.removeDomain()
-            } else {
-                // Ensure domain is registered
-                try? await FileProviderDomainManager.shared.ensureDomainRegistered()
-                
-                // Add each enabled profile as a connection
-                for profile in enabledProfiles {
-                    await FileProviderDomainManager.shared.addConnection(
-                        profileId: profile.id.uuidString,
-                        name: profile.name,
-                        host: profile.host,
-                        port: profile.port,
-                        username: profile.username,
-                        authMethod: profile.authMethod.rawValue,
-                        sshKeyName: profile.sshKeyName
-                    )
-                }
-                
-                // Clear any stale "Syncing Paused" state from previous session errors
-                // This gives the user a fresh start when opening the app
-                await FileProviderDomainManager.shared.signalErrorsResolved()
-            }
-        }
-        #endif
-    }
+    // NOTE: File Provider integration has been archived (Jan 2026)
+    // See FILE_PROVIDER_LEARNINGS.md and branch archive/file-provider-jan-2026
+    // The enableFilesIntegration property on ConnectionProfile is retained but unused.
 }

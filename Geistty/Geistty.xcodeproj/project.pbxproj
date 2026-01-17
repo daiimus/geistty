@@ -35,7 +35,6 @@
 		A1000041 /* SFTPClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* SFTPClientProtocol.swift */; };
 		A1000044 /* MockSFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000044 /* MockSFTPClient.swift */; };
 		A1000042 /* SFTPChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* SFTPChannel.swift */; };
-		A1000043 /* FileProviderDomainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* FileProviderDomainManager.swift */; };
 		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
 		A1000060 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* Theme.swift */; };
 		A1000061 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* Themes */; };
@@ -65,35 +64,7 @@
 		A1000093 /* TmuxGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000093 /* TmuxGateway.swift */; };
 		A1000094 /* TmuxProtocolParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000094 /* TmuxProtocolParser.swift */; };
 		A1000095 /* KittyKeyboardTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000095 /* KittyKeyboardTranslator.swift */; };
-		A1000098 /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000098 /* SyncState.swift */; };
-		A1000099 /* CachedFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000099 /* CachedFileMetadata.swift */; };
-		A100009A /* MetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009A /* MetadataStore.swift */; };
-		A100009B /* MetadataStoreEnumerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009B /* MetadataStoreEnumerator.swift */; };
-		A100009D /* ActiveFolderRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009D /* ActiveFolderRecord.swift */; };
-/* File Provider Extension Build Files */
-		C1000001 /* FileProviderExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001 /* FileProviderExtension.swift */; };
-		C1000004 /* SFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* SFTPClient.swift */; };
-		C100002A /* SFTPClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* SFTPClientProtocol.swift */; };
-		C1000005 /* SFTPChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* SFTPChannel.swift */; };
-		C1000006 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* KeychainManager.swift */; };
-		C1000007 /* NIOSSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000090 /* NIOSSHConnection.swift */; };
-		C1000008 /* CredentialProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* CredentialProvider.swift */; };
-		C1000014 /* ConnectionProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* ConnectionProfile.swift */; };
-		C1000013 /* SSHKeyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* SSHKeyParser.swift */; };
-		C1000009 /* SSHKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* SSHKeyManager.swift */; };
-		C1000015 /* FileProviderDomainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043 /* FileProviderDomainManager.swift */; };
-		C1000019 /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000098 /* SyncState.swift */; };
-		C100001A /* CachedFileMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000099 /* CachedFileMetadata.swift */; };
-		C100001B /* MetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009A /* MetadataStore.swift */; };
-		C100001C /* MetadataStoreEnumerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009B /* MetadataStoreEnumerator.swift */; };
-		C100001E /* ActiveFolderRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200009D /* ActiveFolderRecord.swift */; };
-		C1000010 /* GeisttyFileProvider.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C2000010 /* GeisttyFileProvider.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		C1000011 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = CE000002 /* NIOSSH */; };
-		C1000012 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = CE000003 /* NIOTransportServices */; };
-		D1000002 /* FileProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* FileProviderTests.swift */; };
-		D1000003 /* FileProviderExtensionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000002 /* FileProviderExtensionTests.swift */; };
-		D1000004 /* FileProviderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000003 /* FileProviderIntegrationTests.swift */; };
-		D1000005 /* MetadataStoreEnumeratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000004 /* MetadataStoreEnumeratorTests.swift */; };
+		D1000010 /* GeisttyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* GeisttyTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -103,13 +74,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = A6000001;
 			remoteInfo = Geistty;
-		};
-		C3000001 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = AA000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = C6000001;
-			remoteInfo = GeisttyFileProvider;
 		};
 		D3000001 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -137,7 +101,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				C1000010 /* GeisttyFileProvider.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -202,21 +165,8 @@
 		A2000093 /* TmuxGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxGateway.swift; sourceTree = "<group>"; };
 		A2000094 /* TmuxProtocolParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxProtocolParser.swift; sourceTree = "<group>"; };
 		A2000095 /* KittyKeyboardTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyKeyboardTranslator.swift; sourceTree = "<group>"; };
-		A2000098 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
-		A2000099 /* CachedFileMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedFileMetadata.swift; sourceTree = "<group>"; };
-		A200009A /* MetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataStore.swift; sourceTree = "<group>"; };
-		A200009B /* MetadataStoreEnumerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataStoreEnumerator.swift; sourceTree = "<group>"; };
-		A200009D /* ActiveFolderRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveFolderRecord.swift; sourceTree = "<group>"; };
-/* File Provider Extension File References */
-		C2000001 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
-		C2000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		C2000005 /* GeisttyFileProvider.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GeisttyFileProvider.entitlements; sourceTree = "<group>"; };
-		C2000010 /* GeisttyFileProvider.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GeisttyFileProvider.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		D2000001 /* FileProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderTests.swift; sourceTree = "<group>"; };
-		D2000002 /* FileProviderExtensionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtensionTests.swift; sourceTree = "<group>"; };
-		D2000003 /* FileProviderIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderIntegrationTests.swift; sourceTree = "<group>"; };
-		D2000004 /* MetadataStoreEnumeratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataStoreEnumeratorTests.swift; sourceTree = "<group>"; };
 		D1000001 /* GeisttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2000001 /* GeisttyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -234,15 +184,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		C4000001 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				C1000011 /* NIOSSH in Frameworks */,
-				C1000012 /* NIOTransportServices in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -267,18 +208,7 @@
 				A2000008 /* Info.plist */,
 				A5000010 /* Products */,
 				B5000001 /* GeisttyUITests */,
-				C5000001 /* GeisttyFileProvider */,
 			);
-			sourceTree = "<group>";
-		};
-		C5000001 /* GeisttyFileProvider */ = {
-			isa = PBXGroup;
-			children = (
-				C2000001 /* FileProviderExtension.swift */,
-				C2000004 /* Info.plist */,
-				C2000005 /* GeisttyFileProvider.entitlements */,
-			);
-			path = GeisttyFileProvider;
 			sourceTree = "<group>";
 		};
 		A5000002 /* Sources */ = {
@@ -291,7 +221,6 @@
 				A5000008 /* Auth */,
 				A5000009 /* UI */,
 				A5000011 /* SFTP */,
-				A5000014 /* FileProviderCore */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -382,7 +311,6 @@
 				D1000001 /* GeisttyTests.xctest */,
 				A2000010 /* Geistty.app */,
 				B2000010 /* GeisttyUITests.xctest */,
-				C2000010 /* GeisttyFileProvider.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -400,7 +328,6 @@
 			sourceTree = "<group>";
 		};
 		A2000042 /* SFTPChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPChannel.swift; sourceTree = "<group>"; };
-		A2000043 /* FileProviderDomainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderDomainManager.swift; sourceTree = "<group>"; };
 		A5000011 /* SFTP */ = {
 			isa = PBXGroup;
 			children = (
@@ -408,21 +335,8 @@
 				A2000041 /* SFTPClientProtocol.swift */,
 				A2000044 /* MockSFTPClient.swift */,
 				A2000042 /* SFTPChannel.swift */,
-				A2000043 /* FileProviderDomainManager.swift */,
 			);
 			path = SFTP;
-			sourceTree = "<group>";
-		};
-		A5000014 /* FileProviderCore */ = {
-			isa = PBXGroup;
-			children = (
-				A2000098 /* SyncState.swift */,
-				A2000099 /* CachedFileMetadata.swift */,
-				A200009A /* MetadataStore.swift */,
-				A200009B /* MetadataStoreEnumerator.swift */,
-				A200009D /* ActiveFolderRecord.swift */,
-			);
-			path = FileProviderCore;
 			sourceTree = "<group>";
 		};
 		A5000012 /* Resources */ = {
@@ -457,10 +371,7 @@
 		D5000002 /* GeisttyTests */ = {
 			isa = PBXGroup;
 			children = (
-				D2000001 /* FileProviderTests.swift */,
-				D2000002 /* FileProviderExtensionTests.swift */,
-				D2000003 /* FileProviderIntegrationTests.swift */,
-				D2000004 /* MetadataStoreEnumeratorTests.swift */,
+				D2000001 /* GeisttyTests.swift */,
 			);
 			path = GeisttyTests;
 			sourceTree = "<group>";
@@ -481,7 +392,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				C6000002 /* PBXTargetDependency */,
 			);
 			name = Geistty;
 			packageProductDependencies = (
@@ -491,27 +401,6 @@
 			productName = Geistty;
 			productReference = A2000010 /* Geistty.app */;
 			productType = "com.apple.product-type.application";
-		};
-		C6000001 /* GeisttyFileProvider */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = C7000001 /* Build configuration list for PBXNativeTarget "GeisttyFileProvider" */;
-			buildPhases = (
-				C8000001 /* Sources */,
-				C4000001 /* Frameworks */,
-				C9000001 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = GeisttyFileProvider;
-			packageProductDependencies = (
-				CE000002 /* NIOSSH */,
-				CE000003 /* NIOTransportServices */,
-			);
-			productName = GeisttyFileProvider;
-			productReference = C2000010 /* GeisttyFileProvider.appex */;
-			productType = "com.apple.product-type.app-extension";
 		};
 		B6000001 /* GeisttyUITests */ = {
 			isa = PBXNativeTarget;
@@ -566,9 +455,6 @@
 						CreatedOnToolsVersion = 15.0;
 						TestTargetID = A6000001;
 					};
-					C6000001 = {
-						CreatedOnToolsVersion = 15.0;
-					};
 				};
 			};
 			buildConfigurationList = AB000001 /* Build configuration list for PBXProject "Geistty" */;
@@ -591,7 +477,6 @@
 				A6000001 /* Geistty */,
 				D6000001 /* GeisttyTests */,
 				B6000001 /* GeisttyUITests */,
-				C6000001 /* GeisttyFileProvider */,
 			);
 		};
 /* End PBXProject section */
@@ -620,13 +505,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B8000003 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		C9000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -678,12 +556,6 @@
 				A1000041 /* SFTPClientProtocol.swift in Sources */,
 				A1000044 /* MockSFTPClient.swift in Sources */,
 				A1000042 /* SFTPChannel.swift in Sources */,
-				A1000043 /* FileProviderDomainManager.swift in Sources */,
-				A1000098 /* SyncState.swift in Sources */,
-				A1000099 /* CachedFileMetadata.swift in Sources */,
-				A100009A /* MetadataStore.swift in Sources */,
-				A100009B /* MetadataStoreEnumerator.swift in Sources */,
-				A100009D /* ActiveFolderRecord.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
 				A10000A2 /* KeyTableIndicatorView.swift in Sources */,
 				A1000060 /* Theme.swift in Sources */,
@@ -702,37 +574,11 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		C8000001 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				C1000001 /* FileProviderExtension.swift in Sources */,
-				C1000004 /* SFTPClient.swift in Sources */,
-				C100002A /* SFTPClientProtocol.swift in Sources */,
-				C1000005 /* SFTPChannel.swift in Sources */,
-				C1000006 /* KeychainManager.swift in Sources */,
-				C1000007 /* NIOSSHConnection.swift in Sources */,
-				C1000008 /* CredentialProvider.swift in Sources */,
-				C1000014 /* ConnectionProfile.swift in Sources */,
-				C1000009 /* SSHKeyManager.swift in Sources */,
-				C1000013 /* SSHKeyParser.swift in Sources */,
-				C1000015 /* FileProviderDomainManager.swift in Sources */,
-				C1000019 /* SyncState.swift in Sources */,
-				C100001A /* CachedFileMetadata.swift in Sources */,
-				C100001B /* MetadataStore.swift in Sources */,
-				C100001C /* MetadataStoreEnumerator.swift in Sources */,
-				C100001E /* ActiveFolderRecord.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		D7000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D1000002 /* FileProviderTests.swift in Sources */,
-				D1000003 /* FileProviderExtensionTests.swift in Sources */,
-				D1000004 /* FileProviderIntegrationTests.swift in Sources */,
-				D1000005 /* MetadataStoreEnumeratorTests.swift in Sources */,
+				D1000010 /* GeisttyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -743,11 +589,6 @@
 			isa = PBXTargetDependency;
 			target = A6000001 /* Geistty */;
 			targetProxy = B3000001 /* PBXContainerItemProxy */;
-		};
-		C6000002 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = C6000001 /* GeisttyFileProvider */;
-			targetProxy = C3000001 /* PBXContainerItemProxy */;
 		};
 		D3000002 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -998,68 +839,6 @@
 			};
 			name = Release;
 		};
-		CD000001 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = GeisttyFileProvider/GeisttyFileProvider.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = DPF76SZNJB;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = GeisttyFileProvider/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = GeisttyFileProvider;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.geistty.app.fileprovider;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG FILEPROVIDER_EXTENSION";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = minimal;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		CD000002 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = GeisttyFileProvider/GeisttyFileProvider.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = DPF76SZNJB;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = GeisttyFileProvider/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = GeisttyFileProvider;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.geistty.app.fileprovider;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = FILEPROVIDER_EXTENSION;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = minimal;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 		DB000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1175,15 +954,6 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		C7000001 /* Build configuration list for PBXNativeTarget "GeisttyFileProvider" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				CD000001 /* Debug */,
-				CD000002 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		AB000001 /* Build configuration list for PBXProject "Geistty" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1230,16 +1000,6 @@
 			productName = NIOSSH;
 		};
 		AE000003 /* NIOTransportServices */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AF000003 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */;
-			productName = NIOTransportServices;
-		};
-		CE000002 /* NIOSSH */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AF000002 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
-			productName = NIOSSH;
-		};
-		CE000003 /* NIOTransportServices */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = AF000003 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */;
 			productName = NIOTransportServices;

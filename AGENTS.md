@@ -206,82 +206,15 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 
 ---
 
-## ⚠️ File Provider Development
+## File Provider (Archived)
 
-**STOP. Before touching ANY File Provider code:**
+**Status:** Archived January 16, 2026  
+**Branch:** `archive/file-provider-jan-2026`  
+**Learnings:** See `FILE_PROVIDER_LEARNINGS.md`
 
-1. Read `FILE_PROVIDER_IMPLEMENTATION.md` completely
-2. Check which enumerator is active in `FileProviderExtension.swift` (`enumerator(for:)` method)
-3. State your understanding before making changes
+File Provider development was paused due to complexity outweighing benefits. The core terminal experience is the priority.
 
-### DO NOT (File Provider specific)
-
-- **Do NOT add debug logging as a first step** - the code is already instrumented
-- **Do NOT test on device before understanding the problem** - write unit tests first
-- **Do NOT repeat failed approaches** - check the "Failed Approaches" section below
-
-### Current State (Jan 5, 2026)
-
-| Question | Answer |
-|----------|--------|
-| **Active enumerator** | `MetadataStoreEnumerator` (for working set) |
-| **Symptom** | "Syncing with Geistty Paused" - testing Option B fix |
-| **Alert gone?** | ✅ Yes - error alert no longer appears |
-| **Changes reflect?** | 🔄 Testing after Option B simplification |
-| **Last fix applied** | **Option B: Single source of truth (Jan 5, 2026)** |
-| **Code removed** | MetadataAnchorCache class, sync_anchor.dat file persistence |
-
-### Option B Simplification (Jan 5, 2026)
-
-**Root cause hypothesis:** Anchor desync between three sources:
-1. SwiftData `SyncState` (ground truth)
-2. `MetadataAnchorCache` (in-memory cache) - **REMOVED**
-3. `sync_anchor.dat` (file backup) - **REMOVED**
-
-**Fix Applied:**
-- Removed `MetadataAnchorCache` class entirely (~130 lines)
-- Removed file-based `sync_anchor.dat` persistence
-- `currentSyncAnchor()` now uses `Task{}` to query `MetadataStore.shared` directly
-- SwiftData is now the ONLY source of truth
-- All tests pass on simulator
-
-**Files Changed:**
-- `MetadataStore.swift` - Simplified to ~550 lines
-- `MetadataStoreEnumerator.swift` - Uses async `Task{}` pattern
-- Test files - Updated to query MetadataStore directly
-
-### Bug Fix History
-
-**Option B: Single Source of Truth (Jan 5, 2026)** - 🔄 Testing on device
-- Removed triple anchor storage problem
-- SwiftData is now ONLY source of truth
-- Tests pass, need device verification
-
-**Fix #2: Dual Cache Consolidation (Jan 3, 2026)** - ✅ Merged
-- Removed `MetadataCache` + `CachedItem` duplicate caching
-- Consolidated to single `MetadataStore` for all metadata
-
-**Fix #1: MetadataStore Commits (Jan 2, 2026)** - ✅ Merged
-- Added `upsert()` calls in write operations
-- Added `signalEnumerator(for: .workingSet)` after all operations
-
-### Failed Approaches
-
-1. **Adding more logging** - Created diagnostic bloat, didn't identify root cause
-2. **Signaling errors resolved** - `signalErrorResolved()` after SFTP connect - no effect
-3. **Synchronous anchor cache** - Created desync problems with SwiftData
-4. **File-based anchor backup** - Third source of truth caused more problems
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `FileProviderExtension.swift` | Main extension, `enumerator(for:)` returns which enumerator |
-| `MetadataStoreEnumerator.swift` | Working set enumerator - queries MetadataStore via Task{} |
-| `MetadataStoreEnumeratorTests.swift` | Unit tests for enumerator behavior |
-| `MetadataStore.swift` | SwiftData actor - **ONLY source of truth for anchors** |
-| `CachedFileMetadata.swift` | SwiftData @Model for file metadata |
-| `FILE_PROVIDER_ANALYSIS.md` | Analysis and Option B documentation |
+If revisiting, start fresh from the archive branch and read the learnings doc first.
 
 ---
 
