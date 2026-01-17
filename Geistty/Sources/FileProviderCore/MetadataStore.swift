@@ -5,11 +5,11 @@
 //  Actor that manages all File Provider metadata and sync state.
 //  Single source of truth for cached file metadata and sync anchors.
 //
-//  Architecture:
+//  Architecture (Option B - Simplified Jan 5, 2026):
 //  - Actor isolation for thread safety
-//  - Owns SwiftData ModelContainer in shared App Group
-//  - Provides anchor-based change queries for enumerateChanges()
-//  - Handles both main app and File Provider extension access
+//  - SwiftData is the ONLY source of truth for anchors
+//  - No separate anchor cache or file-based persistence
+//  - Enumerators query MetadataStore directly (async is fine per Apple docs)
 //
 //  Key Design Decisions:
 //  - Monotonic UInt64 anchor (not VERSION-ITERATION)
@@ -63,140 +63,10 @@ enum ItemIdentifier {
     }
 }
 
-// MARK: - Synchronous Anchor Cache
-
-/// Thread-safe synchronous cache for sync anchors.
-/// File Provider completion handlers MUST be called synchronously.
-/// This cache allows currentSyncAnchor() calls to work in sync context.
-///
-/// CRITICAL: This cache loads persisted anchor on init to avoid race conditions.
-/// The MetadataStore actor updates this cache whenever anchor changes.
-final class MetadataAnchorCache: @unchecked Sendable {
-    static let shared = MetadataAnchorCache()
-    
-    private let lock = NSLock()
-    private var _currentAnchor: UInt64 = 0
-    private var _syncAnchor: NSFileProviderSyncAnchor?
-    
-    /// App group identifier - must match MetadataStore
-    private let appGroupIdentifier = "group.com.geistty.fileprovider"
-    
-    private init() {
-        // CRITICAL: Load persisted anchor synchronously on init
-        // This ensures currentSyncAnchor() has a valid value before any async code runs
-        if let anchor = Self.loadPersistedAnchor(appGroupIdentifier: appGroupIdentifier), anchor > 0 {
-            // Valid persisted anchor (must be > 0)
-            _currentAnchor = anchor
-            var value = anchor
-            let data = Data(bytes: &value, count: 8)
-            _syncAnchor = NSFileProviderSyncAnchor(data)
-            NSLog("📂 [MetadataAnchorCache] Loaded persisted anchor: %llu", anchor)
-        } else {
-            // No valid persisted anchor OR anchor was 0 - start at 1 (fresh install)
-            // CRITICAL: Start at 1 so enumerateChanges(from: 0) can detect changes
-            _currentAnchor = 1
-            var value: UInt64 = 1
-            let data = Data(bytes: &value, count: 8)
-            _syncAnchor = NSFileProviderSyncAnchor(data)
-            savePersistedAnchor(1)  // Persist immediately
-            NSLog("📂 [MetadataAnchorCache] No valid persisted anchor, starting at 1")
-        }
-    }
-    
-    /// Load anchor from persisted storage synchronously
-    /// Uses a simple file-based approach for reliability
-    private static func loadPersistedAnchor(appGroupIdentifier: String) -> UInt64? {
-        guard let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupIdentifier
-        ) else {
-            return nil
-        }
-        
-        let anchorFile = containerURL.appendingPathComponent("sync_anchor.dat")
-        
-        guard let data = try? Data(contentsOf: anchorFile),
-              data.count == 8 else {
-            return nil
-        }
-        
-        return data.withUnsafeBytes { $0.load(as: UInt64.self) }
-    }
-    
-    /// Save anchor to persisted storage synchronously
-    private func savePersistedAnchor(_ anchor: UInt64) {
-        guard let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupIdentifier
-        ) else {
-            return
-        }
-        
-        let anchorFile = containerURL.appendingPathComponent("sync_anchor.dat")
-        var value = anchor
-        let data = Data(bytes: &value, count: 8)
-        try? data.write(to: anchorFile, options: .atomic)
-    }
-    
-    /// Current anchor value (synchronous)
-    var currentAnchor: UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        return _currentAnchor
-    }
-    
-    /// Current sync anchor for File Provider (synchronous)
-    var syncAnchor: NSFileProviderSyncAnchor {
-        lock.lock()
-        defer { lock.unlock() }
-        if let anchor = _syncAnchor {
-            return anchor
-        }
-        // Create from current anchor value
-        var value = _currentAnchor
-        let data = Data(bytes: &value, count: 8)
-        return NSFileProviderSyncAnchor(data)
-    }
-    
-    /// Update cache (called from MetadataStore actor)
-    func update(anchor: UInt64) {
-        lock.lock()
-        defer { lock.unlock() }
-        _currentAnchor = anchor
-        var value = anchor
-        let data = Data(bytes: &value, count: 8)
-        _syncAnchor = NSFileProviderSyncAnchor(data)
-        
-        // Persist to file for next launch
-        savePersistedAnchor(anchor)
-        
-        logger.debug("🔄 MetadataAnchorCache updated: \(anchor)")
-    }
-    
-    /// Refresh cache from persisted storage (used after reset)
-    func refresh() {
-        lock.lock()
-        defer { lock.unlock() }
-        
-        if let anchor = Self.loadPersistedAnchor(appGroupIdentifier: appGroupIdentifier), anchor > 0 {
-            _currentAnchor = anchor
-            var value = anchor
-            let data = Data(bytes: &value, count: 8)
-            _syncAnchor = NSFileProviderSyncAnchor(data)
-        } else {
-            // No valid persisted anchor - reset to 1
-            _currentAnchor = 1
-            var value: UInt64 = 1
-            let data = Data(bytes: &value, count: 8)
-            _syncAnchor = NSFileProviderSyncAnchor(data)
-            savePersistedAnchor(1)
-        }
-        
-        logger.debug("🔄 MetadataAnchorCache refreshed: \(self._currentAnchor)")
-    }
-}
-
 // MARK: - MetadataStore Actor
 
-/// Actor that owns all File Provider metadata and sync state
+/// Actor that owns all File Provider metadata and sync state.
+/// SwiftData is the ONLY source of truth - no separate caches.
 actor MetadataStore {
     
     /// Shared singleton instance
@@ -245,9 +115,7 @@ actor MetadataStore {
     }
     
     /// Get or create the SyncState record within the given context
-    /// This ensures SyncState changes are saved with the same context as other operations
     private func getSyncState(in context: ModelContext) throws -> SyncState {
-        // Try to fetch existing sync state
         let descriptor = FetchDescriptor<SyncState>()
         if let existing = try context.fetch(descriptor).first {
             logger.debug("📦 Loaded existing SyncState: anchor=\(existing.currentAnchor)")
@@ -257,22 +125,15 @@ actor MetadataStore {
         // Create new sync state - starts at anchor 1
         let newState = SyncState()
         context.insert(newState)
-        
-        // CRITICAL: Save immediately so the new state persists
         try context.save()
         
-        logger.info("📦 Created and saved new SyncState: anchor=\(newState.currentAnchor)")
-        
-        // Update synchronous cache
-        MetadataAnchorCache.shared.update(anchor: newState.currentAnchor)
-        
+        logger.info("📦 Created new SyncState: anchor=\(newState.currentAnchor)")
         return newState
     }
     
     // MARK: - Sync Anchor API
     
-    /// Current anchor value
-    /// CRITICAL: If anchor is 0, reset to 1 (legacy data migration)
+    /// Current anchor value from SwiftData (ONLY source of truth)
     var currentAnchor: UInt64 {
         get throws {
             let container = try getContainer()
@@ -288,8 +149,7 @@ actor MetadataStore {
                 logger.warning("📦 Fixed legacy anchor: 0 → 1")
             }
             
-            // Keep sync cache updated
-            MetadataAnchorCache.shared.update(anchor: anchor)
+            logger.debug("📦 currentAnchor queried: \(anchor)")
             return anchor
         }
     }
@@ -299,42 +159,22 @@ actor MetadataStore {
         get throws {
             let container = try getContainer()
             let context = ModelContext(container)
-            return try getSyncState(in: context).toSyncAnchor()
+            let state = try getSyncState(in: context)
+            let anchor = state.toSyncAnchor()
+            logger.debug("📦 currentSyncAnchor queried: \(state.currentAnchor)")
+            return anchor
         }
     }
     
     /// Increment anchor and return the new value
-    /// Call this when recording changes
     func incrementAnchor() throws -> UInt64 {
         let container = try getContainer()
         let context = ModelContext(container)
         let state = try getSyncState(in: context)
         let newAnchor = state.incrementAndGet()
-        
-        try context.save()  // Save in same context as SyncState
-        
-        // Update synchronous cache
-        MetadataAnchorCache.shared.update(anchor: newAnchor)
-        
+        try context.save()
         logger.debug("📦 Anchor incremented to \(newAnchor)")
         return newAnchor
-    }
-    
-    // MARK: - Synchronous Access (for File Provider callbacks)
-    
-    /// Get item synchronously - blocks calling thread
-    /// WARNING: Only use in File Provider synchronous callbacks
-    nonisolated func itemSync(id: String) -> CachedFileMetadata? {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: CachedFileMetadata?
-        
-        Task {
-            result = try? await self.item(id: id)
-            semaphore.signal()
-        }
-        
-        semaphore.wait()
-        return result
     }
     
     // MARK: - Item Queries
@@ -396,8 +236,7 @@ actor MetadataStore {
     
     // MARK: - Change Queries (for enumerateChanges)
     
-    /// Get items modified since the given anchor (creates + updates)
-    /// Returns items where modifiedAtAnchor > anchor AND not deleted
+    /// Get items modified since the given anchor
     func itemsModified(since anchor: UInt64) throws -> [CachedFileMetadata] {
         let container = try getContainer()
         let context = ModelContext(container)
@@ -412,13 +251,10 @@ actor MetadataStore {
     }
     
     /// Get item identifiers deleted since the given anchor
-    /// Returns identifiers where deletedAtAnchor > anchor
     func deletions(since anchor: UInt64) throws -> [String] {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // SwiftData predicate can't directly compare optional > value
-        // Fetch all with deletedAtAnchor != nil, then filter
         let predicate = #Predicate<CachedFileMetadata> { item in
             item.deletedAtAnchor != nil
         }
@@ -430,71 +266,68 @@ actor MetadataStore {
             .map { $0.itemIdentifier }
     }
     
-    /// Get all changes since anchor in a format ready for enumerateChanges()
-    /// CRITICAL: This is the permissive approach - accepts ANY older anchor
-    /// Returns (modifiedItems, deletedIdentifiers, newAnchor)
+    // MARK: - Anchor Validation
+    
+    /// Validate an anchor from iOS using strict version checking
+    func validateAnchor(_ syncAnchor: NSFileProviderSyncAnchor) throws -> AnchorValidation {
+        let container = try getContainer()
+        let context = ModelContext(container)
+        let state = try getSyncState(in: context)
+        return state.validateAnchor(syncAnchor)
+    }
+    
+    /// Get all changes since anchor for enumerateChanges()
+    /// Returns changes and the NEW anchor in proper "V{version}-{iteration}" format
     func changesSince(anchor: UInt64) throws -> (
         modified: [CachedFileMetadata],
         deletions: [String],
-        newAnchor: UInt64
+        newAnchor: NSFileProviderSyncAnchor
     ) {
-        let currentAnchorValue = try currentAnchor
+        let container = try getContainer()
+        let context = ModelContext(container)
+        let state = try getSyncState(in: context)
         
-        // If anchor is same as current, no changes
+        let currentAnchorValue = state.currentAnchor
+        
         guard anchor < currentAnchorValue else {
-            return ([], [], currentAnchorValue)
+            return ([], [], state.toSyncAnchor())
         }
         
-        // Get all modified items since anchor
         let modified = try itemsModified(since: anchor)
-        
-        // Get all deletions since anchor
         let deletedIds = try deletions(since: anchor)
         
         logger.debug("📦 Changes since \(anchor): \(modified.count) modified, \(deletedIds.count) deleted")
         
-        return (modified, deletedIds, currentAnchorValue)
+        return (modified, deletedIds, state.toSyncAnchor())
     }
     
     // MARK: - Reset Operations
     
-    /// Reset the metadata store for domain clearing.
-    /// Deletes all data and resets anchor to 1.
-    /// Called during domain reset to ensure clean state.
+    /// Reset the metadata store for domain clearing
     func resetForDomainClear() async throws {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // Delete all cached metadata (includes soft-deleted items via deletedAtAnchor)
         try context.delete(model: CachedFileMetadata.self)
-        
-        // Delete all active folders
         try context.delete(model: ActiveFolderRecord.self)
         
-        // Reset sync state to anchor 1
         let statePredicate = #Predicate<SyncState> { _ in true }
         let stateDescriptor = FetchDescriptor<SyncState>(predicate: statePredicate)
         if let existingState = try context.fetch(stateDescriptor).first {
             existingState.currentAnchor = 1
             existingState.lastModified = Date()
         } else {
-            // Create new state - init() sets anchor to 1
             let newState = SyncState()
             context.insert(newState)
         }
         
         try context.save()
-        
-        // Reset the synchronous cache
-        MetadataAnchorCache.shared.update(anchor: 1)
-        
         logger.info("📦 MetadataStore reset complete - anchor reset to 1")
     }
     
     // MARK: - Write Operations
     
     /// Upsert an item from SFTP attributes
-    /// Returns (item, isNew) tuple
     @discardableResult
     func upsert(
         itemIdentifier: String,
@@ -511,14 +344,9 @@ actor MetadataStore {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // Get SyncState in SAME context - critical for proper save
         let state = try getSyncState(in: context)
         let anchor = state.incrementAndGet()
         
-        // Update synchronous cache with new anchor
-        MetadataAnchorCache.shared.update(anchor: anchor)
-        
-        // Check if item exists
         let targetId = itemIdentifier
         let predicate = #Predicate<CachedFileMetadata> { item in
             item.itemIdentifier == targetId
@@ -526,7 +354,6 @@ actor MetadataStore {
         let descriptor = FetchDescriptor<CachedFileMetadata>(predicate: predicate)
         
         if let existing = try context.fetch(descriptor).first {
-            // Update existing item
             existing.filename = filename
             existing.size = size
             existing.isDirectory = isDirectory
@@ -534,14 +361,13 @@ actor MetadataStore {
             existing.modificationDate = modificationDate
             existing.isSymlink = isSymlink
             existing.modifiedAtAnchor = anchor
-            existing.deletedAtAnchor = nil  // Undelete if was soft-deleted
+            existing.deletedAtAnchor = nil
             existing.cachedAt = Date()
             
-            try context.save()  // Saves both SyncState and CachedFileMetadata
+            try context.save()
             logger.debug("📦 Updated item: \(filename) @ anchor \(anchor)")
             return (existing, false)
         } else {
-            // Insert new item
             let newItem = CachedFileMetadata(
                 itemIdentifier: itemIdentifier,
                 connectionId: connectionId,
@@ -561,25 +387,20 @@ actor MetadataStore {
             )
             
             context.insert(newItem)
-            try context.save()  // Saves both SyncState and CachedFileMetadata
+            try context.save()
             logger.debug("📦 Inserted item: \(filename) @ anchor \(anchor)")
             return (newItem, true)
         }
     }
     
     /// Mark an item as deleted (soft delete)
-    /// Returns the deletion anchor
     @discardableResult
     func markDeleted(id: String) throws -> UInt64 {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // Get SyncState in SAME context
         let state = try getSyncState(in: context)
         let anchor = state.incrementAndGet()
-        
-        // Update synchronous cache with new anchor
-        MetadataAnchorCache.shared.update(anchor: anchor)
         
         let targetId = id
         let predicate = #Predicate<CachedFileMetadata> { item in
@@ -589,7 +410,7 @@ actor MetadataStore {
         
         if let item = try context.fetch(descriptor).first {
             item.deletedAtAnchor = anchor
-            try context.save()  // Saves both SyncState and CachedFileMetadata
+            try context.save()
             logger.debug("📦 Marked deleted: \(item.filename) @ anchor \(anchor)")
         }
         
@@ -597,8 +418,6 @@ actor MetadataStore {
     }
     
     /// Batch upsert items (for directory listing)
-    /// Also handles detecting deleted items
-    /// Returns true if any actual changes occurred (new items, updates, deletions)
     @discardableResult
     func upsertBatch(
         items: [(id: String, connId: String, path: String, parentId: String, name: String, size: Int64, isDir: Bool, perms: Int32, modDate: Date?, isSymlink: Bool)],
@@ -607,7 +426,7 @@ actor MetadataStore {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // Get existing children FIRST (before any anchor changes)
+        // Get existing children
         let targetParentId = parentId
         let existingPredicate = #Predicate<CachedFileMetadata> { item in
             item.parentIdentifier == targetParentId && item.deletedAtAnchor == nil
@@ -616,23 +435,18 @@ actor MetadataStore {
         let existing = try context.fetch(existingDescriptor)
         let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.itemIdentifier, $0) })
         
-        // Track changes
+        // Check for changes
         var hasNewItems = false
-        let hasUpdates = false  // TODO: Track actual item updates (size/date changes)
         var hasDeletions = false
         var seenIds = Set<String>()
         
-        // Check for new or modified items
         for item in items {
             seenIds.insert(item.id)
-            
             if existingById[item.id] == nil {
-                // New item
                 hasNewItems = true
             }
         }
         
-        // Check for deletions
         for existingItem in existing {
             if !seenIds.contains(existingItem.itemIdentifier) {
                 hasDeletions = true
@@ -640,26 +454,20 @@ actor MetadataStore {
             }
         }
         
-        let hasChanges = hasNewItems || hasUpdates || hasDeletions
+        let hasChanges = hasNewItems || hasDeletions
         
-        // Only increment anchor if there are actual changes
         guard hasChanges else {
-            logger.debug("📦 No changes detected for \(parentId), anchor unchanged")
+            logger.debug("📦 No changes detected for \(parentId)")
             return false
         }
         
-        // NOW increment anchor since we have real changes
-        // Get SyncState in SAME context - critical for proper save
+        // Increment anchor for real changes
         let state = try getSyncState(in: context)
         let anchor = state.incrementAndGet()
-        
-        // Update synchronous cache with new anchor
-        MetadataAnchorCache.shared.update(anchor: anchor)
         
         // Apply changes
         for item in items {
             if let existingItem = existingById[item.id] {
-                // Update existing
                 existingItem.filename = item.name
                 existingItem.size = item.size
                 existingItem.isDirectory = item.isDir
@@ -669,7 +477,6 @@ actor MetadataStore {
                 existingItem.modifiedAtAnchor = anchor
                 existingItem.cachedAt = Date()
             } else {
-                // Insert new
                 let newItem = CachedFileMetadata(
                     itemIdentifier: item.id,
                     connectionId: item.connId,
@@ -688,7 +495,7 @@ actor MetadataStore {
             }
         }
         
-        // Mark missing items as deleted
+        // Mark deletions
         for existingItem in existing {
             if !seenIds.contains(existingItem.itemIdentifier) {
                 existingItem.deletedAtAnchor = anchor
@@ -707,7 +514,7 @@ actor MetadataStore {
             parent.cachedAt = Date()
         }
         
-        try context.save()  // Saves both SyncState and CachedFileMetadata
+        try context.save()
         logger.debug("📦 Batch upserted \(items.count) items under \(parentId) @ anchor \(anchor)")
         return true
     }
@@ -717,12 +524,8 @@ actor MetadataStore {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // Get SyncState in SAME context - critical for proper save
         let state = try getSyncState(in: context)
         let anchor = state.incrementAndGet()
-        
-        // Update synchronous cache with new anchor
-        MetadataAnchorCache.shared.update(anchor: anchor)
         
         let targetConnectionId = connectionId
         let predicate = #Predicate<CachedFileMetadata> { item in
@@ -731,21 +534,19 @@ actor MetadataStore {
         let descriptor = FetchDescriptor<CachedFileMetadata>(predicate: predicate)
         let items = try context.fetch(descriptor)
         
-        // Soft delete all items
         for item in items {
             item.deletedAtAnchor = anchor
         }
         
-        try context.save()  // Saves both SyncState and CachedFileMetadata
+        try context.save()
         logger.info("📦 Deleted connection \(connectionId): \(items.count) items @ anchor \(anchor)")
     }
     
-    /// Purge items deleted before anchor (cleanup old history)
+    /// Purge items deleted before anchor
     func purgeDeleted(before anchor: UInt64) throws {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // SwiftData can't do optional < comparison in predicate
         let predicate = #Predicate<CachedFileMetadata> { item in
             item.deletedAtAnchor != nil
         }
@@ -769,38 +570,29 @@ actor MetadataStore {
         let container = try getContainer()
         let context = ModelContext(container)
         
-        // Delete all metadata
         let metadataDescriptor = FetchDescriptor<CachedFileMetadata>()
         for item in try context.fetch(metadataDescriptor) {
             context.delete(item)
         }
         
-        // Reset sync state
         let stateDescriptor = FetchDescriptor<SyncState>()
         for state in try context.fetch(stateDescriptor) {
             context.delete(state)
         }
         
         try context.save()
-        
-        // Reset anchor cache
-        MetadataAnchorCache.shared.update(anchor: 1)
-        
         logger.info("📦 Cleared all MetadataStore data")
     }
     
     // MARK: - Cache Staleness
     
-    /// Check if cache is stale for a directory
     func isStale(parentId: String) throws -> Bool {
         guard let item = try self.item(id: parentId) else {
-            return true // Not cached = stale
+            return true
         }
-        
         return item.isStale(olderThan: staleThreshold)
     }
     
-    /// Check if we have cached children for a directory
     func hasChildren(parentId: String) throws -> Bool {
         guard let item = try self.item(id: parentId) else {
             return false
@@ -810,10 +602,8 @@ actor MetadataStore {
     
     // MARK: - Active Folder Management
     
-    /// Maximum number of active folders to track
     private static let maxActiveFolders = 20
     
-    /// Register a folder as active (will be polled for changes)
     func registerActiveFolder(connectionId: String, remotePath: String) throws {
         let container = try getContainer()
         let context = ModelContext(container)
@@ -823,28 +613,24 @@ actor MetadataStore {
         let descriptor = FetchDescriptor<ActiveFolderRecord>(predicate: predicate)
         
         if let existing = try context.fetch(descriptor).first {
-            // Already registered - just update access time
             existing.touch()
             try context.save()
             logger.debug("📂 Updated active folder access time: \(remotePath)")
             return
         }
         
-        // Check if at capacity - remove oldest if needed
         let allDescriptor = FetchDescriptor<ActiveFolderRecord>(
             sortBy: [SortDescriptor(\.lastAccessed, order: .forward)]
         )
         let allFolders = try context.fetch(allDescriptor)
         
         if allFolders.count >= Self.maxActiveFolders {
-            // Remove oldest
             if let oldest = allFolders.first {
                 context.delete(oldest)
                 logger.debug("📂 Removed oldest active folder: \(oldest.remotePath)")
             }
         }
         
-        // Insert new
         let newFolder = ActiveFolderRecord(connectionId: connectionId, remotePath: remotePath)
         context.insert(newFolder)
         try context.save()
@@ -852,7 +638,6 @@ actor MetadataStore {
         logger.info("📂 Registered active folder: \(remotePath) (conn: \(connectionId))")
     }
     
-    /// Unregister a folder (no longer needs polling)
     func unregisterActiveFolder(connectionId: String, remotePath: String) throws {
         let container = try getContainer()
         let context = ModelContext(container)
@@ -868,7 +653,6 @@ actor MetadataStore {
         }
     }
     
-    /// Get all active folders for polling
     func activeFolders() throws -> [(connectionId: String, remotePath: String)] {
         let container = try getContainer()
         let context = ModelContext(container)
@@ -881,7 +665,6 @@ actor MetadataStore {
         return folders.map { ($0.connectionId, $0.remotePath) }
     }
     
-    /// Get active folder count
     func activeFolderCount() throws -> Int {
         let container = try getContainer()
         let context = ModelContext(container)

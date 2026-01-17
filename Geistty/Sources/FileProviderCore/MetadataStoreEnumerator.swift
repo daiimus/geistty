@@ -3,13 +3,12 @@
 //  Geistty
 //
 //  Working set enumerator that uses MetadataStore for change tracking.
-//  Replaces the old WorkingSetEnumerator with proper anchor-based queries.
-//
-//  Key differences from old implementation:
-//  - Uses UInt64 monotonic anchor (not VERSION-ITERATION string)
-//  - Permissive change enumeration (any older anchor, not strict +1)
-//  - Direct SwiftData queries for changes (not in-memory pending list)
-//  - Never returns syncAnchorExpired (always brings client up to date)
+//  
+//  Architecture (Jan 16, 2026):
+//  - Queries MetadataStore directly (no separate anchor cache)
+//  - Uses "V{version}-{iteration}" anchor format (like Blink)
+//  - Strict anchor validation - returns syncAnchorExpired on version mismatch
+//  - SwiftData is the ONLY source of truth
 //
 
 import FileProvider
@@ -24,121 +23,145 @@ private let logger = Logger(subsystem: "com.geistty.fileprovider", category: "Me
 /// Working set enumerator using MetadataStore for change tracking.
 /// 
 /// Architecture:
-/// - Uses MetadataAnchorCache for synchronous anchor access
-/// - Queries MetadataStore for changes since anchor
-/// - Returns ALL changes since requested anchor (permissive)
-/// - Never returns syncAnchorExpired (always succeeds)
+/// - Queries MetadataStore actor directly for anchors
+/// - Uses "V{version}-{iteration}" format for anchors
+/// - Strict validation: version mismatch → syncAnchorExpired
+/// - Task{} for async operations (Apple-approved)
 class MetadataStoreEnumerator: NSObject, NSFileProviderEnumerator {
     
     override init() {
         super.init()
-        logger.info("MetadataStoreEnumerator created, anchor=\(MetadataAnchorCache.shared.currentAnchor)")
+        logger.info("📦 MetadataStoreEnumerator created")
     }
     
     func invalidate() {
-        logger.info("MetadataStoreEnumerator invalidated")
+        logger.info("📦 MetadataStoreEnumerator invalidated")
     }
     
     // MARK: - Enumerate Items
     
     /// Working set returns NO items in enumerateItems.
     /// All content flows through enumerateChanges.
-    /// This matches Blink/Cryptomator patterns.
     func enumerateItems(for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
-        logger.info("enumerateItems called - returning empty (correct behavior)")
+        logger.info("📦 enumerateItems called - returning empty (per Apple pattern)")
         observer.finishEnumerating(upTo: nil)
     }
     
     // MARK: - Enumerate Changes
     
     /// Report all changes since the requested anchor.
-    /// Uses permissive approach: accepts ANY older anchor and reports ALL changes since then.
+    /// For expired/invalid anchors, returns ALL items as a fresh sync.
     func enumerateChanges(for observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
-        let anchorData = anchor.rawValue
+        let anchorString = String(data: anchor.rawValue, encoding: .utf8) ?? "<binary>"
+        logger.info("📦 enumerateChanges called: anchor=\(anchorString)")
         
-        // Parse anchor
-        var requestedAnchor: UInt64 = 0
-        
-        if anchorData.count == 8 {
-            requestedAnchor = anchorData.withUnsafeBytes { $0.load(as: UInt64.self) }
-        } else if let _ = String(data: anchorData, encoding: .utf8) {
-            // Legacy string anchor - treat as 0 to get all changes
-            requestedAnchor = 0
-        }
-        
-        let currentAnchor = MetadataAnchorCache.shared.currentAnchor
-        
-        logger.info("enumerateChanges: requested=\(requestedAnchor) current=\(currentAnchor)")
-        
-        // CASE 1: Same anchor - no changes
-        if requestedAnchor >= currentAnchor {
-            logger.info("No changes (requested >= current)")
-            let newAnchor = makeAnchor(currentAnchor)
-            observer.finishEnumeratingChanges(upTo: newAnchor, moreComing: false)
-            return
-        }
-        
-        // CASE 2: Older anchor - query MetadataStore for changes
         Task {
             do {
-                let (modified, deletedIds, newAnchorValue) = try await MetadataStore.shared.changesSince(anchor: requestedAnchor)
+                // Validate anchor using the new strict validation
+                let validation = try await MetadataStore.shared.validateAnchor(anchor)
                 
-                logger.info("Changes: \(modified.count) modified, \(deletedIds.count) deleted")
-                
-                // Report deletions first
-                if !deletedIds.isEmpty {
-                    let identifiers = deletedIds.map { NSFileProviderItemIdentifier($0) }
-                    observer.didDeleteItems(withIdentifiers: identifiers)
+                switch validation {
+                case .noChanges:
+                    // Same anchor - no changes to report
+                    logger.info("📦 enumerateChanges: no changes (same anchor)")
+                    observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
+                    return
+                    
+                case .expired(let requestedVersion, let currentVersion):
+                    // Version mismatch - enumerate ALL items as fresh sync
+                    // DO NOT return syncAnchorExpired (causes "Syncing Paused")
+                    logger.warning("📦 enumerateChanges: anchor expired (v\(requestedVersion) != v\(currentVersion)), returning all items")
+                    try await enumerateAllItems(for: observer)
+                    return
+                    
+                case .invalid:
+                    // Malformed anchor - enumerate ALL items as fresh sync
+                    logger.warning("📦 enumerateChanges: invalid anchor format, returning all items")
+                    try await enumerateAllItems(for: observer)
+                    return
+                    
+                case .valid(let iteration):
+                    // Valid anchor - get changes since iteration
+                    let (modified, deletedIds, newAnchor) = try await MetadataStore.shared.changesSince(anchor: iteration)
+                    
+                    logger.info("📦 Changes found: \(modified.count) modified, \(deletedIds.count) deleted")
+                    
+                    // Report deletions first
+                    if !deletedIds.isEmpty {
+                        let identifiers = deletedIds.map { NSFileProviderItemIdentifier($0) }
+                        observer.didDeleteItems(withIdentifiers: identifiers)
+                    }
+                    
+                    // Report modified items
+                    if !modified.isEmpty {
+                        let items = modified.map { CachedMetadataItem(metadata: $0) }
+                        observer.didUpdate(items)
+                    }
+                    
+                    observer.finishEnumeratingChanges(upTo: newAnchor, moreComing: false)
+                    let anchorStr = String(data: newAnchor.rawValue, encoding: .utf8) ?? "<binary>"
+                    logger.info("📦 enumerateChanges completed, newAnchor=\(anchorStr)")
                 }
-                
-                // Report modified items
-                // Note: We report ALL modified items. iOS will handle parent resolution.
-                // Previously we filtered to only items with parent in modified set, but this
-                // incorrectly excluded items in subfolders when the subfolder wasn't modified.
-                // Fixed Jan 2, 2026 - see testSubfolderFileChangesAreReported test.
-                if !modified.isEmpty {
-                    let items = modified.map { CachedMetadataItem(metadata: $0) }
-                    observer.didUpdate(items)
-                }
-                
-                let newAnchor = self.makeAnchor(newAnchorValue)
-                observer.finishEnumeratingChanges(upTo: newAnchor, moreComing: false)
-                logger.info("enumerateChanges completed, finalAnchor=\(newAnchorValue)")
                 
             } catch {
-                logger.error("enumerateChanges error: \(error.localizedDescription)")
-                // On error, still finish with current anchor
-                let newAnchor = self.makeAnchor(currentAnchor)
-                observer.finishEnumeratingChanges(upTo: newAnchor, moreComing: false)
+                logger.error("📦 enumerateChanges error: \(error.localizedDescription)")
+                // On unexpected error, try to return all items as fallback
+                do {
+                    try await enumerateAllItems(for: observer)
+                } catch {
+                    // NEVER return syncAnchorExpired - it causes "Syncing Paused"
+                    // Instead, complete with empty results and current anchor
+                    // iOS will retry later
+                    logger.error("📦 Failed to enumerate all items: \(error.localizedDescription), completing with empty results")
+                    let emptyAnchor = "V1-0".data(using: .utf8)!
+                    observer.finishEnumeratingChanges(upTo: NSFileProviderSyncAnchor(emptyAnchor), moreComing: false)
+                }
             }
         }
     }
     
-    // MARK: - Current Sync Anchor
-    
-    /// Return current anchor synchronously.
-    /// Uses MetadataAnchorCache for thread-safe sync access.
-    func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
-        let anchor = MetadataAnchorCache.shared.syncAnchor
-        let anchorValue = MetadataAnchorCache.shared.currentAnchor
-        logger.info("currentSyncAnchor: \(anchorValue)")
-        completionHandler(anchor)
+    /// Enumerate ALL items as a fresh sync (used for expired/invalid anchors)
+    private func enumerateAllItems(for observer: NSFileProviderChangeObserver) async throws {
+        let allItems = try await MetadataStore.shared.allActiveItems()
+        let newAnchor = try await MetadataStore.shared.currentSyncAnchor
+        
+        logger.info("📦 Fresh sync: returning \(allItems.count) items")
+        
+        if !allItems.isEmpty {
+            let items = allItems.map { CachedMetadataItem(metadata: $0) }
+            observer.didUpdate(items)
+        }
+        
+        observer.finishEnumeratingChanges(upTo: newAnchor, moreComing: false)
+        let anchorStr = String(data: newAnchor.rawValue, encoding: .utf8) ?? "<binary>"
+        logger.info("📦 Fresh sync completed, newAnchor=\(anchorStr)")
     }
     
-    // MARK: - Helpers
+    // MARK: - Current Sync Anchor
     
-    /// Create NSFileProviderSyncAnchor from UInt64
-    private func makeAnchor(_ value: UInt64) -> NSFileProviderSyncAnchor {
-        var v = value
-        let data = Data(bytes: &v, count: 8)
-        return NSFileProviderSyncAnchor(data)
+    /// Return current anchor by querying MetadataStore.
+    /// Uses Task{} pattern - Apple docs confirm this is fine for File Provider callbacks.
+    func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
+        logger.info("📦 currentSyncAnchor called")
+        
+        Task {
+            do {
+                let anchor = try await MetadataStore.shared.currentSyncAnchor
+                let anchorStr = String(data: anchor.rawValue, encoding: .utf8) ?? "<binary>"
+                logger.info("📦 currentSyncAnchor returning: \(anchorStr)")
+                completionHandler(anchor)
+            } catch {
+                logger.error("📦 currentSyncAnchor error: \(error.localizedDescription)")
+                // Return nil to signal iOS should start fresh
+                completionHandler(nil)
+            }
+        }
     }
 }
 
 // MARK: - CachedMetadataItem
 
 /// NSFileProviderItem wrapper for CachedFileMetadata
-/// Used to report items in enumerateChanges
 final class CachedMetadataItem: NSObject, NSFileProviderItem {
     let metadata: CachedFileMetadata
     
@@ -182,11 +205,9 @@ final class CachedMetadataItem: NSObject, NSFileProviderItem {
     }
     
     var creationDate: Date? {
-        metadata.modificationDate // Use mod date as creation date
+        metadata.modificationDate
     }
     
-    // CRITICAL: Required for NSFileProviderReplicatedExtension
-    // Without this, iOS may reject items or show "Syncing Paused"
     var itemVersion: NSFileProviderItemVersion {
         let modTime = metadata.modificationDate?.timeIntervalSince1970 ?? 0
         let contentVer = "\(metadata.size):\(modTime)".data(using: .utf8)!
@@ -194,24 +215,18 @@ final class CachedMetadataItem: NSObject, NSFileProviderItem {
         return NSFileProviderItemVersion(contentVersion: contentVer, metadataVersion: metaVer)
     }
     
-    // MARK: - Transfer Status Properties
-    
-    /// Folders are always "downloaded" for browsing. Files are streamed on demand.
     var isDownloaded: Bool {
-        metadata.isDirectory // Folders always show as available
+        metadata.isDirectory
     }
     
-    /// All items exist on remote server (cached metadata = server state)
     var isUploaded: Bool {
         true
     }
     
-    /// No active downloads in enumerator (downloads happen through startProvidingItem)
     var isDownloading: Bool {
         false
     }
     
-    /// No active uploads from File Provider (read-only currently)
     var isUploading: Bool {
         false
     }

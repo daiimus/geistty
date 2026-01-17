@@ -209,45 +209,55 @@ final class FileProviderExtensionTests: XCTestCase {
 @available(iOS 16.0, *)
 final class SyncAnchorContractTests: XCTestCase {
     
-    /// Test: Anchor from MetadataAnchorCache must be valid 8-byte format
-    func testAnchorCacheProducesValidFormat() {
-        let cache = MetadataAnchorCache.shared
-        let syncAnchor = cache.syncAnchor
+    /// Test: Anchor from MetadataStore must be valid versioned string format
+    /// NOTE: MetadataAnchorCache was removed in Option B simplification (Jan 5, 2026)
+    func testAnchorProducesValidFormat() async throws {
+        let syncAnchor = try await MetadataStore.shared.currentSyncAnchor
         
-        // Must be exactly 8 bytes
-        XCTAssertEqual(syncAnchor.rawValue.count, 8,
-            "Sync anchor must be 8 bytes (UInt64)")
+        // Must be parseable as versioned string format
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Sync anchor must be parseable")
+            return
+        }
         
-        // Must parse back to a value >= 1
-        let value = SyncState.anchorValue(from: syncAnchor)
-        XCTAssertNotNil(value, "Should parse as UInt64")
-        XCTAssertGreaterThanOrEqual(value!, 1, "Value should be >= 1")
+        XCTAssertEqual(version, SyncState.currentVersion, "Version should match current")
+        XCTAssertGreaterThanOrEqual(iteration, 1, "Iteration should be >= 1")
     }
     
-    /// Test: MetadataStoreEnumerator.currentSyncAnchor returns immediately
-    func testEnumeratorCurrentSyncAnchorIsSync() {
+    /// Test: MetadataStoreEnumerator.currentSyncAnchor returns promptly
+    /// NOTE: With Option B simplification, we now use Task{} which is async.
+    /// Apple docs allow async callbacks for currentSyncAnchor.
+    func testEnumeratorCurrentSyncAnchorReturnsPromptly() async throws {
         let enumerator = MetadataStoreEnumerator()
         
+        let exp = expectation(description: "currentSyncAnchor callback")
         var receivedAnchor: NSFileProviderSyncAnchor?
         var callbackTime: Date?
         let startTime = Date()
         
-        // This MUST complete synchronously
+        // This now uses Task{} internally, so it may be async
         enumerator.currentSyncAnchor { anchor in
             receivedAnchor = anchor
             callbackTime = Date()
+            exp.fulfill()
         }
         
-        // Callback should have been invoked already
-        XCTAssertNotNil(receivedAnchor, "Callback must be invoked synchronously")
+        // Wait for async callback
+        await fulfillment(of: [exp], timeout: 1.0)
+        
+        // Callback should have been invoked
+        XCTAssertNotNil(receivedAnchor, "Callback must be invoked")
         
         if let callbackTime = callbackTime {
             let elapsed = callbackTime.timeIntervalSince(startTime)
-            XCTAssertLessThan(elapsed, 0.1, "Callback must complete in < 100ms")
+            // Allow more time since it's async now, but should still be fast
+            XCTAssertLessThan(elapsed, 1.0, "Callback should complete in < 1s")
         }
         
-        // Anchor should be valid
-        XCTAssertEqual(receivedAnchor?.rawValue.count, 8)
+        // Anchor should be valid (new versioned string format)
+        if let anchor = receivedAnchor {
+            XCTAssertNotNil(SyncState.parseAnchor(from: anchor), "Anchor should be parseable")
+        }
     }
     
     /// Test: MetadataStoreEnumerator.enumerateChanges calls observer
@@ -278,15 +288,16 @@ final class SyncAnchorContractTests: XCTestCase {
         
         // Create mock observer
         let observer = TestChangeObserver { anchor, moreComing in
-            // Validate anchor
-            XCTAssertEqual(anchor.rawValue.count, 8, "Anchor must be 8 bytes")
+            // Validate anchor is parseable (new versioned format)
+            let parsed = SyncState.parseAnchor(from: anchor)
+            XCTAssertNotNil(parsed, "Anchor must be parseable")
             XCTAssertFalse(moreComing, "Should not have more coming")
             expectation.fulfill()
         }
         
-        // Call enumerateChanges from anchor 0
-        var zeroAnchor: UInt64 = 0
-        let anchorData = Data(bytes: &zeroAnchor, count: 8)
+        // Call enumerateChanges using new versioned format (V1-0 = all changes)
+        let anchorString = "V\(SyncState.currentVersion)-0"
+        let anchorData = anchorString.data(using: .utf8)!
         let fromAnchor = NSFileProviderSyncAnchor(anchorData)
         
         enumerator.enumerateChanges(for: observer, from: fromAnchor)
@@ -492,15 +503,16 @@ final class MetadataStoreFullFlowTests: XCTestCase {
         XCTAssertNotNil(found2, "Other item should still exist")
     }
     
-    /// Test: Anchor persists across cache instances
+    /// Test: Anchor persists across store queries
+    /// NOTE: MetadataAnchorCache was removed - using MetadataStore directly
     func testAnchorPersistence() async throws {
         // Modify anchor
         let newAnchor = try await store.incrementAnchor()
         
-        // Cache should have same value
-        let cacheAnchor = MetadataAnchorCache.shared.currentAnchor
-        XCTAssertGreaterThanOrEqual(cacheAnchor, newAnchor,
-            "Cache should reflect incremented anchor")
+        // Query store again - should have same value
+        let storeAnchor = try await store.currentAnchor
+        XCTAssertGreaterThanOrEqual(storeAnchor, newAnchor,
+            "Store should reflect incremented anchor")
     }
     
     /// Test: changesSince returns both modifications and deletions
@@ -558,8 +570,13 @@ final class MetadataStoreFullFlowTests: XCTestCase {
         XCTAssertEqual(deleted.count, 1, "Should have 1 deleted item")
         XCTAssertTrue(deleted.contains("chg:item2"))
         
+        // Parse returned anchor and compare with current
         let currentAnchor = try await store.currentAnchor
-        XCTAssertEqual(anchor, currentAnchor, "Returned anchor should be current")
+        guard let (_, anchorIteration) = SyncState.parseAnchor(from: anchor) else {
+            XCTFail("Returned anchor should be parseable")
+            return
+        }
+        XCTAssertEqual(anchorIteration, currentAnchor, "Returned anchor iteration should match current")
     }
 }
 
@@ -1115,17 +1132,19 @@ final class DeviceIntegrationTests: XCTestCase {
     }
     
     /// Test: Verify extension starts with correct anchor state
+    /// NOTE: MetadataAnchorCache was removed - using MetadataStore directly
     func testExtensionAnchorState() async throws {
         if isSimulator {
             throw XCTSkip("Device-only test: requires File Provider extension")
         }
         
-        // Check that MetadataAnchorCache has a valid anchor
-        let anchor = MetadataAnchorCache.shared.currentAnchor
+        // Check that MetadataStore has a valid anchor
+        let anchor = try await MetadataStore.shared.currentAnchor
         XCTAssertGreaterThanOrEqual(anchor, 1, "Anchor must be >= 1")
         
-        let syncAnchor = MetadataAnchorCache.shared.syncAnchor
-        XCTAssertEqual(syncAnchor.rawValue.count, 8, "Sync anchor must be 8 bytes")
+        let syncAnchor = try await MetadataStore.shared.currentSyncAnchor
+        let parsed = SyncState.parseAnchor(from: syncAnchor)
+        XCTAssertNotNil(parsed, "Sync anchor must be parseable")
     }
     
     /// Test: Enumerate root container items
@@ -1296,23 +1315,21 @@ final class SyncingPausedDiagnosticDeviceTests: XCTestCase {
         print("✅ Domain OK: \(domain.identifier.rawValue), userEnabled=\(domain.userEnabled)")
         print("")
         
-        // 2. Anchor State
+        // 2. Anchor State (using MetadataStore directly)
         print("=== 2. ANCHOR STATE ===")
-        let cacheAnchor = MetadataAnchorCache.shared.currentAnchor
-        let syncAnchor = MetadataAnchorCache.shared.syncAnchor
-        print("  Cache anchor value: \(cacheAnchor)")
-        print("  Sync anchor bytes: \(syncAnchor.rawValue.count)")
+        let storeAnchorValue = try await MetadataStore.shared.currentAnchor
+        let syncAnchor = try await MetadataStore.shared.currentSyncAnchor
+        print("  Store anchor value: \(storeAnchorValue)")
         
-        if syncAnchor.rawValue.count == 8 {
-            let anchorValue = syncAnchor.rawValue.withUnsafeBytes { $0.load(as: UInt64.self) }
-            print("  Sync anchor parsed: \(anchorValue)")
-            print("✅ Anchor format OK (8 bytes, value=\(anchorValue))")
+        if let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) {
+            print("  Sync anchor version: \(version), iteration: \(iteration)")
+            print("✅ Anchor format OK (version=\(version), iteration=\(iteration))")
         } else {
-            print("❌ CRITICAL: Anchor is \(syncAnchor.rawValue.count) bytes, expected 8!")
-            XCTFail("Wrong anchor size")
+            print("❌ CRITICAL: Anchor is not parseable!")
+            XCTFail("Unparseable anchor")
         }
         
-        XCTAssertGreaterThanOrEqual(cacheAnchor, 1, "Anchor must be >= 1")
+        XCTAssertGreaterThanOrEqual(storeAnchorValue, 1, "Anchor must be >= 1")
         print("")
         
         // 3. MetadataStore State
@@ -1578,28 +1595,28 @@ final class SyncingPausedDiagnosticDeviceTests: XCTestCase {
     }
     
     /// Test: Verify anchor format round-trip
+    /// NOTE: MetadataAnchorCache was removed - using MetadataStore directly
     func testAnchorFormatRoundTrip() async throws {
         if isSimulator {
             throw XCTSkip("Device-only diagnostic test")
         }
         
-        // Get current anchor
-        let cache = MetadataAnchorCache.shared
-        let originalValue = cache.currentAnchor
-        let syncAnchor = cache.syncAnchor
+        // Get current anchor from MetadataStore
+        let originalValue = try await MetadataStore.shared.currentAnchor
+        let syncAnchor = try await MetadataStore.shared.currentSyncAnchor
         
         print("Original anchor value: \(originalValue)")
-        print("Sync anchor bytes: \(syncAnchor.rawValue.count)")
         
-        // Must be 8 bytes
-        XCTAssertEqual(syncAnchor.rawValue.count, 8, "Anchor must be 8 bytes")
+        // Must be parseable in new versioned format
+        guard let (version, iteration) = SyncState.parseAnchor(from: syncAnchor) else {
+            XCTFail("Anchor must be parseable")
+            return
+        }
+        print("Parsed anchor: version=\(version), iteration=\(iteration)")
         
-        // Round-trip: parse back
-        let parsedValue = syncAnchor.rawValue.withUnsafeBytes { $0.load(as: UInt64.self) }
-        print("Parsed anchor value: \(parsedValue)")
-        
-        XCTAssertEqual(parsedValue, originalValue, "Round-trip must preserve value")
-        XCTAssertGreaterThanOrEqual(parsedValue, 1, "Anchor must be >= 1")
+        XCTAssertEqual(version, SyncState.currentVersion, "Version must match current")
+        XCTAssertEqual(iteration, originalValue, "Round-trip must preserve iteration value")
+        XCTAssertGreaterThanOrEqual(iteration, 1, "Iteration must be >= 1")
     }
     
     /// Test: Multiple signal-wait cycles to detect intermittent crashes
@@ -1995,11 +2012,11 @@ final class SyncingPausedDiagnosticDeviceTests: XCTestCase {
         print("  Store anchor: \(storeAnchor)")
         print("  Total items: \(allItems.count)")
         
-        // 3. MetadataAnchorCache state  
-        print("\n=== ANCHOR CACHE ===")
-        let cache = MetadataAnchorCache.shared
-        print("  Current anchor: \(cache.currentAnchor)")
-        print("  Sync anchor bytes: \(cache.syncAnchor.rawValue.count)")
+        // 3. Anchor state from MetadataStore (cache was removed in Option B)
+        print("\n=== ANCHOR STATE ===")
+        let syncAnchor = try await store.currentSyncAnchor
+        print("  Current anchor: \(storeAnchor)")
+        print("  Sync anchor bytes: \(syncAnchor.rawValue.count)")
         
         // 4. Extension log
         print("\n=== EXTENSION LOG (last 20 lines) ===")
