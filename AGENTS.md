@@ -220,60 +220,68 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 - **Do NOT test on device before understanding the problem** - write unit tests first
 - **Do NOT repeat failed approaches** - check the "Failed Approaches" section below
 
-### Current State (Jan 3, 2026)
+### Current State (Jan 5, 2026)
 
 | Question | Answer |
 |----------|--------|
 | **Active enumerator** | `MetadataStoreEnumerator` (for working set) |
-| **Symptom** | "Syncing with Geistty Paused" - testing after dual-cache fix |
+| **Symptom** | "Syncing with Geistty Paused" - testing Option B fix |
 | **Alert gone?** | ✅ Yes - error alert no longer appears |
-| **Changes reflect?** | 🔄 Testing after dual-cache fix |
-| **Last fix applied** | Dual cache consolidation (Jan 3, 2026) |
-| **Code removed** | ~500 lines (MetadataCache.swift, CachedItem.swift deleted) |
+| **Changes reflect?** | 🔄 Testing after Option B simplification |
+| **Last fix applied** | **Option B: Single source of truth (Jan 5, 2026)** |
+| **Code removed** | MetadataAnchorCache class, sync_anchor.dat file persistence |
 
-### Bug Fix History (Jan 3, 2026)
+### Option B Simplification (Jan 5, 2026)
 
-**Fix #2: Dual Cache Consolidation** - 🔄 Testing
-- **Root cause discovered:** TWO PARALLEL CACHE SYSTEMS existed:
-  - `MetadataCache` + `CachedItem` (~500 lines) - used by RemoteEnumerator for browsing
-  - `MetadataStore` + `CachedFileMetadata` - used by MetadataStoreEnumerator
-- Directory browsing used `MetadataCache` which held stale data
-- **Fix:**
-  - Updated `item(for:)` to use `MetadataStore.shared.item(id:)`
-  - Updated `enumerateItems` fallback to use `MetadataStore.shared.items(inFolder:)`
-  - Rewrote `refreshFromServer()` to only update `MetadataStore`
-  - Added full write capabilities to `CachedMetadataItem`
-  - **DELETED** `MetadataCache.swift` (359 lines)
-  - **DELETED** `CachedItem.swift` (137 lines)
-  - **DELETED** `CachedRemoteItem` class
+**Root cause hypothesis:** Anchor desync between three sources:
+1. SwiftData `SyncState` (ground truth)
+2. `MetadataAnchorCache` (in-memory cache) - **REMOVED**
+3. `sync_anchor.dat` (file backup) - **REMOVED**
 
-**Fix #1: MetadataStore Commits (Jan 2, 2026)** - ✅ Partial success
-- Added `upsert()` calls in `createItem()` and `modifyItem()`
-- Added `markDeleted()` call in `deleteItem()`
+**Fix Applied:**
+- Removed `MetadataAnchorCache` class entirely (~130 lines)
+- Removed file-based `sync_anchor.dat` persistence
+- `currentSyncAnchor()` now uses `Task{}` to query `MetadataStore.shared` directly
+- SwiftData is now the ONLY source of truth
+- All tests pass on simulator
+
+**Files Changed:**
+- `MetadataStore.swift` - Simplified to ~550 lines
+- `MetadataStoreEnumerator.swift` - Uses async `Task{}` pattern
+- Test files - Updated to query MetadataStore directly
+
+### Bug Fix History
+
+**Option B: Single Source of Truth (Jan 5, 2026)** - 🔄 Testing on device
+- Removed triple anchor storage problem
+- SwiftData is now ONLY source of truth
+- Tests pass, need device verification
+
+**Fix #2: Dual Cache Consolidation (Jan 3, 2026)** - ✅ Merged
+- Removed `MetadataCache` + `CachedItem` duplicate caching
+- Consolidated to single `MetadataStore` for all metadata
+
+**Fix #1: MetadataStore Commits (Jan 2, 2026)** - ✅ Merged
+- Added `upsert()` calls in write operations
 - Added `signalEnumerator(for: .workingSet)` after all operations
-- **Result:** Error alert gone, but stale data issue led to discovery of dual caches
-
-**Earlier Fix: Item Filtering Bug** - ✅ Fixed
-- Removed filter that dropped subfolder items
-- Test: `testSubfolderFileChangesAreReported()`
 
 ### Failed Approaches
 
 1. **Adding more logging** - Created diagnostic bloat, didn't identify root cause
 2. **Signaling errors resolved** - `signalErrorResolved()` after SFTP connect - no effect
-3. **Async Task{} in callbacks** - Apple docs say async is allowed, Cryptomator does it, didn't help
-4. **Parent-in-modified-set filter** - **REMOVED** - caused subfolder items to be dropped
+3. **Synchronous anchor cache** - Created desync problems with SwiftData
+4. **File-based anchor backup** - Third source of truth caused more problems
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
 | `FileProviderExtension.swift` | Main extension, `enumerator(for:)` returns which enumerator |
-| `MetadataStoreEnumerator.swift` | Working set enumerator (current) |
+| `MetadataStoreEnumerator.swift` | Working set enumerator - queries MetadataStore via Task{} |
 | `MetadataStoreEnumeratorTests.swift` | Unit tests for enumerator behavior |
-| `MetadataStore.swift` | SwiftData actor, anchor cache - **ONLY source of truth** |
+| `MetadataStore.swift` | SwiftData actor - **ONLY source of truth for anchors** |
 | `CachedFileMetadata.swift` | SwiftData @Model for file metadata |
-| `FILE_PROVIDER_IMPLEMENTATION.md` | Full context, history, architecture |
+| `FILE_PROVIDER_ANALYSIS.md` | Analysis and Option B documentation |
 
 ---
 

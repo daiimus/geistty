@@ -304,8 +304,8 @@ final class WorkingSetMockTests: XCTestCase {
     func testSyncAnchorFlow() async throws {
         // Step 1: iOS asks for current anchor
         let initialAnchorData = try await store.currentSyncAnchor
-        guard let initialAnchor = SyncState.anchorValue(from: initialAnchorData) else {
-            XCTFail("Failed to get initial anchor value")
+        guard let (_, initialAnchor) = SyncState.parseAnchor(from: initialAnchorData) else {
+            XCTFail("Failed to parse initial anchor")
             return
         }
         XCTAssertEqual(initialAnchor, 1, "Initial anchor should be 1")
@@ -336,8 +336,8 @@ final class WorkingSetMockTests: XCTestCase {
         
         // Step 4: Get new anchor after changes
         let newAnchorData = try await store.currentSyncAnchor
-        guard let newAnchor = SyncState.anchorValue(from: newAnchorData) else {
-            XCTFail("Failed to get new anchor value")
+        guard let (_, newAnchor) = SyncState.parseAnchor(from: newAnchorData) else {
+            XCTFail("Failed to parse new anchor")
             return
         }
         XCTAssertGreaterThan(newAnchor, initialAnchor, "Anchor should advance after adding items")

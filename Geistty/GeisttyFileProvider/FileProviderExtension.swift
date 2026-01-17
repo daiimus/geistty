@@ -1292,7 +1292,8 @@ class RemoteEnumerator: NSObject, NSFileProviderEnumerator {
                         observer.didEnumerate(items)
                         observer.finishEnumerating(upTo: nil)
                     } else {
-                        // No cache either - report the original error
+                        // No cache - report error so user knows there's a problem
+                        // This is better than showing empty folder when it's not
                         Self.debugLog("No cache available, reporting error")
                         observer.finishEnumeratingWithError(Self.toFileProviderError(error))
                     }
