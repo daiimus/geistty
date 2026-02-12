@@ -12,45 +12,6 @@ import Combine
 
 private let logger = Logger(subsystem: "com.geistty", category: "TmuxSession")
 
-// MARK: - Pane Restore State
-
-/// State machine for pane history restore process
-/// This ensures proper sequencing: surface created -> history requested -> history received -> live output flushed
-enum PaneRestoreState: Equatable {
-    /// Initial state - pane exists but no surface yet
-    case awaitingSurface
-    
-    /// Surface created, history request sent, awaiting response
-    /// Live output is buffered during this phase
-    case awaitingHistory(bufferedOutput: [Data])
-    
-    /// History received and fed to surface, live output flushed
-    /// Pane is now fully operational
-    case restored
-    
-    /// Check if we should buffer live output
-    var shouldBufferOutput: Bool {
-        if case .awaitingHistory = self { return true }
-        return false
-    }
-    
-    /// Append output to buffer (only valid in awaitingHistory state)
-    mutating func appendBufferedOutput(_ data: Data) {
-        if case .awaitingHistory(var buffered) = self {
-            buffered.append(data)
-            self = .awaitingHistory(bufferedOutput: buffered)
-        }
-    }
-    
-    /// Get buffered output (only valid in awaitingHistory state)
-    var bufferedOutput: [Data] {
-        if case .awaitingHistory(let buffered) = self {
-            return buffered
-        }
-        return []
-    }
-}
-
 // MARK: - Connection State
 
 /// Connection state for the tmux session
@@ -121,7 +82,7 @@ class TmuxSessionManager: ObservableObject {
     
     /// Ghostty surfaces for each pane (paneId -> surface)
     /// TmuxSessionManager owns ALL surfaces - views just display them
-    private var paneSurfaces: [String: Ghostty.SurfaceView] = [:]
+    private(set) var paneSurfaces: [String: Ghostty.SurfaceView] = [:]
     
     /// The primary surface for the initial pane (%0)
     /// This is always kept alive even when in multi-pane mode
@@ -131,18 +92,12 @@ class TmuxSessionManager: ObservableObject {
     /// This is updated when the surface reports its cell size
     @Published private(set) var primaryCellSize: CGSize = .zero
     
-    // MARK: - Pane Restore State Machine
-    
-    /// State machine for each pane's history restore process
-    /// This replaces the multiple buffer dictionaries with a single source of truth
-    private var paneRestoreStates: [String: PaneRestoreState] = [:]
+    // MARK: - Output Buffering
     
     /// Buffer for output received before surfaces are created (pre-factory configuration)
-    /// This is separate from the restore state machine - used only during initial connection
-    private var pendingOutput: [String: [Data]] = [:]
-    
-    /// Buffer for history content received before surface was created
-    private var pendingHistoryContent: [String: String] = [:]
+    /// tmux sends %output immediately on attach; if the surface isn't ready yet,
+    /// we buffer here and flush when the surface is created.
+    private(set) var pendingOutput: [String: [Data]] = [:]
     
     /// Tracks whether %sessions-changed was received before %session-changed
     /// If true, the session was newly created; if false, it was resumed (attached)
@@ -274,9 +229,7 @@ class TmuxSessionManager: ObservableObject {
         currentSplitTree = TmuxSplitTree()
         lastProcessedLayouts.removeAll()
         
-        // Clear pane restore state machine
-        paneRestoreStates.removeAll()
-        pendingHistoryContent.removeAll()
+        // Clear output buffers
         pendingOutput.removeAll()
         sawSessionsChanged = false
         sessionResumeStatus = nil
@@ -307,7 +260,6 @@ class TmuxSessionManager: ObservableObject {
     // MARK: - State Queries
     
     /// Refresh all state from tmux server
-    /// Uses proper command routing so responses don't interfere with session restore
     func refreshState() {
         guard writeToSSH != nil else {
             logger.warning("Cannot refresh state: no write callback available")
@@ -439,6 +391,187 @@ class TmuxSessionManager: ObservableObject {
         
         // Query windows for this session
         queryWindows(for: sessionId)
+        
+        // If resuming an existing session, restore visible screen content.
+        // tmux does NOT send %output for the existing visible screen on control
+        // client attach — only new output produced after attach arrives via %output.
+        // We must use capture-pane to populate the terminal surface.
+        if case .resumed = sessionResumeStatus {
+            restoreVisibleContent()
+        }
+    }
+    
+    // MARK: - Session Restore
+    
+    /// Callback type for sending async commands through TmuxGateway
+    typealias AsyncCommandFunc = (String) async throws -> String
+    
+    /// Callback type for fire-and-forget commands through TmuxGateway
+    typealias PausePaneFunc = (String) async throws -> Void
+    typealias UnpausePaneFunc = (String) async throws -> Void
+    
+    /// Async command function (provided by SSHSession bridging to TmuxGateway)
+    private var asyncSendCommandFunc: AsyncCommandFunc?
+    
+    /// Pause/unpause functions (provided by SSHSession bridging to TmuxGateway)
+    private var pausePaneFunc: PausePaneFunc?
+    private var unpausePaneFunc: UnpausePaneFunc?
+    
+    /// Set up async gateway functions for session restore
+    /// These bridge to TmuxGateway's actor-isolated methods
+    func setupRestoreFunctions(
+        asyncSendCommand: @escaping AsyncCommandFunc,
+        pausePane: @escaping PausePaneFunc,
+        unpausePane: @escaping UnpausePaneFunc
+    ) {
+        self.asyncSendCommandFunc = asyncSendCommand
+        self.pausePaneFunc = pausePane
+        self.unpausePaneFunc = unpausePane
+    }
+    
+    /// Restore visible screen content for all panes in the current window.
+    ///
+    /// Strategy (inspired by iTerm2):
+    /// 1. Pause all panes to freeze %output delivery
+    /// 2. capture-pane -pe (visible screen, ANSI escapes) for each pane
+    /// 3. Feed captured content to Ghostty surfaces
+    /// 4. Unpause all panes to resume live output
+    ///
+    /// This must happen BEFORE any %output arrives. Since we pause first,
+    /// tmux buffers any new output while we capture. After unpausing,
+    /// the buffered output arrives naturally via %output.
+    private func restoreVisibleContent() {
+        guard let asyncSend = asyncSendCommandFunc,
+              let pause = pausePaneFunc,
+              let unpause = unpausePaneFunc else {
+            logger.warning("RESTORE: Cannot restore - async functions not configured (asyncSend=\(asyncSendCommandFunc != nil), pause=\(pausePaneFunc != nil), unpause=\(unpausePaneFunc != nil))")
+            return
+        }
+        
+        logger.info("RESTORE: Starting visible content restore for resumed session")
+        
+        // First, query panes to know which panes exist in the current window.
+        // We use the list-panes command response to identify panes, then
+        // capture each one.
+        sendCommand("list-panes -F '#{pane_id}'") { [weak self] result in
+            guard let self = self else {
+                logger.warning("RESTORE: self is nil in list-panes callback")
+                return
+            }
+            
+            switch result {
+            case .success(let response):
+                logger.info("RESTORE: list-panes raw response: '\(response)'")
+                let paneIds = response
+                    .split(separator: "\n", omittingEmptySubsequences: true)
+                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { $0.hasPrefix("%") }
+                
+                logger.info("RESTORE: Found \(paneIds.count) panes to restore: \(paneIds)")
+                
+                if paneIds.isEmpty {
+                    logger.warning("RESTORE: No panes found! Raw response was: '\(response)'")
+                    return
+                }
+                
+                // Launch async restore task
+                Task { [weak self] in
+                    await self?.performRestore(paneIds: paneIds, asyncSend: asyncSend, pause: pause, unpause: unpause)
+                }
+                
+            case .failure(let error):
+                logger.error("RESTORE: Failed to list panes: \(error.localizedDescription)")
+                // Fall through — panes will show blank until user types something
+            }
+        }
+    }
+    
+    /// Perform the async pause → capture → feed → unpause sequence.
+    /// Runs on a Task because it needs to await TmuxGateway commands.
+    @MainActor
+    private func performRestore(
+        paneIds: [String],
+        asyncSend: @escaping AsyncCommandFunc,
+        pause: @escaping PausePaneFunc,
+        unpause: @escaping UnpausePaneFunc
+    ) async {
+        guard !paneIds.isEmpty else {
+            logger.info("RESTORE: No panes to restore")
+            return
+        }
+        
+        logger.info("RESTORE: performRestore starting for \(paneIds.count) panes: \(paneIds)")
+        
+        // Step 1: Pause all panes to freeze %output.
+        for paneId in paneIds {
+            do {
+                logger.info("RESTORE: Pausing pane \(paneId)...")
+                try await pause(paneId)
+                logger.info("RESTORE: Paused pane \(paneId) successfully")
+            } catch {
+                logger.warning("RESTORE: Failed to pause pane \(paneId): \(error.localizedDescription)")
+            }
+        }
+        
+        // Step 2: Capture and feed each pane
+        for paneId in paneIds {
+            do {
+                logger.info("RESTORE: Capturing pane \(paneId)...")
+                let content = try await asyncSend("capture-pane -pe -t \(paneId)")
+                
+                logger.info("RESTORE: Captured \(content.count) chars for pane \(paneId), first 100: '\(content.prefix(100))'")
+                
+                // Skip if content is empty (blank pane)
+                guard !content.isEmpty else {
+                    logger.info("RESTORE: Pane \(paneId) capture is empty, skipping")
+                    continue
+                }
+                
+                // Convert \n to \r\n for terminal emulator.
+                // capture-pane returns Unix line endings (\n), but terminal emulators
+                // interpret \n as "cursor down" without carriage return. We need \r\n
+                // to move to column 0 AND down.
+                let terminalContent = content.replacingOccurrences(of: "\n", with: "\r\n")
+                
+                guard let data = terminalContent.data(using: .utf8) else {
+                    logger.error("RESTORE: Failed to encode capture content for \(paneId)")
+                    continue
+                }
+                
+                // Get or create surface and feed the captured content
+                let surface = getSurfaceOrCreate(for: paneId)
+                logger.info("RESTORE: Surface for \(paneId): \(surface != nil ? "exists" : "nil"), surfaceFactory: \(surfaceFactory != nil ? "set" : "nil"), paneSurfaces keys: \(Array(paneSurfaces.keys))")
+                
+                if let surface = surface {
+                    surface.feedData(data)
+                    surface.setNeedsDisplay()
+                    logger.info("RESTORE: Fed \(data.count) bytes of capture to \(paneId)")
+                } else {
+                    // Surface not ready yet — buffer it as pending output.
+                    if pendingOutput[paneId] == nil {
+                        pendingOutput[paneId] = []
+                    }
+                    pendingOutput[paneId]?.append(data)
+                    logger.info("RESTORE: Buffered \(data.count) bytes of capture for \(paneId) (surface not ready)")
+                }
+                
+            } catch {
+                logger.error("RESTORE: Failed to capture pane \(paneId): \(error.localizedDescription)")
+            }
+        }
+        
+        // Step 3: Unpause all panes to resume live output.
+        for paneId in paneIds {
+            do {
+                logger.info("RESTORE: Unpausing pane \(paneId)...")
+                try await unpause(paneId)
+                logger.info("RESTORE: Unpaused pane \(paneId) successfully")
+            } catch {
+                logger.warning("RESTORE: Failed to unpause pane \(paneId): \(error.localizedDescription)")
+            }
+        }
+        
+        logger.info("RESTORE: Visible content restore COMPLETE for \(paneIds.count) panes")
     }
     
     /// Handle window added notification
@@ -515,9 +648,7 @@ class TmuxSessionManager: ObservableObject {
                 // Remove surface with paneActuallyClosed=true so %0 can be removed
                 removeSurface(for: paneId, paneActuallyClosed: true)
                 
-                // Clean up buffer state for this pane
-                paneRestoreStates.removeValue(forKey: paneId)
-                pendingHistoryContent.removeValue(forKey: paneId)
+                // Clean up output buffer for this pane
                 pendingOutput.removeValue(forKey: paneId)
             }
         }
@@ -724,9 +855,7 @@ class TmuxSessionManager: ObservableObject {
                 removeSurface(for: paneId, paneActuallyClosed: true)
                 panes.removeValue(forKey: paneId)
                 
-                // Clear pane restore state to prevent memory leak
-                paneRestoreStates.removeValue(forKey: paneId)
-                pendingHistoryContent.removeValue(forKey: paneId)
+                // Clean up output buffer for this pane
                 pendingOutput.removeValue(forKey: paneId)
                 
                 // If the removed pane had our primary surface, reassign it atomically
@@ -846,19 +975,13 @@ class TmuxSessionManager: ObservableObject {
     // MARK: - Pane Output Routing
     
     /// Route pane output to the appropriate Ghostty surface
-    /// During history restore, output is buffered to avoid interleaving
+    /// If no surface exists yet, output is buffered in pendingOutput and flushed
+    /// when the surface is created. tmux sends %output for the visible screen
+    /// on attach — this is the canonical way content reaches the terminal.
     func routeOutput(_ data: Data, to paneId: String) {
-        // If history restore is in progress, buffer live output
-        if let state = paneRestoreStates[paneId], state.shouldBufferOutput {
-            paneRestoreStates[paneId]?.appendBufferedOutput(data)
-            logger.debug("Buffered \(data.count) bytes during history restore for pane \(paneId)")
-            return
-        }
-        
         // Get existing surface or create one if factory is available
         guard let surface = getSurfaceOrCreate(for: paneId) else {
-            // No surface available - buffer the output for later
-            // This happens for session restore which arrives before surface factory is configured
+            // No surface available — buffer output until surface is created
             if pendingOutput[paneId] == nil {
                 pendingOutput[paneId] = []
             }
@@ -947,10 +1070,14 @@ class TmuxSessionManager: ObservableObject {
         
         logger.info("Created Ghostty surface for pane \(paneId)")
         
-        // Trigger history restore for this newly created surface
-        // capture-pane will fetch the scrollback content and feed it to the surface
-        // handleSurfaceCreatedForRestore also handles flushing pendingOutput in the correct order
-        handleSurfaceCreatedForRestore(surface, paneId: paneId)
+        // Flush any output that was buffered before this surface existed
+        if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+            logger.info("🔄 Flushing \(pending.count) buffered output chunks to new surface for pane \(paneId)")
+            for data in pending {
+                surface.feedData(data)
+            }
+            surface.setNeedsDisplay()
+        }
         
         return surface
     }
@@ -982,157 +1109,6 @@ class TmuxSessionManager: ObservableObject {
         }
     }
     
-    /// Handle surface creation in context of history restore state machine
-    private func handleSurfaceCreatedForRestore(_ surface: Ghostty.SurfaceView, paneId: String) {
-        let currentState = paneRestoreStates[paneId]
-        
-        // Check if there's buffered history content for this pane (history arrived before surface)
-        if let historyContent = pendingHistoryContent.removeValue(forKey: paneId) {
-            logger.info("📜 Feeding buffered history content to new surface for pane \(paneId): \(historyContent.count) chars")
-            feedHistoryToSurface(surface, content: historyContent, paneId: paneId)
-            
-            // Flush any buffered live output that arrived during history restore
-            if let state = currentState, case .awaitingHistory(let buffered) = state, !buffered.isEmpty {
-                logger.info("📜 Flushing \(buffered.count) buffered live output chunks for pane \(paneId)")
-                for data in buffered {
-                    surface.feedData(data)
-                }
-            }
-            
-            // Flush any pre-surface output
-            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
-                logger.info("🔄 Flushing \(pending.count) pre-surface chunks for pane \(paneId)")
-                for data in pending {
-                    surface.feedData(data)
-                }
-            }
-            
-            // Mark as restored
-            paneRestoreStates[paneId] = .restored
-            
-        } else if currentState == .restored {
-            // History was already restored for this pane (e.g., surface recreated)
-            // Safe to flush pending output directly
-            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
-                logger.info("🔄 Flushing \(pending.count) buffered chunks to surface for pane \(paneId) (already restored)")
-                for data in pending {
-                    surface.feedData(data)
-                }
-            }
-        } else {
-            // History restore hasn't happened yet - move pendingOutput to state buffer
-            var buffered: [Data] = []
-            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
-                logger.info("📜 Moving \(pending.count) pre-surface chunks to history restore buffer for pane \(paneId)")
-                buffered = pending
-            }
-            
-            // Now start history restore
-            startHistoryRestore(paneId: paneId, withBuffer: buffered)
-        }
-    }
-    
-    /// Start history restore for a pane
-    private func startHistoryRestore(paneId: String, withBuffer existingBuffer: [Data] = []) {
-        // Check if already restoring or restored
-        if let state = paneRestoreStates[paneId] {
-            if state == .restored || state.shouldBufferOutput {
-                logger.debug("📜 Pane \(paneId) already in restore process, skipping")
-                return
-            }
-        }
-        
-        guard writeToSSH != nil else {
-            logger.warning("📜 Cannot restore pane history - writeToSSH not configured")
-            return
-        }
-        
-        logger.info("📜 Starting history restore for pane \(paneId)")
-        
-        // Transition to awaiting history state with any existing buffered data
-        paneRestoreStates[paneId] = .awaitingHistory(bufferedOutput: existingBuffer)
-        
-        // Send capture-pane command via abstracted sendCommand
-        // The response will be handled by the gateway and forwarded to historyRestoreComplete
-        sendCommand("capture-pane -pe -t \(paneId) -S -") { [weak self] result in
-            switch result {
-            case .success(let content):
-                self?.historyRestoreComplete(for: paneId, content: content)
-            case .failure(let error):
-                logger.error("📜 Failed to restore history for pane \(paneId): \(error)")
-                // Clear state on failure so we don't stay stuck
-                self?.paneRestoreStates[paneId] = .restored
-            }
-        }
-    }
-    
-    /// Called when history restore is complete for a pane
-    /// Flushes any buffered live output that arrived during the restore
-    func historyRestoreComplete(for paneId: String, content: String) {
-        // Get the buffered output from state machine before transitioning
-        let bufferedOutput: [Data]
-        if let state = paneRestoreStates[paneId], case .awaitingHistory(let buffered) = state {
-            bufferedOutput = buffered
-        } else {
-            bufferedOutput = []
-        }
-        
-        // Try to get or create the surface
-        guard let surface = getSurfaceOrCreate(for: paneId) else {
-            // Surface not available yet - buffer the history for when surface is created
-            logger.info("📜 History restore complete but no surface for \(paneId) - buffering content (\(content.count) chars)")
-            pendingHistoryContent[paneId] = content
-            // Keep the state as awaitingHistory so buffered output is preserved
-            return
-        }
-        
-        // Feed history to the surface
-        feedHistoryToSurface(surface, content: content, paneId: paneId)
-        
-        // Flush any live output that was buffered during history restore
-        if !bufferedOutput.isEmpty {
-            logger.info("📜 Flushing \(bufferedOutput.count) buffered live output chunks for pane \(paneId)")
-            for data in bufferedOutput {
-                surface.feedData(data)
-            }
-        }
-        
-        // Transition to restored state
-        paneRestoreStates[paneId] = .restored
-        logger.info("📜 ✅ Pane \(paneId) history restore complete")
-    }
-    
-    /// Feed captured history content to a surface
-    private func feedHistoryToSurface(_ surface: Ghostty.SurfaceView, content: String, paneId: String) {
-        // Strip trailing empty lines from captured content
-        // capture-pane includes all lines up to cursor, which may include many blank lines
-        var lines = content.components(separatedBy: "\n")
-        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
-            lines.removeLast()
-        }
-        let trimmedContent = lines.joined(separator: "\n")
-        
-        guard !trimmedContent.isEmpty else {
-            logger.info("📜 No history content to feed for pane \(paneId)")
-            return
-        }
-        
-        // Clear the screen and feed history content
-        // ESC[2J = clear entire screen, ESC[H = move cursor to home position
-        let clearScreen = "\u{1b}[2J\u{1b}[H"
-        if let clearData = clearScreen.data(using: .utf8) {
-            surface.feedData(clearData)
-        }
-        
-        // Feed captured session content to terminal
-        // Convert \n to \r\n for proper terminal display (CR moves to column 0, LF moves down)
-        let terminalContent = trimmedContent.replacingOccurrences(of: "\n", with: "\r\n")
-        if let data = terminalContent.data(using: .utf8) {
-            surface.feedData(data)
-        }
-        logger.info("📜 Fed history content to pane \(paneId): \(trimmedContent.count) chars (trimmed from \(content.count))")
-    }
-
     /// Configure surface management with factory and handlers
     /// Call this before any surfaces are created
     func configureSurfaceManagement(
@@ -1783,9 +1759,7 @@ class TmuxSessionManager: ObservableObject {
             removeSurface(for: paneId)
         }
         
-        // Clear pane restore state machine
-        paneRestoreStates.removeAll()
-        pendingHistoryContent.removeAll()
+        // Clear output buffers
         pendingOutput.removeAll()
         sawSessionsChanged = false
         sessionResumeStatus = nil
