@@ -5,7 +5,10 @@
 //  Main view for managing saved connections
 //
 
+import os
 import SwiftUI
+
+private let logger = Logger(subsystem: "com.geistty", category: "ConnectionList")
 
 /// Main view showing saved connections with quick connect
 struct ConnectionListView: View {
@@ -21,6 +24,9 @@ struct ConnectionListView: View {
     @State private var searchText = ""
     @State private var errorMessage: String?
     @State private var showingError = false
+    @State private var showingPasswordPrompt = false
+    @State private var passwordPromptProfile: ConnectionProfile?
+    @State private var promptedPassword = ""
     
     // Callback for when connection succeeds
     var onConnect: ((SSHSession) -> Void)?
@@ -153,6 +159,25 @@ struct ConnectionListView: View {
             } message: {
                 Text(errorMessage ?? "Unknown error")
             }
+            .alert("Enter Password", isPresented: $showingPasswordPrompt) {
+                SecureField("Password", text: $promptedPassword)
+                Button("Connect") {
+                    guard let profile = passwordPromptProfile else { return }
+                    let password = promptedPassword
+                    promptedPassword = ""
+                    passwordPromptProfile = nil
+                    connectWithPassword(profile: profile, password: password)
+                }
+                Button("Cancel", role: .cancel) {
+                    promptedPassword = ""
+                    passwordPromptProfile = nil
+                    connectionInProgress = nil
+                }
+            } message: {
+                if let profile = passwordPromptProfile {
+                    Text("\(profile.username)@\(profile.host)")
+                }
+            }
             // Keyboard shortcut handlers (Cmd+N, Cmd+O)
             .onReceive(NotificationCenter.default.publisher(for: .showNewConnection)) { _ in
                 showingAddConnection = true
@@ -271,6 +296,48 @@ struct ConnectionListView: View {
                 let session = SSHSession()
                 let credential = try await CredentialManager.shared.getCredentials(for: profile)
                 try await session.connect(profile: profile, credential: credential)
+                
+                await MainActor.run {
+                    connectionInProgress = nil
+                    onConnect?(session)
+                }
+            } catch is KeychainError where profile.authMethod == .password {
+                // No password saved in keychain — prompt the user to enter one
+                logger.info("No saved password for \(profile.username)@\(profile.host), prompting")
+                await MainActor.run {
+                    passwordPromptProfile = profile
+                    showingPasswordPrompt = true
+                }
+            } catch {
+                await MainActor.run {
+                    connectionInProgress = nil
+                    errorMessage = error.localizedDescription
+                    showingError = true
+                }
+            }
+        }
+    }
+    
+    private func connectWithPassword(profile: ConnectionProfile, password: String) {
+        connectionInProgress = profile
+        
+        Task {
+            do {
+                let session = SSHSession()
+                try await session.connect(
+                    host: profile.host,
+                    port: profile.port,
+                    username: profile.username,
+                    password: password,
+                    useTmux: profile.useTmux,
+                    tmuxSessionName: profile.tmuxSessionName
+                )
+                
+                // Save password to keychain for next time
+                try? KeychainManager.shared.savePassword(
+                    password, for: profile.host, username: profile.username
+                )
+                logger.info("Saved password to keychain for \(profile.username)@\(profile.host)")
                 
                 await MainActor.run {
                     connectionInProgress = nil
