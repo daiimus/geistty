@@ -616,6 +616,20 @@ class SSHSession: ObservableObject, Identifiable {
             }
         )
         
+        // Set up async restore functions for session resume.
+        // These bridge TmuxSessionManager (MainActor) to TmuxGateway (actor).
+        manager.setupRestoreFunctions(
+            asyncSendCommand: { command in
+                try await gateway.sendCommand(command)
+            },
+            pausePane: { paneId in
+                try await gateway.pausePane(paneId: paneId)
+            },
+            unpausePane: { paneId in
+                try await gateway.unpausePane(paneId: paneId)
+            }
+        )
+        
         // CRITICAL: Configure write callback before starting event loop
         // This ensures sendKeys can work as soon as data arrives
         Task { [weak self] in
@@ -667,10 +681,6 @@ class SSHSession: ObservableObject, Identifiable {
             Task {
                 await tmuxGateway?.enablePauseMode(pauseAfter: 1)
             }
-            
-        case .sessionRestored(let paneId, let content):
-            logger.info("Session restored: \(content.count) chars for \(paneId)")
-            tmuxSessionManager?.historyRestoreComplete(for: paneId, content: content)
             
         case .layoutChanged(let windowId, let windowIndex, let layout):
             tmuxSessionManager?.handleLayoutChanged(windowId: windowId, windowIndex: windowIndex, layout: layout)

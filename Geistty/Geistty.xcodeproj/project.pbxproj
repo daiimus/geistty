@@ -73,6 +73,7 @@
 		D1000016 /* TmuxModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000016 /* TmuxModelsTests.swift */; };
 		D1000017 /* TmuxLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000017 /* TmuxLayoutTests.swift */; };
 		D1000018 /* TmuxSplitTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000018 /* TmuxSplitTreeTests.swift */; };
+		D1000019 /* TmuxSessionRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000019 /* TmuxSessionRestoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -183,6 +184,7 @@
 		D2000016 /* TmuxModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModelsTests.swift; sourceTree = "<group>"; };
 		D2000017 /* TmuxLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxLayoutTests.swift; sourceTree = "<group>"; };
 		D2000018 /* TmuxSplitTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitTreeTests.swift; sourceTree = "<group>"; };
+		D2000019 /* TmuxSessionRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionRestoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -396,6 +398,7 @@
 				D2000016 /* TmuxModelsTests.swift */,
 				D2000017 /* TmuxLayoutTests.swift */,
 				D2000018 /* TmuxSplitTreeTests.swift */,
+				D2000019 /* TmuxSessionRestoreTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -611,6 +614,7 @@
 				D1000016 /* TmuxModelsTests.swift in Sources */,
 				D1000017 /* TmuxLayoutTests.swift in Sources */,
 				D1000018 /* TmuxSplitTreeTests.swift in Sources */,
+				D1000019 /* TmuxSessionRestoreTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};

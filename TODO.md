@@ -519,8 +519,8 @@ iOS aggressively suspends apps and drops network connections. tmux handles persi
 **State Capture & Restore: ✅ COMPLETE**
 - [x] On app suspend: Pause mode active (tmux auto-pauses after timeout)
 - [x] On app resume: Reconnect SSH, re-attach tmux, restore view state
-- [x] capture-pane to restore visible content immediately
-- [x] Scrollback restoration via capture-pane -p -S -
+- [x] Visible screen restored via tmux %output on attach (capture-pane history restore removed — iTerm2 research showed feeding captured ANSI through terminal emulator corrupts state; Ghostty has no direct buffer API)
+- [x] capture-pane retained for on-demand search/export only
 
 **iOS Lifecycle Handling: 🔄 PARTIAL**
 - [x] App lifecycle observers (willResignActive/didBecomeActive)
