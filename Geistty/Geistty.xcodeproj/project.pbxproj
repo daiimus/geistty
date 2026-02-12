@@ -70,6 +70,9 @@
 		D1000013 /* FontMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000013 /* FontMappingTests.swift */; };
 		D1000014 /* ConnectionProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000014 /* ConnectionProfileTests.swift */; };
 		D1000015 /* GhosttyInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000015 /* GhosttyInputTests.swift */; };
+		D1000016 /* TmuxModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000016 /* TmuxModelsTests.swift */; };
+		D1000017 /* TmuxLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000017 /* TmuxLayoutTests.swift */; };
+		D1000018 /* TmuxSplitTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000018 /* TmuxSplitTreeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -177,6 +180,9 @@
 		D2000013 /* FontMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMappingTests.swift; sourceTree = "<group>"; };
 		D2000014 /* ConnectionProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionProfileTests.swift; sourceTree = "<group>"; };
 		D2000015 /* GhosttyInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInputTests.swift; sourceTree = "<group>"; };
+		D2000016 /* TmuxModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModelsTests.swift; sourceTree = "<group>"; };
+		D2000017 /* TmuxLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxLayoutTests.swift; sourceTree = "<group>"; };
+		D2000018 /* TmuxSplitTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitTreeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -386,9 +392,12 @@
 				D2000012 /* KittyKeyboardTranslatorTests.swift */,
 				D2000013 /* FontMappingTests.swift */,
 				D2000014 /* ConnectionProfileTests.swift */,
-				D2000015 /* GhosttyInputTests.swift */,
-			);
-			path = GeisttyTests;
+			D2000015 /* GhosttyInputTests.swift */,
+				D2000016 /* TmuxModelsTests.swift */,
+				D2000017 /* TmuxLayoutTests.swift */,
+				D2000018 /* TmuxSplitTreeTests.swift */,
+		);
+		path = GeisttyTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -598,10 +607,13 @@
 				D1000012 /* KittyKeyboardTranslatorTests.swift in Sources */,
 				D1000013 /* FontMappingTests.swift in Sources */,
 				D1000014 /* ConnectionProfileTests.swift in Sources */,
-				D1000015 /* GhosttyInputTests.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+			D1000015 /* GhosttyInputTests.swift in Sources */,
+				D1000016 /* TmuxModelsTests.swift in Sources */,
+				D1000017 /* TmuxLayoutTests.swift in Sources */,
+				D1000018 /* TmuxSplitTreeTests.swift in Sources */,
+		);
+		runOnlyForDeploymentPostprocessing = 0;
+	};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
