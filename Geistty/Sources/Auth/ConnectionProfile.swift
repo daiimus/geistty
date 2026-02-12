@@ -37,7 +37,7 @@ enum AuthMethod: String, Codable, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .sshKey: return "Import or generate an SSH key (recommended)"
-        case .password: return "Enter password at connection time"
+        case .password: return "Password saved securely in Keychain"
         }
     }
     
