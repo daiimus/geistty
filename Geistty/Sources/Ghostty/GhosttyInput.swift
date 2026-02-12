@@ -731,11 +731,25 @@ extension Ghostty.Input {
             self.action = action
             self.key = ghosttyKey
             
-            // Get text, filtering out iOS special key constants
+            // Get text, filtering out iOS special key constants and control characters.
             // iOS uses "UIKeyInput*" strings for special keys (Escape, arrows, etc.)
-            // Similar to how macOS uses Unicode PUA (0xF700-0xF8FF) for function keys
+            // Similar to how macOS uses Unicode PUA (0xF700-0xF8FF) for function keys.
+            //
+            // For control characters (codepoint < 0x20): iOS returns the raw control
+            // character in UIKey.characters (e.g. "\u{03}" for Ctrl+C). macOS Ghostty
+            // strips the control modifier to re-derive the printable character (e.g. "c")
+            // via its ghosttyCharacters property, then applies a second filter dropping
+            // text with first byte < 0x20. Ghostty's ctrlSeq() encoder expects either
+            // the printable character or nil — not the raw control byte — because its
+            // switch starts at 0x20. We mirror the macOS behavior by setting text to nil
+            // for control characters and letting ctrlSeq() use the logical key codepoint.
             let rawText = uiKey.characters
             if rawText.hasPrefix("UIKeyInput") {
+                self.text = nil
+            } else if let firstByte = rawText.utf8.first, firstByte < 0x20 {
+                // Control character — don't pass raw C0 bytes as text.
+                // Ghostty's key encoder will derive the correct byte from the
+                // key and modifiers via ctrlSeq().
                 self.text = nil
             } else {
                 self.text = rawText
