@@ -265,6 +265,13 @@ struct KittyModifiers {
     var hasBindingModifiers: Bool {
         ctrl || alt || superKey || hyper || meta
     }
+    
+    /// True if any modifier is active (including shift alone).
+    /// Used for functional keys where shift should produce a modifier parameter
+    /// in the legacy escape sequence (e.g., Shift+Up = ESC[1;2A).
+    var hasAnyModifier: Bool {
+        shift || ctrl || alt || superKey || hyper || meta
+    }
 }
 
 // MARK: - Functional Keys
@@ -291,8 +298,9 @@ enum FunctionalKey {
     
     /// Convert kitty code to legacy bytes
     func toLegacyBytes(mods: KittyModifiers) -> [UInt8] {
-        // For modified keys, we need to include the modifier in the sequence
-        let modParam = mods.hasBindingModifiers ? modifierParam(mods) : nil
+        // For functional keys, any modifier (including shift alone) produces a modifier parameter.
+        // This matches standard xterm behavior: Shift+Up = ESC[1;2A, Shift+Delete = ESC[3;2~
+        let modParam = mods.hasAnyModifier ? modifierParam(mods) : nil
         
         switch self {
         case .escape:
