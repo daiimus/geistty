@@ -10,24 +10,38 @@ import Foundation
 
 /// Test configuration for UI tests that require SSH connections
 /// Copy this file to TestConfig.local.swift and fill in your test credentials
+///
+/// Setup steps:
+///   1. Generate a test-only ed25519 key pair (no passphrase):
+///        ssh-keygen -t ed25519 -f GeisttyUITests/test_secrets/geistty_test_ed25519 -N "" -C "geistty-test-key"
+///   2. Add the public key to your test server's authorized_keys:
+///        cat GeisttyUITests/test_secrets/geistty_test_ed25519.pub >> ~/.ssh/authorized_keys
+///   3. Copy this file to TestConfig.local.swift and update the values below
+///   4. Set isConfigured = true
+///
+/// The test_secrets/ directory is gitignored. Never commit private keys.
 enum TestConfig {
     
     // MARK: - SSH Test Server
     
-    /// SSH hostname or IP address
-    static let sshHost = "your-test-server.example.com"
+    /// SSH hostname or IP address (use "localhost" to test against your Mac)
+    static let sshHost = "localhost"
     
     /// SSH port (default 22)
     static let sshPort: UInt16 = 22
     
     /// SSH username
-    static let sshUsername = "testuser"
+    static let sshUsername = "your-username"
     
-    /// Path to PEM file (relative to test bundle or absolute)
-    /// Place your .pem file in a gitignored location like ~/
-    static let pemFilePath = "/path/to/your/key.pem"
+    /// Path to ed25519 private key for key-based auth
+    /// Place your key in GeisttyUITests/test_secrets/ (gitignored)
+    static let keyFilePath = Bundle(for: BundleToken.self).path(
+        forResource: "geistty_test_ed25519",
+        ofType: nil,
+        inDirectory: "test_secrets"
+    ) ?? "/path/to/your/geistty_test_ed25519"
     
-    /// Alternative: SSH password (use PEM key instead when possible)
+    /// SSH password — prefer key-based auth; set to nil when using a key
     static let sshPassword: String? = nil
     
     // MARK: - Test Timeouts
@@ -47,6 +61,9 @@ enum TestConfig {
     static let verboseLogging = true
 }
 
+// Helper class to get bundle reference
+private class BundleToken {}
+
 // MARK: - Validation
 
 extension TestConfig {
@@ -60,7 +77,7 @@ extension TestConfig {
         guard !sshUsername.isEmpty else {
             throw TestConfigError.missingUsername
         }
-        guard FileManager.default.fileExists(atPath: pemFilePath) || sshPassword != nil else {
+        guard FileManager.default.fileExists(atPath: keyFilePath) || sshPassword != nil else {
             throw TestConfigError.missingCredentials
         }
     }
@@ -80,7 +97,7 @@ extension TestConfig {
             case .missingUsername:
                 return "SSH username is empty"
             case .missingCredentials:
-                return "No PEM file or password configured"
+                return "No key file or password configured"
             }
         }
     }

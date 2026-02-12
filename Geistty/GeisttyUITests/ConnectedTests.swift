@@ -6,7 +6,10 @@
 //  Uses TestConfig.local.swift for credentials (gitignored)
 //
 
+import os
 import XCTest
+
+private let logger = Logger(subsystem: "com.geistty.uitests", category: "ConnectedTests")
 
 /// Tests that connect to a real SSH server for testing tmux integration
 /// Requires TestConfig.local.swift to be configured with valid credentials
@@ -15,14 +18,6 @@ final class ConnectedTests: XCTestCase {
     var app: XCUIApplication!
     
     override func setUpWithError() throws {
-        // Check if credentials are configured
-        print("🔧 TestConfig.isConfigured: \(TestConfig.isConfigured)")
-        print("🔧 PEM file path: \(TestConfig.pemFilePath)")
-        print("🔧 PEM file exists: \(FileManager.default.fileExists(atPath: TestConfig.pemFilePath))")
-        print("🔧 SSH Host: \(TestConfig.sshHost)")
-        print("🔧 SSH User: \(TestConfig.sshUsername)")
-        print("🔧 SSH Password set: \(TestConfig.sshPassword != nil)")
-        
         // Skip all tests if config isn't set up
         guard TestConfig.isConfigured else {
             throw XCTSkip("TestConfig.local.swift not configured - isConfigured is false")
@@ -37,12 +32,12 @@ final class ConnectedTests: XCTestCase {
             "--test-host", TestConfig.sshHost,
             "--test-port", String(TestConfig.sshPort),
             "--test-user", TestConfig.sshUsername,
-            "--test-key", TestConfig.pemFilePath
+            "--test-key", TestConfig.keyFilePath
         ]
         
-        print("🚀 Launching app with test arguments...")
+        logger.info("Launching app with test arguments")
         app.launch()
-        print("✅ App launched")
+        logger.info("App launched")
     }
     
     override func tearDownWithError() throws {
@@ -62,7 +57,7 @@ final class ConnectedTests: XCTestCase {
             quickConnectButton.tap()
             takeScreenshot(name: "02-QuickConnectTapped")
         } else {
-            print("⚠️ QuickConnectButton not found, looking for alternatives...")
+            logger.warning("QuickConnectButton not found, looking for alternatives")
             // Also try text-based lookup
             let altButton = app.buttons["Quick Connect"]
             if altButton.waitForExistence(timeout: 2) {
@@ -112,7 +107,7 @@ final class ConnectedTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2.0)
         
         // Horizontal split (Cmd+D)
-        print("🔄 Performing horizontal split (Cmd+D)...")
+        logger.debug("Performing horizontal split (Cmd+D)")
         app.typeKey("d", modifierFlags: .command)
         Thread.sleep(forTimeInterval: 1.5)
         takeScreenshot(name: "Split-02-AfterHorizontalSplit")
@@ -142,7 +137,7 @@ final class ConnectedTests: XCTestCase {
         takeScreenshot(name: "VSplit-01-Connected")
         
         // Vertical split (Cmd+Shift+D)
-        print("🔄 Performing vertical split (Cmd+Shift+D)...")
+        logger.debug("Performing vertical split (Cmd+Shift+D)")
         app.typeKey("d", modifierFlags: [.command, .shift])
         Thread.sleep(forTimeInterval: 1.5)
         takeScreenshot(name: "VSplit-02-AfterSplit")
@@ -199,7 +194,7 @@ final class ConnectedTests: XCTestCase {
         
         // Log initial frame
         let window = app.windows.firstMatch
-        print("📐 Initial window frame: \(window.frame)")
+        logger.debug("Initial window frame: \(String(describing: window.frame))")
         
         // Note: Can't programmatically resize window in UI tests easily
         // But we can capture the state and rotate device
@@ -209,13 +204,13 @@ final class ConnectedTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         Thread.sleep(forTimeInterval: 1.5)
         takeScreenshot(name: "Resize-03-Landscape")
-        print("📐 Landscape window frame: \(window.frame)")
+        logger.debug("Landscape window frame: \(String(describing: window.frame))")
         
         // Rotate back
         XCUIDevice.shared.orientation = .portrait
         Thread.sleep(forTimeInterval: 1.5)
         takeScreenshot(name: "Resize-04-BackToPortrait")
-        print("📐 Portrait again window frame: \(window.frame)")
+        logger.debug("Portrait again window frame: \(String(describing: window.frame))")
         
         logPaneElements()
     }
@@ -267,9 +262,8 @@ final class ConnectedTests: XCTestCase {
         if hostField.waitForExistence(timeout: 2) {
             hostField.tap()
             hostField.typeText(TestConfig.sshHost)
-            print("✅ Filled host: \(TestConfig.sshHost)")
         } else {
-            print("⚠️ HostField not found")
+            logger.warning("HostField not found")
         }
         
         // Username field
@@ -277,9 +271,8 @@ final class ConnectedTests: XCTestCase {
         if userField.waitForExistence(timeout: 1) {
             userField.tap()
             userField.typeText(TestConfig.sshUsername)
-            print("✅ Filled username: \(TestConfig.sshUsername)")
         } else {
-            print("⚠️ UsernameField not found")
+            logger.warning("UsernameField not found")
         }
         
         // Password field (using password auth)
@@ -288,9 +281,8 @@ final class ConnectedTests: XCTestCase {
             if passwordField.waitForExistence(timeout: 1) {
                 passwordField.tap()
                 passwordField.typeText(password)
-                print("✅ Filled password")
             } else {
-                print("⚠️ PasswordField not found")
+                logger.warning("PasswordField not found")
             }
         }
         
@@ -299,7 +291,6 @@ final class ConnectedTests: XCTestCase {
         if portField.exists && TestConfig.sshPort != 22 {
             portField.tap()
             portField.typeText(String(TestConfig.sshPort))
-            print("✅ Filled port: \(TestConfig.sshPort)")
         }
     }
     
@@ -336,28 +327,28 @@ final class ConnectedTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-        print("📸 Screenshot: \(name)")
+        logger.debug("Screenshot: \(name)")
     }
     
     private func logPaneElements() {
-        print("📋 Pane Elements:")
+        logger.debug("Pane Elements:")
         
         // Find terminal pane elements
         let panes = app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH 'TerminalPane'"))
-        print("   Terminal Panes found: \(panes.count)")
+        logger.debug("   Terminal Panes found: \(panes.count)")
         
         for i in 0..<panes.count {
             let pane = panes.element(boundBy: i)
-            print("   - \(pane.identifier): frame=\(pane.frame)")
+            logger.debug("   - \(pane.identifier): frame=\(String(describing: pane.frame))")
         }
         
         // Also log surfaces
         let surfaces = app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH 'TerminalSurface'"))
-        print("   Terminal Surfaces found: \(surfaces.count)")
+        logger.debug("   Terminal Surfaces found: \(surfaces.count)")
         
         for i in 0..<surfaces.count {
             let surface = surfaces.element(boundBy: i)
-            print("   - \(surface.identifier): frame=\(surface.frame)")
+            logger.debug("   - \(surface.identifier): frame=\(String(describing: surface.frame))")
         }
     }
 }
