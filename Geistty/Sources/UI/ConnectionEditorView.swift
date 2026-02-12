@@ -5,7 +5,10 @@
 //  View for creating/editing connection profiles
 //
 
+import os
 import SwiftUI
+
+private let logger = Logger(subsystem: "com.geistty", category: "ConnectionEditor")
 
 struct ConnectionEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -20,6 +23,7 @@ struct ConnectionEditorView: View {
     @State private var port = "22"
     @State private var username = ""
     @State private var authMethod: AuthMethod = .sshKey
+    @State private var password = ""
     @State private var selectedKeyName: String?
     @State private var isFavorite = false
     @State private var useTmux = false
@@ -63,6 +67,11 @@ struct ConnectionEditorView: View {
                     }
                 }
                 
+                if authMethod == .password {
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                }
+                
                 Text(authMethod.description)
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -71,6 +80,8 @@ struct ConnectionEditorView: View {
             } footer: {
                 if authMethod == .sshKey {
                     Text("SSH keys are more secure than passwords. Import a .pem file from 1Password or Files, or generate a new key.")
+                } else {
+                    Text("Password is saved securely in the iOS Keychain.")
                 }
             }
             
@@ -205,7 +216,8 @@ struct ConnectionEditorView: View {
     
     private var isValid: Bool {
         !name.isEmpty && !host.isEmpty && !username.isEmpty && (Int(port) ?? 0) > 0 &&
-        (authMethod != .sshKey || selectedKeyName != nil)
+        (authMethod == .password ? !password.isEmpty : true) &&
+        (authMethod == .sshKey ? selectedKeyName != nil : true)
     }
     
     private func importKey(from url: URL) {
@@ -251,6 +263,16 @@ struct ConnectionEditorView: View {
         useTmux = profile.useTmux
         tmuxSessionName = profile.tmuxSessionName ?? ""
         enableFilesIntegration = profile.enableFilesIntegration
+        
+        // Load saved password from keychain if using password auth
+        if profile.authMethod == .password {
+            if let savedPassword = try? KeychainManager.shared.getPassword(
+                for: profile.host, username: profile.username
+            ) {
+                password = savedPassword
+                logger.debug("Loaded saved password for \(profile.username)@\(profile.host)")
+            }
+        }
     }
     
     private func save() {
@@ -274,6 +296,18 @@ struct ConnectionEditorView: View {
             newProfile.createdAt = existing.createdAt
             newProfile.lastConnectedAt = existing.lastConnectedAt
             newProfile.colorTag = existing.colorTag
+        }
+        
+        // Save password to keychain when using password auth
+        if authMethod == .password, !password.isEmpty {
+            do {
+                try KeychainManager.shared.savePassword(
+                    password, for: host, username: username
+                )
+                logger.info("Saved password to keychain for \(username)@\(host)")
+            } catch {
+                logger.error("Failed to save password to keychain: \(error.localizedDescription)")
+            }
         }
         
         onSave(newProfile)
