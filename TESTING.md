@@ -1,6 +1,6 @@
 # Testing Guide for Geistty
 
-This document explains how to build, test, and debug Geistty without requiring manual device interaction.
+This document explains how to build, test, and debug Geistty.
 
 ## Quick Start
 
@@ -10,11 +10,11 @@ cd Geistty
 # Build for simulator (no signing required)
 ./ci.sh build
 
-# Build for device 
-./ci.sh device-build
+# Run unit tests
+./ci.sh test
 
-# Install on connected device
-./ci.sh install
+# Run all CI checks (build + lint)
+./ci.sh all
 ```
 
 ## CI Script Commands
@@ -30,6 +30,7 @@ The `ci.sh` script provides automated build and test capabilities:
 | `./ci.sh ui-test` | Run UI tests on simulator |
 | `./ci.sh lint` | Analyze code for warnings |
 | `./ci.sh all` | Run all CI checks |
+| `./ci.sh sync-ghostty` | Sync GhosttyKit xcframework from ghostty repo |
 
 ## Building Without Code Signing
 
@@ -46,11 +47,11 @@ xcodebuild build \
 ## Test Targets
 
 ### GeisttyTests (Unit Tests)
-- Tests core logic without UI or network
+- Tests core logic without UI or network dependencies
 - Files in `GeisttyTests/`
 - Run with: `./ci.sh test`
-- **101 tests covering File Provider infrastructure**
-- See `GeisttyTests/FILE_PROVIDER_TEST_MATRIX.md` for detailed coverage
+- **369 tests** across 8 test files, all passing
+- No mocks — direct unit tests of real implementations
 
 ### GeisttyUITests (UI Tests)
 - Requires a running app instance
@@ -59,12 +60,32 @@ xcodebuild build \
 
 ## Test Files
 
-| File | Purpose | Tests |
-|------|---------|-------|
-| `FileProviderTests.swift` | MetadataStore, SyncState, AnchorCache | 40 |
-| `FileProviderExtensionTests.swift` | Extension integration, Device-only tests | 46 |
-| `FileProviderIntegrationTests.swift` | Mock SFTP→Store→Anchor flow | 7 |
-| `MetadataStoreEnumeratorTests.swift` | Enumerator protocol, edge cases | 15 |
+| File | Tests | Purpose |
+|------|-------|---------|
+| `TmuxProtocolParserTests.swift` | 80 | tmux control mode protocol parsing: %output, %begin/%end, blocks, octal escapes, fragmented data |
+| `KittyKeyboardTranslatorTests.swift` | 64 | Kitty keyboard protocol → legacy terminal escape sequence translation |
+| `TmuxSplitTreeTests.swift` | 63 | Split tree structure: factory from layout, queries, zoom, equalize, ratio updates, Codable round-trip |
+| `GhosttyInputTests.swift` | 44 | Hardware keyboard input handling, Ctrl+key combos, modifier processing |
+| `TmuxModelsTests.swift` | 36 | tmux session/window/pane parsing, ID validation, numeric extraction, Equatable |
+| `TmuxLayoutTests.swift` | 32 | tmux layout string parsing, checksum calculation, error cases, convenience properties |
+| `FontMappingTests.swift` | 31 | Font name mapping between GUI display names and Ghostty/CoreText names |
+| `ConnectionProfileTests.swift` | 19 | SSH connection profile serialization, auth methods, display strings |
+
+## Test Pattern
+
+All tests follow the same pattern:
+
+```swift
+import XCTest
+@testable import Geistty
+
+final class SomethingTests: XCTestCase {
+    // Optional setUp with implicitly unwrapped optionals
+    // // MARK: - sections to organize
+    // Private helper methods in // MARK: - Helpers
+    // No mocks — direct unit tests of real implementations
+}
+```
 
 ## Running Tests
 
@@ -76,53 +97,10 @@ cd Geistty && ./ci.sh test
 xcodebuild test -project Geistty.xcodeproj -scheme Geistty \
     -destination "platform=iOS Simulator,name=iPhone 17 Pro" \
     -only-testing:GeisttyTests
+
+# Full log available at
+cat /tmp/geistty_tests.log
 ```
-
-## Test Coverage Summary
-
-| Test Suite | Tests | Description |
-|------------|-------|-------------|
-| MetadataStoreTests | 10 | CRUD, anchor management, change tracking |
-| MetadataStoreEnumeratorTests | 15 | Enumerator protocol, edge cases, deep nesting |
-| SyncStateTests | 3 | Anchor serialization/deserialization |
-| EnumeratorBehaviorTests | 2 | Incremental change detection |
-| MetadataAnchorCacheTests | 2 | Synchronous cache behavior |
-| SyncingPausedDiagnosticTests | 14 | "Syncing Paused" root cause coverage (device-only) |
-| EnumeratorContractTests | 5 | File Provider protocol contract tests |
-| ItemIdentifierTests | 6 | Item ID format parsing |
-| CachedMetadataItemTests | 3 | Item properties |
-| FileProviderIntegrationTests | 7 | Mock SFTP flow |
-| WorkingSetMockTests | 2 | Working set behavior |
-
-### Key Test Categories (Jan 2, 2026)
-
-| Category | Coverage | Key Tests |
-|----------|----------|-----------|
-| Subfolder Changes | ✅ | `testSubfolderFileChangesAreReported`, `testDeepNestedChangesAreReported` |
-| Large Batches | ✅ | `testLargeBatchOfChanges` (100 items) |
-| Concurrent Access | ✅ | `testConcurrentEnumerations` (5 parallel) |
-| Unicode Filenames | ✅ | `testUnicodeFilenames` (Japanese, Chinese, emoji, etc.) |
-| Rapid Changes | ✅ | `testRapidSuccessiveChanges` (50 rapid ops) |
-| Symlinks | ✅ | `testSymlinkReporting` |
-
-### "Syncing Paused" Test Coverage
-
-These tests specifically target the known causes of "Syncing Paused":
-
-| Test | Root Cause | Status |
-|------|------------|--------|
-| `testAnchorIsExactly8Bytes` | Wrong anchor byte count | ✅ Pass |
-| `testAnchorNeverStartsAtZero` | Anchor = 0 causes no-change detection | ✅ Pass |
-| `testCacheSyncAnchorIsSynchronous` | Async completion handler | ✅ Pass |
-| `testIOSCallSequenceSimulation` | iOS call pattern mismatch | ✅ Pass |
-| `testEnumerateChangesCompletesWithValidAnchor` | Task {} async flow | ✅ Pass |
-| `testSubfolderFileChangesAreReported` | Item filtering bug (Fixed Jan 2, 2026) | ✅ Pass |
-
-**Conclusion**: Core infrastructure is correct. The item filtering bug (subfolder items dropped) was fixed on Jan 2, 2026.
-- ~~Extension process not starting (check Console.app for extension logs)~~
-- ~~Domain registration timing (try deleting/reinstalling app)~~
-- ~~App Group container state (reset via Settings → General → iPhone Storage)~~
-- **UPDATE (Jan 1, 2026)**: Root cause identified - **resolvable errors** (`.notAuthenticated`, `.serverUnreachable`) persist until `signalErrorResolved()` is called. Fix implemented: extension now calls `signalErrorsResolved()` after successful SFTP connection. **Needs device testing.**
 
 ## Device Testing
 
@@ -150,63 +128,17 @@ xcrun devicectl device process launch --device DEVICE_ID --console com.geistty.a
 # Launch with console (streams logs in real-time)
 xcrun devicectl device process launch --device DEVICE_ID --console com.geistty.app
 
-# Filter for specific subsystems
+# Filter for specific categories
 xcrun devicectl device process launch --device DEVICE_ID --console com.geistty.app 2>&1 | \
-    grep -E "(FileProvider|MetadataStore|anchor)" --line-buffered
-```
-
-## File Provider Debugging
-
-The File Provider extension is particularly tricky to debug. Key areas:
-
-### Sync Anchor Flow
-1. iOS calls `currentSyncAnchor(completionHandler:)` - must return synchronously
-2. iOS calls `enumerateChanges(for:from:)` with the anchor
-3. Extension reports changes since that anchor
-4. iOS updates its local cache
-
-### Common Issues
-
-**"Syncing Paused"** - Usually caused by:
-- Anchor format mismatch (must be 8-byte UInt64)
-- Anchor starting at 0 instead of 1
-- Completion handler not called
-- Extension crash/timeout
-
-### Key Log Patterns
-```bash
-# Watch for anchor-related logs
-grep -E "(anchor|WS-ENUM|enumerateChanges|currentSyncAnchor)"
-
-# Watch for File Provider extension logs
-grep -E "(FP-EXT|FileProvider|GeisttyFileProvider)"
-```
-
-### Testing Fresh Install
-To simulate a fresh install (resets File Provider state):
-
-1. Delete Geistty from device
-2. Reinstall via `./ci.sh install`
-3. Open Files.app → Geistty
-4. Watch for initial enumeration
-
-## Running Self-Tests
-
-The `MetadataStoreSelfTest` can be triggered from app code:
-
-```swift
-// In Debug builds
-Task {
-    await MetadataStoreSelfTest.run()
-}
+    grep -E "(SSH|Terminal|tmux|capture)" --line-buffered
 ```
 
 ## Known Device IDs
 
-| Device | ID |
-|--------|-----|
-| Icarus | `00008103-001425D11153001E` |
-| Athena | `00008130-001049E23ED0001C` |
+| Device | UDID | CoreDevice UUID |
+|--------|------|-----------------|
+| ICarus (iPad Pro) | `00008103-001425D11153001E` | `4E8A6D04-FCF9-5BB5-BF57-22080EC6A31A` |
+| Athena (iPhone) | `00008130-001049E23ED0001C` | `55CF3503-DC69-50E1-BC33-17A7DB9ECE9C` |
 
 ## Build Artifacts
 
@@ -214,14 +146,15 @@ Task {
 |------|----------|
 | `~/Library/Developer/Xcode/DerivedData/Geistty-*/` | Build outputs |
 | `/tmp/geistty_build.log` | Full build log |
-| `test_results/` | Test result bundles |
+| `/tmp/geistty_tests.log` | Full test log |
 
 ## Agent Development Notes
 
 When working as a coding agent:
 
 1. **Always run `./ci.sh build` after code changes** to verify compilation
-2. **Check `/tmp/geistty_build.log` for full error details** if build fails
-3. **Use simulator builds** for quick iteration (no signing delays)
-4. **Device testing** still requires user to verify UI behavior in Files.app
-5. **The "Syncing Paused" bug** is in the anchor/enumerator dance - focus on `MetadataStoreEnumerator` and `currentSyncAnchor` flow
+2. **Run `./ci.sh test` after adding/modifying tests** to verify they pass
+3. **Check `/tmp/geistty_build.log` for full error details** if build fails
+4. **Use simulator builds** for quick iteration (no signing delays)
+5. **Device testing** requires user to verify behavior on ICarus/Athena
+6. **New test files** must be added to `project.pbxproj` (PBXBuildFile, PBXFileReference, GeisttyTests group, test target Sources build phase)
