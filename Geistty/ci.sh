@@ -9,7 +9,8 @@
 #   ./ci.sh build          - Build for simulator
 #   ./ci.sh test           - Run unit tests on simulator  
 #   ./ci.sh lint           - Check for Swift warnings/errors
-#   ./ci.sh all            - Run all checks
+#   ./ci.sh sync-ghostty   - Rebuild and sync GhosttyKit from ghostty fork
+#   ./ci.sh all            - Run all checks (build + test + lint)
 #   ./ci.sh device-build   - Build for device (requires signing)
 #   ./ci.sh install DEVICE - Install and run on device
 #
@@ -213,11 +214,46 @@ syntax_check() {
     done
 }
 
+# Sync GhosttyKit xcframework from ghostty fork
+sync_ghostty() {
+    local GHOSTTY_DIR="$SCRIPT_DIR/../../ghostty"
+
+    if [ ! -d "$GHOSTTY_DIR" ]; then
+        log_error "Ghostty repo not found at $GHOSTTY_DIR"
+        return 1
+    fi
+
+    log_info "Building GhosttyKit xcframework..."
+    (cd "$GHOSTTY_DIR" && zig build -Demit-xcframework=true -Dxcframework-target=universal 2>&1) | tail -20
+
+    if [ ! -d "$GHOSTTY_DIR/macos/GhosttyKit.xcframework" ]; then
+        log_error "xcframework not found after build"
+        return 1
+    fi
+
+    log_info "Copying xcframework to Geistty..."
+    rm -rf "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework"
+    cp -R "$GHOSTTY_DIR/macos/GhosttyKit.xcframework" "$SCRIPT_DIR/Frameworks/"
+
+    log_info "Renaming module maps (module.modulemap -> GhosttyKit.modulemap)..."
+    for dir in "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework"/*/Headers/; do
+        if [ -f "${dir}module.modulemap" ]; then
+            mv "${dir}module.modulemap" "${dir}GhosttyKit.modulemap"
+        fi
+    done
+
+    log_info "Verifying build with new xcframework..."
+    resolve_packages
+    build_simulator
+
+    log_info "✅ GhosttyKit sync complete"
+}
+
 # Run all checks
 run_all() {
     resolve_packages
     build_simulator
-    # run_tests  # Uncomment when test target is set up
+    run_tests
     lint
     log_info "✅ All CI checks passed!"
 }
@@ -235,6 +271,7 @@ show_help() {
     echo "  test            Run unit tests on simulator"
     echo "  ui-test         Run UI tests on simulator"
     echo "  lint            Analyze code for warnings"
+    echo "  sync-ghostty    Rebuild and sync GhosttyKit xcframework from ghostty fork"
     echo "  all             Run all CI checks"
     echo "  help            Show this help"
     echo ""
@@ -271,6 +308,9 @@ case "${1:-help}" in
         ;;
     syntax)
         syntax_check
+        ;;
+    sync-ghostty)
+        sync_ghostty
         ;;
     all)
         run_all
