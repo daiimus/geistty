@@ -687,6 +687,9 @@ class SSHSession: ObservableObject, Identifiable {
         case .sessionChanged(let sessionId, let sessionName):
             tmuxSessionManager?.handleSessionChanged(sessionId: sessionId, sessionName: sessionName)
             
+        case .sessionsChanged:
+            tmuxSessionManager?.handleSessionsChanged()
+            
         case .exited(let reason):
             let reasonDesc = reason ?? "unknown"
             logger.info("Gateway exited: \(reasonDesc)")

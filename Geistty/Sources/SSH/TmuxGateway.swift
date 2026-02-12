@@ -75,6 +75,9 @@ public enum TmuxGatewayEvent: Sendable {
     /// Session changed
     case sessionChanged(sessionId: String, sessionName: String)
     
+    /// Sessions changed (a session was created or destroyed)
+    case sessionsChanged
+    
     /// Control mode exited
     case exited(reason: String?)
 }
@@ -338,7 +341,11 @@ public actor TmuxGateway {
             isActive = false
             emit(.exited(reason: reason))
             
-        case .sessionRenamed, .sessionsChanged, .sessionWindowChanged,
+        case .sessionsChanged:
+            logger.info("Sessions changed (session created or destroyed)")
+            emit(.sessionsChanged)
+            
+        case .sessionRenamed, .sessionWindowChanged,
              .windowRenamed, .unlinkedWindowAdd, .unlinkedWindowClose, .unlinkedWindowRenamed,
              .clientSessionChanged, .clientDetached, .paneModeChanged, .pausePaneChanged,
              .subscriptionChanged, .unknown:
