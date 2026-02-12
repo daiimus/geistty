@@ -57,9 +57,6 @@ public enum TmuxGatewayEvent: Sendable {
     /// Control mode is now active (first protocol message received)
     case activated
     
-    /// Session content restored from capture-pane
-    case sessionRestored(paneId: String, content: String)
-    
     /// Layout changed (window resized, pane split, etc.)
     case layoutChanged(windowId: String, windowIndex: Int, layout: String)
     
@@ -190,9 +187,6 @@ public actor TmuxGateway {
     
     /// Whether we've sent the activation event
     private var hasNotifiedActivation: Bool = false
-    
-    /// Whether session restore has been performed
-    private var hasRestoredSession: Bool = false
     
     /// Paused panes (tmux 3.2+)
     private var pausedPanes: Set<String> = []
@@ -596,23 +590,38 @@ public actor TmuxGateway {
         return try await sendCommand(command)
     }
     
-    /// Restore session history for a pane
-    /// - Parameter paneId: Target pane
-    public func restoreSession(paneId: String = "%0") async {
-        guard !hasRestoredSession else {
-            logger.debug("Session already restored")
-            return
-        }
-        hasRestoredSession = true
-        
-        do {
-            let content = try await capturePane(paneId: paneId)
-            logger.info("Session restored: \(content.count) chars for \(paneId)")
-            emit(.sessionRestored(paneId: paneId, content: content))
-        } catch {
-            logger.error("Session restore failed: \(error.localizedDescription)")
-            emit(.sessionRestored(paneId: paneId, content: ""))
-        }
+    /// Capture visible screen content for a pane (no scrollback).
+    /// Used for session restore — captures only what's currently visible.
+    /// - Parameter paneId: Target pane (e.g., "%0")
+    /// - Returns: Captured ANSI content (visible screen only)
+    public func capturePaneVisible(paneId: String = "%0") async throws -> String {
+        return try await sendCommand("capture-pane -pe -t \(paneId)")
+    }
+    
+    /// Pause a pane to freeze output delivery.
+    /// While paused, tmux buffers %output internally.
+    /// This is used during session restore to prevent race conditions
+    /// between capture-pane and live output.
+    /// - Parameter paneId: Target pane (e.g., "%0")
+    /// - Note: This is an async command that waits for tmux to acknowledge
+    ///         the pause, ensuring the command queue stays ordered.
+    @discardableResult
+    public func pausePane(paneId: String) async throws -> String {
+        logger.info("⏸️ Pausing pane \(paneId)")
+        pausedPanes.insert(paneId)
+        return try await sendCommand("refresh-client -A '\(paneId):pause'")
+    }
+    
+    /// Unpause a pane to resume output delivery.
+    /// Buffered output will be delivered as %output/%continue messages.
+    /// - Parameter paneId: Target pane (e.g., "%0")
+    /// - Note: This is an async command that waits for tmux to acknowledge
+    ///         the unpause, ensuring the command queue stays ordered.
+    @discardableResult
+    public func unpausePane(paneId: String) async throws -> String {
+        logger.info("▶️ Unpausing pane \(paneId)")
+        pausedPanes.remove(paneId)
+        return try await sendCommand("refresh-client -A '\(paneId):continue'")
     }
     
     // MARK: - Terminal Size
@@ -682,7 +691,6 @@ public actor TmuxGateway {
     public func reset() {
         isActive = false
         hasNotifiedActivation = false
-        hasRestoredSession = false
         isPauseEnabled = false
         isCommandQueuePaused = false
         connectionHealth = .healthy
