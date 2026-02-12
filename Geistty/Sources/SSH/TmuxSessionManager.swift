@@ -68,6 +68,15 @@ enum TmuxConnectionState: Equatable {
     case connectionLost(reason: String?)
 }
 
+/// Whether a tmux session was newly created or resumed from an existing one
+enum SessionResumeStatus: Equatable {
+    /// A new session was created on the server
+    case created(name: String)
+    
+    /// An existing session was resumed (attached to)
+    case resumed(name: String)
+}
+
 /// Manages the mapping between tmux server state and Geistty UI
 @MainActor
 class TmuxSessionManager: ObservableObject {
@@ -97,6 +106,10 @@ class TmuxSessionManager: ObservableObject {
     
     /// Detailed connection state
     @Published private(set) var connectionState: TmuxConnectionState = .disconnected
+    
+    /// Whether the current session was newly created or resumed
+    /// Set after activation when we can distinguish the two cases
+    @Published private(set) var sessionResumeStatus: SessionResumeStatus?
     
     /// Current split tree for the focused window (for UI rendering)
     @Published private(set) var currentSplitTree: TmuxSplitTree = TmuxSplitTree()
@@ -130,6 +143,10 @@ class TmuxSessionManager: ObservableObject {
     
     /// Buffer for history content received before surface was created
     private var pendingHistoryContent: [String: String] = [:]
+    
+    /// Tracks whether %sessions-changed was received before %session-changed
+    /// If true, the session was newly created; if false, it was resumed (attached)
+    private var sawSessionsChanged: Bool = false
 
     /// Surface creation factory (injected before activation)
     /// This creates Ghostty surfaces with proper configuration
@@ -261,6 +278,8 @@ class TmuxSessionManager: ObservableObject {
         paneRestoreStates.removeAll()
         pendingHistoryContent.removeAll()
         pendingOutput.removeAll()
+        sawSessionsChanged = false
+        sessionResumeStatus = nil
         
         // Cancel debounce tasks to prevent crashes after cleanup
         resizeDebounceTask?.cancel()
@@ -398,6 +417,17 @@ class TmuxSessionManager: ObservableObject {
     /// Handle session changed notification
     func handleSessionChanged(sessionId: String, sessionName: String) {
         logger.info("Session changed: \(sessionId) (\(sessionName))")
+        
+        // Determine if this session was newly created or resumed
+        // %sessions-changed arriving before %session-changed means a session was created
+        if sawSessionsChanged {
+            sessionResumeStatus = .created(name: sessionName)
+            logger.info("Session '\(sessionName)' was newly created")
+        } else {
+            sessionResumeStatus = .resumed(name: sessionName)
+            logger.info("Session '\(sessionName)' was resumed (attached to existing)")
+        }
+        sawSessionsChanged = false
         
         // Update or create session
         var session = sessions[sessionId] ?? TmuxSession(id: sessionId, name: sessionName)
@@ -797,8 +827,14 @@ class TmuxSessionManager: ObservableObject {
     }
     
     /// Handle sessions changed notification
+    /// This fires when a session is created or destroyed on the server.
+    /// If it arrives before %session-changed, it means our connection created a new session.
     func handleSessionsChanged() {
-        logger.info("Sessions changed - refreshing session list")
+        logger.info("Sessions changed - a session was created or destroyed")
+        
+        // Mark that a session creation/destruction happened before we saw %session-changed
+        // This distinguishes "new session created" from "attached to existing"
+        sawSessionsChanged = true
         
         sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'") { [weak self] result in
             if case .success(let response) = result {
@@ -810,10 +846,14 @@ class TmuxSessionManager: ObservableObject {
     // MARK: - Pane Output Routing
     
     /// Route pane output to the appropriate Ghostty surface
-    /// Output always flows directly - no buffering for history restore
+    /// During history restore, output is buffered to avoid interleaving
     func routeOutput(_ data: Data, to paneId: String) {
-        // History restore is disabled - always flow output immediately
-        // (The state machine code is kept for future opt-in history restore)
+        // If history restore is in progress, buffer live output
+        if let state = paneRestoreStates[paneId], state.shouldBufferOutput {
+            paneRestoreStates[paneId]?.appendBufferedOutput(data)
+            logger.debug("Buffered \(data.count) bytes during history restore for pane \(paneId)")
+            return
+        }
         
         // Get existing surface or create one if factory is available
         guard let surface = getSurfaceOrCreate(for: paneId) else {
@@ -907,17 +947,10 @@ class TmuxSessionManager: ObservableObject {
         
         logger.info("Created Ghostty surface for pane \(paneId)")
         
-        // Flush any output that was buffered before the surface was ready
-        if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
-            logger.info("🔄 Flushing \(pending.count) buffered output chunks for pane \(paneId)")
-            for data in pending {
-                surface.feedData(data)
-            }
-        }
-        
-        // History restore is disabled - mark pane as restored immediately
-        // This ensures output flows without buffering delays
-        paneRestoreStates[paneId] = .restored
+        // Trigger history restore for this newly created surface
+        // capture-pane will fetch the scrollback content and feed it to the surface
+        // handleSurfaceCreatedForRestore also handles flushing pendingOutput in the correct order
+        handleSurfaceCreatedForRestore(surface, paneId: paneId)
         
         return surface
     }
@@ -1754,6 +1787,8 @@ class TmuxSessionManager: ObservableObject {
         paneRestoreStates.removeAll()
         pendingHistoryContent.removeAll()
         pendingOutput.removeAll()
+        sawSessionsChanged = false
+        sessionResumeStatus = nil
         
         sessions.removeAll()
         windows.removeAll()
