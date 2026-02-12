@@ -1159,63 +1159,84 @@ class SSHSession: ObservableObject, Identifiable {
     
     // Internal method to handle received data, called from connection delegate
     fileprivate func handleReceivedData(_ data: Data) {
-        // Debug: log what we receive
+        // Hex-level diagnostic logging for tmux control mode debugging
+        let hexDump = data.prefix(256).map { String(format: "%02x", $0) }.joined(separator: " ")
+        logger.info("📥 recv: \(data.count)B state=\(self.controlModeState) tmux=\(String(describing: self.tmuxMode))")
+        logger.info("📥 HEX[\(data.count)]: \(hexDump)")
         if let str = String(data: data, encoding: .utf8) {
-            logger.info("📥 handleReceivedData: \(data.count) bytes, state=\(self.controlModeState), tmuxMode=\(String(describing: self.tmuxMode))")
-            logger.info("📥 Content preview: \(str.prefix(200))")
+            logger.info("📥 TXT: \(str.prefix(300))")
         }
         
         // If control mode data routing is active, send through the gateway
         if controlModeState.isRouting, let gateway = tmuxGateway {
-            // Gateway will parse the data and emit events via AsyncStream
-            logger.info("📥 Routing to gateway")
+            logger.info("📥 Routing \(data.count)B to gateway")
             Task {
                 await gateway.receive(data)
             }
             return
         }
         
-        // Check if this data contains the start of control mode
-        // tmux -CC sends control messages starting with % at line start
+        // Detect and activate tmux control mode.
+        // tmux -CC sends control messages starting with % at line start.
         // Common first messages: %begin, %session-changed, %output, %layout-change
         if tmuxMode == .controlMode, controlModeState == .inactive {
             if let str = String(data: data, encoding: .utf8) {
-                // Check for any tmux control mode message (line starting with %)
-                // Also check raw string contains % near a newline (handles \r\n)
-                let hasControlMessage = str.contains("\n%") || str.contains("\r%") || str.hasPrefix("%")
+                // CRITICAL: Strip DCS 1000p sequences BEFORE checking for % messages.
+                // tmux sends \x1bP1000p (DCS 1000p) to signal control mode entry.
+                // We must strip this to prevent Ghostty's internal tmux parser from
+                // activating (which conflicts with our TmuxGateway), but we must NOT
+                // drop the entire packet because % messages may arrive in the same
+                // TCP chunk. The old code dropped the whole packet on DCS match,
+                // which could swallow the % messages needed for activation.
+                var filtered = str
+                var hadDCS = false
+                for dcsSeq in ["\u{1b}P1000p", "\u{1b}P1000;"] {
+                    if filtered.contains(dcsSeq) {
+                        logger.info("📥 Stripping DCS sequence from packet")
+                        filtered = filtered.replacingOccurrences(of: dcsSeq, with: "")
+                        hadDCS = true
+                    }
+                }
+                if hadDCS {
+                    logger.info("📥 After DCS strip: '\(filtered.prefix(200))'")
+                }
                 
-                logger.info("📥 Checking for control mode: hasControlMessage=\(hasControlMessage)")
+                // Check filtered string for tmux control mode messages
+                let hasControlMessage = filtered.contains("\n%") || filtered.contains("\r%") || filtered.hasPrefix("%")
+                
+                logger.info("📥 Control mode check: hasControl=\(hasControlMessage) hadDCS=\(hadDCS)")
                 
                 if hasControlMessage {
-                    logger.info("✅ Control mode detected! State: \(controlModeState) → routing")
-                    // Start routing data through the gateway
-                    // NOTE: controlModeState stays at .routing until gateway emits .activated
-                    // This means user input will be queued until the gateway is fully ready
+                    logger.info("✅ Control mode detected! \(controlModeState) → routing")
                     controlModeState = .routing
-                    Task {
-                        await tmuxGateway?.receive(data)
+                    // Send DCS-stripped data to the gateway for parsing
+                    if let filteredData = filtered.data(using: .utf8) {
+                        Task {
+                            await tmuxGateway?.receive(filteredData)
+                        }
+                    }
+                    return
+                }
+                
+                // Had DCS but no % messages yet — DCS stripped, check remainder
+                if hadDCS {
+                    let remaining = filtered.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if remaining.isEmpty {
+                        logger.info("📥 DCS-only packet, waiting for % messages")
+                        return
+                    }
+                    // Forward remaining non-DCS content (MOTD, shell output) to Ghostty
+                    logger.info("📥 Forwarding non-DCS remainder to delegate")
+                    if let remainderData = filtered.data(using: .utf8) {
+                        delegate?.sshSession(self, didReceiveData: remainderData)
                     }
                     return
                 }
             }
-            // In control mode but haven't detected % messages yet.
-            // This is pre-control-mode data (MOTD, shell prompt, command echo).
-            // IMPORTANT: Do NOT forward this to Ghostty if it contains DCS 1000 p
-            // because that would trigger Ghostty's internal tmux control mode parser,
-            // which conflicts with our Swift-side TmuxGateway parsing.
-            if let str = String(data: data, encoding: .utf8) {
-                // DCS 1000 p is ESC P 1000 p = \x1bP1000p
-                // Check for this sequence and don't forward it
-                if str.contains("\u{1b}P1000p") || str.contains("\u{1b}P1000;") {
-                    logger.info("⚠️ Filtering out DCS 1000p (tmux control mode entry) from Ghostty")
-                    // Don't forward - wait for % messages to start gateway routing
-                    return
-                }
-            }
-            // Forward non-DCS data normally (MOTD, prompt, etc)
+            // No DCS, no % messages — forward normally (MOTD, prompt, command echo)
         }
         
-        logger.info("📥 Forwarding to delegate")
+        logger.info("📥 Forwarding \(data.count)B to delegate")
         delegate?.sshSession(self, didReceiveData: data)
     }
 }
