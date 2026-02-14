@@ -854,6 +854,49 @@ class TmuxSessionManager: ObservableObject {
         return surface
     }
     
+    /// Adopt an existing direct surface as the tmux primary surface.
+    ///
+    /// When a tmux connection starts, the SSH data (including DCS 1000p) is fed
+    /// to the direct surface created at viewDidLoad. Ghostty detects DCS 1000p
+    /// and creates the tmux viewer INSIDE that surface's C-side state. If we
+    /// destroy that surface and create a new one, we lose the viewer and all
+    /// tmux protocol state — the new surface would be blank.
+    ///
+    /// Instead, we adopt the existing surface into TmuxSessionManager's
+    /// paneSurfaces dictionary and wire up the tmux-aware input handler.
+    func adoptExistingSurface(_ surface: Ghostty.SurfaceView) {
+        let initialPaneId = resolveInitialPaneId()
+        
+        logger.info("Adopting existing surface as tmux primary for \(initialPaneId)")
+        
+        // Register in paneSurfaces
+        paneSurfaces[initialPaneId] = surface
+        
+        // Wire up the tmux-aware input handler (pane-tracking)
+        if let inputHandler = surfaceInputHandler {
+            inputHandler(surface, initialPaneId)
+        }
+        
+        // Wire up resize handler for single-pane mode
+        if surfaceResizeHandler != nil {
+            surface.onResize = { [weak self] cols, rows in
+                guard let self = self else { return }
+                guard !self.currentSplitTree.isSplit else {
+                    logger.debug("Ignoring surface resize in multi-pane mode (handled by container)")
+                    return
+                }
+                Task { @MainActor in
+                    self.surfaceResizeHandler?(cols, rows)
+                }
+            }
+        }
+        
+        // Assign as primary
+        assignPrimarySurface(surface, forPaneId: initialPaneId)
+        
+        logger.info("Adopted existing surface as tmux primary for \(initialPaneId)")
+    }
+    
     /// Get surface for a pane (returns nil if not created)
     func getSurface(for paneId: String) -> Ghostty.SurfaceView? {
         return paneSurfaces[paneId]
