@@ -124,6 +124,6 @@ struct TmuxSessionNameResolver {
     /// - Returns: The portion up to and including the end marker
     static func extractResponse(from buffer: String) -> String? {
         guard let range = buffer.range(of: endMarker) else { return nil }
-        return String(buffer[buffer.startIndex...range.upperBound])
+        return String(buffer[buffer.startIndex..<range.upperBound])
     }
 }

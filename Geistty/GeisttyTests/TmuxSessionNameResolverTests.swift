@@ -242,6 +242,19 @@ final class TmuxSessionNameResolverTests: XCTestCase {
         XCTAssertNil(TmuxSessionNameResolver.extractResponse(from: "main 1\n"))
     }
     
+    func testExtractResponseEndMarkerAtEndOfBuffer() {
+        // Regression: when ---END--- is the very last thing in the buffer
+        // (no trailing newline), upperBound == endIndex. Using closed range
+        // (buffer.startIndex...range.upperBound) would crash with
+        // "String index is out of bounds". Must use half-open range (..<).
+        let buffer = "main 1\n---END---"
+        let response = TmuxSessionNameResolver.extractResponse(from: buffer)
+        XCTAssertNotNil(response)
+        XCTAssertTrue(response!.contains("main 1"))
+        XCTAssertTrue(response!.contains("---END---"))
+        XCTAssertEqual(response, "main 1\n---END---")
+    }
+    
     // MARK: - queryCommand
     
     func testQueryCommandFormat() {
