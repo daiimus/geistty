@@ -76,6 +76,7 @@
 		D1000018 /* TmuxSplitTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000018 /* TmuxSplitTreeTests.swift */; };
 		D1000019 /* TmuxSessionRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000019 /* TmuxSessionRestoreTests.swift */; };
 		D1000020 /* TmuxSessionNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000020 /* TmuxSessionNameResolverTests.swift */; };
+		D1000021 /* TmuxMultiClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000021 /* TmuxMultiClientTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -189,6 +190,7 @@
 		D2000018 /* TmuxSplitTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitTreeTests.swift; sourceTree = "<group>"; };
 		D2000019 /* TmuxSessionRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionRestoreTests.swift; sourceTree = "<group>"; };
 		D2000020 /* TmuxSessionNameResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolverTests.swift; sourceTree = "<group>"; };
+		D2000021 /* TmuxMultiClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiClientTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -405,6 +407,7 @@
 				D2000018 /* TmuxSplitTreeTests.swift */,
 				D2000019 /* TmuxSessionRestoreTests.swift */,
 				D2000020 /* TmuxSessionNameResolverTests.swift */,
+				D2000021 /* TmuxMultiClientTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -623,6 +626,7 @@
 				D1000018 /* TmuxSplitTreeTests.swift in Sources */,
 				D1000019 /* TmuxSessionRestoreTests.swift in Sources */,
 				D1000020 /* TmuxSessionNameResolverTests.swift in Sources */,
+				D1000021 /* TmuxMultiClientTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
