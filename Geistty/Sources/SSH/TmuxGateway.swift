@@ -231,9 +231,9 @@ public actor TmuxGateway {
     
     /// Generate the command to start control mode
     /// - Parameters:
-    ///   - session: Session name to attach or create
+    ///   - session: Session name to attach or create (e.g., "geistty-1")
     /// - Returns: Shell command string to start control mode
-    public func makeAttachCommand(session: String = "main") -> String {
+    public func makeAttachCommand(session: String) -> String {
         "exec tmux -CC new-session -A -s \(session)\n"
     }
     
