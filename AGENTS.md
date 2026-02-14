@@ -186,9 +186,10 @@ SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
 
 User Input → Ghostty encodes keystroke → External.queueWrite()
                                         ↓
-                              write_callback → SSHSession.performWrite()
+                              write_callback → SSHSession.writeFromGhostty()
+                              → wrapInSendKeys() → "send -lt %<id> <chars>\n"
                                         ↓
-                              NIOSSHConnection.write() → SSH → tmux stdin → active pane
+                              NIOSSHConnection.write() → SSH → tmux stdin (as command)
 ```
 
 ### Key Components
@@ -206,7 +207,7 @@ User Input → Ghostty encodes keystroke → External.queueWrite()
 
 ### Key Design Decisions
 
-1. **No send-keys**: In native tmux control mode, keystrokes on stdin go directly to the active pane. Ghostty's viewer handles routing.
+1. **send-keys wrapping**: In tmux control mode, ALL stdin is parsed as tmux commands. User keystrokes are wrapped in `send-keys` commands by `SSHSession.wrapInSendKeys()` (iTerm2-style: literal mode for safe chars, hex mode for everything else). Viewer commands from Ghostty (ending with `\n`) pass through as-is.
 2. **No command/response**: With Ghostty handling the protocol, Swift can only do fire-and-forget commands written to stdin. `%begin/%end` responses go to Ghostty's viewer, not Swift.
 3. **Session restore by Ghostty**: `viewer.zig` does `capture-pane` during its startup sequence.
 4. **No DCS filter needed**: The old dual-parser conflict is gone — Ghostty is the sole tmux parser.
@@ -266,7 +267,7 @@ If revisiting, start fresh from the archive branch and read the learnings doc fi
 | SwiftNIO-SSH | Pure Swift, Network.framework integration, native async/await |
 | Ghostty Native tmux | Ghostty's upstream viewer.zig/control.zig handles all protocol parsing, output routing, and session restore — eliminates dual-parser conflicts |
 | Fire-and-forget tmux commands | With Ghostty owning the protocol, Swift can only write commands to stdin; %begin/%end responses go to Ghostty's viewer |
-| Stdin keystrokes (no send-keys) | In native tmux control mode, keystrokes on stdin go directly to the active pane |
+| send-keys wrapping | In tmux control mode, ALL stdin is tmux commands; user input wrapped in `send-keys` by SSHSession |
 | libxev fork | iOS uses `kevent`, not `kevent64` |
 | Custom module.modulemap name | Renamed to avoid Xcode module conflicts |
 
@@ -301,9 +302,10 @@ SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
                                         ↓
 User Input → Ghostty encodes → External.queueWrite() → write_callback
                                         ↓
-                              SSHSession.performWrite() → NIOSSHConnection.write()
+                              SSHSession.writeFromGhostty()
+                              → wrapInSendKeys() → "send -lt %<id> <chars>\n"
                                         ↓
-                              SSH → tmux stdin → active pane
+                              NIOSSHConnection.write() → SSH → tmux stdin (as command)
 ```
 
 Note: Ghostty is the sole tmux protocol parser. No DCS filter is needed —
