@@ -130,7 +130,7 @@ class TmuxSessionManager: ObservableObject {
     /// Debounce task for layout changes to prevent UI thrashing
     private var layoutDebounceTask: Task<Void, Never>?
     
-    // MARK: - Gateway Connection
+    // MARK: - Direct Write Connection
     
     /// Write function to send data to SSH
     private var writeToSSH: ((String) -> Void)?
@@ -147,46 +147,24 @@ class TmuxSessionManager: ObservableObject {
     
     // MARK: - Connection
     
-    /// Callback type for async command responses
-    typealias CommandCallback = (Result<String, Error>) -> Void
-    
-    /// Function type for sending commands with callback
-    typealias SendCommandFunc = (String, @escaping CommandCallback) -> Void
-    
-    /// Send command function (provided by TmuxGateway)
-    private var sendCommandFunc: SendCommandFunc?
-    
-    /// Set up the session manager with gateway (actor-based)
-    /// - Parameters:
-    ///   - sendCommand: Function to send commands and receive responses
-    ///   - write: Function to write raw strings to SSH (for fire-and-forget)
-    func setupWithGateway(
-        sendCommand: @escaping SendCommandFunc,
-        write: @escaping (String) -> Void
-    ) {
-        self.sendCommandFunc = sendCommand
+    /// Set up the session manager with a direct write function.
+    /// In native Ghostty tmux mode, commands are fire-and-forget —
+    /// written to stdin where tmux processes them. Ghostty's internal
+    /// tmux viewer handles all protocol parsing and state tracking.
+    /// - Parameter write: Function to write raw strings to SSH stdin
+    func setupWithDirectWrite(_ write: @escaping (String) -> Void) {
         self.writeToSSH = write
-        
-        logger.info("TmuxSessionManager connected to gateway")
+        logger.info("TmuxSessionManager connected with direct write")
     }
     
     // MARK: - Command Abstraction
     
-    /// Send a command and receive a response
-    private func sendCommand(_ command: String, completion: @escaping CommandCallback) {
-        guard let sendFunc = sendCommandFunc else {
-            logger.warning("Cannot send command - no gateway available")
-            completion(.failure(TmuxGatewayError.notConnected))
-            return
-        }
-        
-        sendFunc(command, completion)
-    }
-    
-    /// Send a fire-and-forget command (no response expected)
+    /// Send a fire-and-forget command (no response expected).
+    /// In native Ghostty tmux mode, all commands are fire-and-forget
+    /// because Ghostty's viewer consumes the %begin/%end responses.
     private func sendCommandFireAndForget(_ command: String) {
         guard let write = writeToSSH else {
-            logger.warning("Cannot send fire-and-forget command - no write function available")
+            logger.warning("Cannot send command - no write function available")
             return
         }
         
@@ -259,62 +237,34 @@ class TmuxSessionManager: ObservableObject {
     
     // MARK: - State Queries
     
-    /// Refresh all state from tmux server
+    /// Refresh state from tmux server.
+    /// In native Ghostty tmux mode, Ghostty's viewer tracks state internally.
+    /// We fire refresh-client to trigger Ghostty to re-evaluate state.
     func refreshState() {
         guard writeToSSH != nil else {
             logger.warning("Cannot refresh state: no write callback available")
             return
         }
         
-        logger.info("Refreshing tmux state")
+        logger.info("Refreshing tmux state (native Ghostty mode)")
         
-        // Query sessions with proper callback
-        sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'") { [weak self] result in
-            switch result {
-            case .success(let response):
-                self?.parseSessionsResponse(response)
-            case .failure(let error):
-                logger.error("Failed to list sessions: \(error.localizedDescription)")
-            }
-        }
-        
-        // Query windows in current session
-        sendCommand("list-windows -F '\(TmuxQueryFormat.windows)'") { [weak self] result in
-            switch result {
-            case .success(let response):
-                self?.parseWindowsResponse(response)
-            case .failure(let error):
-                logger.error("Failed to list windows: \(error.localizedDescription)")
-            }
-        }
-        
-        // Query all panes
-        sendCommand("list-panes -a -F '\(TmuxQueryFormat.panes)'") { [weak self] result in
-            switch result {
-            case .success(let response):
-                self?.parsePanesResponse(response)
-            case .failure(let error):
-                logger.error("Failed to list panes: \(error.localizedDescription)")
-            }
-        }
+        // Trigger a refresh-client which causes tmux to re-send state notifications.
+        // Ghostty's viewer will process these and fire TMUX_STATE_CHANGED.
+        sendCommandFireAndForget("refresh-client")
     }
     
-    /// Query windows for a specific session
+    /// Query windows for a specific session (fire-and-forget)
     func queryWindows(for sessionId: String) {
-        sendCommand("list-windows -t '\(sessionId)' -F '\(TmuxQueryFormat.windows)'") { [weak self] result in
-            if case .success(let response) = result {
-                self?.parseWindowsResponse(response)
-            }
-        }
+        // In native Ghostty mode, we can't capture responses.
+        // State comes via TMUX_STATE_CHANGED notifications.
+        logger.debug("queryWindows called for \(sessionId) - relying on Ghostty state tracking")
     }
     
-    /// Query panes for a specific window
+    /// Query panes for a specific window (fire-and-forget)
     func queryPanes(for windowId: String) {
-        sendCommand("list-panes -t '\(windowId)' -F '\(TmuxQueryFormat.panes)'") { [weak self] result in
-            if case .success(let response) = result {
-                self?.parsePanesResponse(response)
-            }
-        }
+        // In native Ghostty mode, we can't capture responses.
+        // State comes via TMUX_STATE_CHANGED notifications.
+        logger.debug("queryPanes called for \(windowId) - relying on Ghostty state tracking")
     }
     
     // MARK: - Response Parsing
@@ -366,6 +316,22 @@ class TmuxSessionManager: ObservableObject {
     
     // MARK: - Notification Handling
     
+    /// Handle TMUX_STATE_CHANGED from Ghostty's native tmux viewer.
+    /// This is the primary state update path in the native Ghostty tmux architecture.
+    /// Called from SSHSession's notification observer when Ghostty fires
+    /// GHOSTTY_ACTION_TMUX_STATE_CHANGED with window_count and pane_count.
+    ///
+    /// Currently this is a minimal stub — window/pane state tracking will be
+    /// enhanced when we add C API functions to expose layout geometry from
+    /// Ghostty's viewer.
+    func handleTmuxStateChanged(windowCount: Int, paneCount: Int) {
+        logger.info("Ghostty tmux state changed: \(windowCount) windows, \(paneCount) panes")
+        
+        // TODO: Use ghostty_surface_tmux_pane_ids() to get actual pane IDs
+        // and reconcile with our local state. For now, just log the counts.
+        // Future work: expose layout geometry via C API and update split trees.
+    }
+    
     /// Handle session changed notification
     func handleSessionChanged(sessionId: String, sessionName: String) {
         logger.info("Session changed: \(sessionId) (\(sessionName))")
@@ -392,187 +358,10 @@ class TmuxSessionManager: ObservableObject {
         // Query windows for this session
         queryWindows(for: sessionId)
         
-        // If resuming an existing session, restore visible screen content.
-        // tmux does NOT send %output for the existing visible screen on control
-        // client attach — only new output produced after attach arrives via %output.
-        // We must use capture-pane to populate the terminal surface.
-        if case .resumed = sessionResumeStatus {
-            restoreVisibleContent()
-        }
+        // In native Ghostty tmux mode, session restore (capture-pane) is handled
+        // by Ghostty's tmux viewer during its startup sequence. No action needed here.
     }
     
-    // MARK: - Session Restore
-    
-    /// Callback type for sending async commands through TmuxGateway
-    typealias AsyncCommandFunc = (String) async throws -> String
-    
-    /// Callback type for fire-and-forget commands through TmuxGateway
-    typealias PausePaneFunc = (String) async throws -> Void
-    typealias UnpausePaneFunc = (String) async throws -> Void
-    
-    /// Async command function (provided by SSHSession bridging to TmuxGateway)
-    private var asyncSendCommandFunc: AsyncCommandFunc?
-    
-    /// Pause/unpause functions (provided by SSHSession bridging to TmuxGateway)
-    private var pausePaneFunc: PausePaneFunc?
-    private var unpausePaneFunc: UnpausePaneFunc?
-    
-    /// Set up async gateway functions for session restore
-    /// These bridge to TmuxGateway's actor-isolated methods
-    func setupRestoreFunctions(
-        asyncSendCommand: @escaping AsyncCommandFunc,
-        pausePane: @escaping PausePaneFunc,
-        unpausePane: @escaping UnpausePaneFunc
-    ) {
-        self.asyncSendCommandFunc = asyncSendCommand
-        self.pausePaneFunc = pausePane
-        self.unpausePaneFunc = unpausePane
-    }
-    
-    /// Restore visible screen content for all panes in the current window.
-    ///
-    /// Strategy (inspired by iTerm2):
-    /// 1. Pause all panes to freeze %output delivery
-    /// 2. capture-pane -pe (visible screen, ANSI escapes) for each pane
-    /// 3. Feed captured content to Ghostty surfaces
-    /// 4. Unpause all panes to resume live output
-    ///
-    /// This must happen BEFORE any %output arrives. Since we pause first,
-    /// tmux buffers any new output while we capture. After unpausing,
-    /// the buffered output arrives naturally via %output.
-    private func restoreVisibleContent() {
-        guard let asyncSend = asyncSendCommandFunc,
-              let pause = pausePaneFunc,
-              let unpause = unpausePaneFunc else {
-            logger.warning("RESTORE: Cannot restore - async functions not configured (asyncSend=\(asyncSendCommandFunc != nil), pause=\(pausePaneFunc != nil), unpause=\(unpausePaneFunc != nil))")
-            return
-        }
-        
-        logger.info("RESTORE: Starting visible content restore for resumed session")
-        
-        // First, query panes to know which panes exist in the current window.
-        // We use the list-panes command response to identify panes, then
-        // capture each one.
-        sendCommand("list-panes -F '#{pane_id}'") { [weak self] result in
-            guard let self = self else {
-                logger.warning("RESTORE: self is nil in list-panes callback")
-                return
-            }
-            
-            switch result {
-            case .success(let response):
-                logger.info("RESTORE: list-panes raw response: '\(response)'")
-                let paneIds = response
-                    .split(separator: "\n", omittingEmptySubsequences: true)
-                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { $0.hasPrefix("%") }
-                
-                logger.info("RESTORE: Found \(paneIds.count) panes to restore: \(paneIds)")
-                
-                if paneIds.isEmpty {
-                    logger.warning("RESTORE: No panes found! Raw response was: '\(response)'")
-                    return
-                }
-                
-                // Launch async restore task
-                Task { [weak self] in
-                    await self?.performRestore(paneIds: paneIds, asyncSend: asyncSend, pause: pause, unpause: unpause)
-                }
-                
-            case .failure(let error):
-                logger.error("RESTORE: Failed to list panes: \(error.localizedDescription)")
-                // Fall through — panes will show blank until user types something
-            }
-        }
-    }
-    
-    /// Perform the async pause → capture → feed → unpause sequence.
-    /// Runs on a Task because it needs to await TmuxGateway commands.
-    @MainActor
-    private func performRestore(
-        paneIds: [String],
-        asyncSend: @escaping AsyncCommandFunc,
-        pause: @escaping PausePaneFunc,
-        unpause: @escaping UnpausePaneFunc
-    ) async {
-        guard !paneIds.isEmpty else {
-            logger.info("RESTORE: No panes to restore")
-            return
-        }
-        
-        logger.info("RESTORE: performRestore starting for \(paneIds.count) panes: \(paneIds)")
-        
-        // Step 1: Pause all panes to freeze %output.
-        for paneId in paneIds {
-            do {
-                logger.info("RESTORE: Pausing pane \(paneId)...")
-                try await pause(paneId)
-                logger.info("RESTORE: Paused pane \(paneId) successfully")
-            } catch {
-                logger.warning("RESTORE: Failed to pause pane \(paneId): \(error.localizedDescription)")
-            }
-        }
-        
-        // Step 2: Capture and feed each pane
-        for paneId in paneIds {
-            do {
-                logger.info("RESTORE: Capturing pane \(paneId)...")
-                let content = try await asyncSend("capture-pane -pe -t \(paneId)")
-                
-                logger.info("RESTORE: Captured \(content.count) chars for pane \(paneId), first 100: '\(content.prefix(100))'")
-                
-                // Skip if content is empty (blank pane)
-                guard !content.isEmpty else {
-                    logger.info("RESTORE: Pane \(paneId) capture is empty, skipping")
-                    continue
-                }
-                
-                // Convert \n to \r\n for terminal emulator.
-                // capture-pane returns Unix line endings (\n), but terminal emulators
-                // interpret \n as "cursor down" without carriage return. We need \r\n
-                // to move to column 0 AND down.
-                let terminalContent = content.replacingOccurrences(of: "\n", with: "\r\n")
-                
-                guard let data = terminalContent.data(using: .utf8) else {
-                    logger.error("RESTORE: Failed to encode capture content for \(paneId)")
-                    continue
-                }
-                
-                // Get or create surface and feed the captured content
-                let surface = getSurfaceOrCreate(for: paneId)
-                logger.info("RESTORE: Surface for \(paneId): \(surface != nil ? "exists" : "nil"), surfaceFactory: \(surfaceFactory != nil ? "set" : "nil"), paneSurfaces keys: \(Array(paneSurfaces.keys))")
-                
-                if let surface = surface {
-                    surface.feedData(data)
-                    surface.setNeedsDisplay()
-                    logger.info("RESTORE: Fed \(data.count) bytes of capture to \(paneId)")
-                } else {
-                    // Surface not ready yet — buffer it as pending output.
-                    if pendingOutput[paneId] == nil {
-                        pendingOutput[paneId] = []
-                    }
-                    pendingOutput[paneId]?.append(data)
-                    logger.info("RESTORE: Buffered \(data.count) bytes of capture for \(paneId) (surface not ready)")
-                }
-                
-            } catch {
-                logger.error("RESTORE: Failed to capture pane \(paneId): \(error.localizedDescription)")
-            }
-        }
-        
-        // Step 3: Unpause all panes to resume live output.
-        for paneId in paneIds {
-            do {
-                logger.info("RESTORE: Unpausing pane \(paneId)...")
-                try await unpause(paneId)
-                logger.info("RESTORE: Unpaused pane \(paneId) successfully")
-            } catch {
-                logger.warning("RESTORE: Failed to unpause pane \(paneId): \(error.localizedDescription)")
-            }
-        }
-        
-        logger.info("RESTORE: Visible content restore COMPLETE for \(paneIds.count) panes")
-    }
     
     /// Handle window added notification
     func handleWindowAdd(windowId: String) {
@@ -593,40 +382,10 @@ class TmuxSessionManager: ObservableObject {
             }
         }
         
-        // Query window details using proper command routing
-        // Query both window info and layout in parallel
-        sendCommand("display-message -t '\(windowId)' -p '#{window_index} #{window_name}'") { [weak self] result in
-            if case .success(let response) = result {
-                let parts = response.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1)
-                if parts.count >= 2, let index = Int(parts[0]) {
-                    if var window = self?.windows[windowId] {
-                        window.index = index
-                        window.name = String(parts[1])
-                        self?.windows[windowId] = window
-                        logger.info("📑 Window \(windowId) details: index=\(index) name=\(parts[1])")
-                    }
-                }
-            }
-        }
-        
-        // Also query the layout for this window to build its split tree
-        sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'") { [weak self] result in
-            guard let self = self else { return }
-            if case .success(let response) = result {
-                let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !layoutStr.isEmpty {
-                    logger.info("📑 Queried layout for new window \(windowId): \(layoutStr.prefix(50))...")
-                    // Parse and create split tree
-                    if let parsedLayout = try? TmuxLayout.parseWithChecksum(layoutStr) {
-                        self.updatePanePositions(from: parsedLayout, in: windowId)
-                        self.updateSplitTree(from: parsedLayout, for: windowId)
-                    } else if let parsedLayout = try? TmuxLayout.parse(String(layoutStr.dropFirst(5))) {
-                        self.updatePanePositions(from: parsedLayout, in: windowId)
-                        self.updateSplitTree(from: parsedLayout, for: windowId)
-                    }
-                }
-            }
-        }
+        // In native Ghostty mode, window details will arrive via %layout-change
+        // which Ghostty's viewer processes, triggering TMUX_STATE_CHANGED.
+        // No need to query — state comes from notifications.
+        logger.info("📑 Window \(windowId) added, waiting for layout notification from Ghostty")
     }
     
     /// Handle window closed notification
@@ -736,27 +495,8 @@ class TmuxSessionManager: ObservableObject {
                     focusedPaneId = "%\(firstPaneId)"
                 }
             } else {
-                // No split tree yet - query the layout
-                logger.info("📑 No split tree for window \(windowId), querying layout...")
-                
-                sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'") { [weak self] result in
-                    guard let self = self else { return }
-                    if case .success(let response) = result {
-                        let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !layoutStr.isEmpty {
-                            logger.info("📑 Got layout for window \(windowId): \(layoutStr.prefix(50))...")
-                            
-                            // Parse and create split tree
-                            if let parsedLayout = try? TmuxLayout.parseWithChecksum(layoutStr) {
-                                self.updatePanePositions(from: parsedLayout, in: windowId)
-                                self.updateSplitTree(from: parsedLayout, for: windowId)
-                            } else if let parsedLayout = try? TmuxLayout.parse(String(layoutStr.dropFirst(5))) {
-                                self.updatePanePositions(from: parsedLayout, in: windowId)
-                                self.updateSplitTree(from: parsedLayout, for: windowId)
-                            }
-                        }
-                    }
-                }
+                // No split tree yet — layout will come via %layout-change from Ghostty
+                logger.info("📑 No split tree for window \(windowId), waiting for layout notification from Ghostty")
             }
         }
     }
@@ -947,17 +687,8 @@ class TmuxSessionManager: ObservableObject {
     /// Handle pane mode changed notification
     func handlePaneModeChanged(paneId: String) {
         logger.debug("Pane mode changed: \(paneId)")
-        
-        // Query pane mode using proper command routing
-        sendCommand("display-message -t '\(paneId)' -p '#{pane_in_mode}'") { [weak self] result in
-            if case .success(let response) = result {
-                let inMode = response.trimmingCharacters(in: .whitespacesAndNewlines) != "0"
-                if var pane = self?.panes[paneId] {
-                    pane.mode = inMode ? .copy : .normal
-                    self?.panes[paneId] = pane
-                }
-            }
-        }
+        // In native Ghostty mode, we can't query pane mode via command/response.
+        // Ghostty's viewer handles mode changes internally.
     }
     
     /// Handle sessions changed notification
@@ -970,47 +701,10 @@ class TmuxSessionManager: ObservableObject {
         // This distinguishes "new session created" from "attached to existing"
         sawSessionsChanged = true
         
-        sendCommand("list-sessions -F '\(TmuxQueryFormat.sessions)'") { [weak self] result in
-            if case .success(let response) = result {
-                self?.parseSessionsResponse(response)
-            }
-        }
-    }
-    
-    // MARK: - Pane Output Routing
-    
-    /// Route pane output to the appropriate Ghostty surface
-    /// If no surface exists yet, output is buffered in pendingOutput and flushed
-    /// when the surface is created. tmux sends %output for the visible screen
-    /// on attach — this is the canonical way content reaches the terminal.
-    func routeOutput(_ data: Data, to paneId: String) {
-        // Set focusedPaneId from first output if not yet resolved.
-        // This is critical when our session's pane is not %0.
-        if focusedPaneId.isEmpty {
-            logger.info("Setting focusedPaneId from first output: \(paneId)")
-            focusedPaneId = paneId
-        }
-        
-        // Get existing surface or create one if factory is available
-        guard let surface = getSurfaceOrCreate(for: paneId) else {
-            // No surface available — buffer output until surface is created
-            if pendingOutput[paneId] == nil {
-                pendingOutput[paneId] = []
-            }
-            pendingOutput[paneId]?.append(data)
-            logger.debug("Buffered \(data.count) bytes for pane \(paneId) (total: \(self.pendingOutput[paneId]?.count ?? 0) chunks)")
-            return
-        }
-        
-        // Feed data to the surface
-        surface.feedData(data)
-        
-        // Update pane in our model if it doesn't exist
-        if panes[paneId] == nil {
-            // Create a placeholder pane
-            let pane = TmuxPane(id: paneId, windowId: focusedWindowId, width: 80, height: 24)
-            panes[paneId] = pane
-        }
+        // In native Ghostty mode, we can't query sessions via command/response.
+        // Ghostty's viewer tracks session state internally and notifies via
+        // TMUX_STATE_CHANGED. The sawSessionsChanged flag is what matters here.
+        logger.debug("Sessions changed — relying on Ghostty state tracking")
     }
     
     // MARK: - Surface Management
@@ -1323,37 +1017,14 @@ class TmuxSessionManager: ObservableObject {
                 focusedPaneId = "%\(firstPaneId)"
             }
         } else {
-            // No split tree yet - show loading state and query the layout
-            logger.info("📑 No split tree for window \(windowId), querying layout...")
+            // No split tree yet — in native Ghostty mode, select-window triggers
+            // %layout-change which Ghostty processes, firing TMUX_STATE_CHANGED.
+            // The layout will arrive via handleLayoutChanged() when it does.
+            logger.info("📑 No split tree for window \(windowId), waiting for layout notification from Ghostty")
             
-            // Clear current split tree while we load the new window's layout
+            // Clear current split tree while we wait for the layout notification
             // This prevents showing the old window's content during transition
             currentSplitTree = TmuxSplitTree()
-            
-            sendCommand("display-message -t '\(windowId)' -p '#{window_layout}'") { [weak self] result in
-                guard let self = self else { return }
-                if case .success(let response) = result {
-                    let layoutStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !layoutStr.isEmpty {
-                        logger.info("📑 Got layout for window \(windowId): \(layoutStr.prefix(50))...")
-                        
-                        // Parse and create split tree
-                        if let parsedLayout = try? TmuxLayout.parseWithChecksum(layoutStr) {
-                            self.updatePanePositions(from: parsedLayout, in: windowId)
-                            self.updateSplitTree(from: parsedLayout, for: windowId)
-                        } else if let parsedLayout = try? TmuxLayout.parse(String(layoutStr.dropFirst(5))) {
-                            self.updatePanePositions(from: parsedLayout, in: windowId)
-                            self.updateSplitTree(from: parsedLayout, for: windowId)
-                        } else {
-                            logger.error("📑 Failed to parse layout for window \(windowId)")
-                        }
-                    } else {
-                        logger.warning("📑 Empty layout received for window \(windowId)")
-                    }
-                } else if case .failure(let error) = result {
-                    logger.error("📑 Failed to query layout for window \(windowId): \(error)")
-                }
-            }
         }
     }
     
@@ -1647,8 +1318,9 @@ class TmuxSessionManager: ObservableObject {
     }
     
     /// Send input to the focused pane
-    /// Note: Input routing should go through SSHSession which uses TmuxGateway.sendKeys()
-    /// This is a legacy method kept for compatibility
+    /// Note: In native Ghostty tmux mode, keystrokes on stdin go directly to the
+    /// active pane — send-keys is NOT needed. This is legacy dead code.
+    /// Input routing goes through SSHSession → Ghostty write callback → SSH.
     func sendInput(_ data: Data) {
         guard let write = writeToSSH else { return }
         
@@ -1659,8 +1331,9 @@ class TmuxSessionManager: ObservableObject {
     }
     
     /// Send input to a specific pane
-    /// Note: Input routing should go through SSHSession which uses TmuxGateway.sendKeys()
-    /// This is a legacy method kept for compatibility
+    /// Note: In native Ghostty tmux mode, keystrokes on stdin go directly to the
+    /// active pane — send-keys is NOT needed. This is legacy dead code.
+    /// Input routing goes through SSHSession → Ghostty write callback → SSH.
     func sendInput(_ data: Data, to paneId: String) {
         guard let write = writeToSSH else { return }
         
