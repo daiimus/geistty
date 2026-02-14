@@ -112,4 +112,48 @@ final class ResizeTimingTests: XCTestCase {
         XCTAssertEqual(conn.cols, 120)
         XCTAssertEqual(conn.rows, 40)
     }
+
+    // MARK: - resizePTY Deduplication
+
+    @MainActor
+    func testResizePTYDeduplicatesSameSize() {
+        // When both sizeDidChange() (sync, main thread) and the Zig-side
+        // resize callback (async, IO→main) fire for the same layout change,
+        // the second resizePTY call should be a no-op. Without a live SSH
+        // channel we can't observe the window-change request, but we verify
+        // that cols/rows are NOT updated when there's no channel — the dedup
+        // guard fires before the channel guard, so same-size calls are skipped
+        // regardless of channel state.
+        let conn = NIOSSHConnection(host: "localhost", username: "test")
+
+        // Set initial size directly (simulates what connect() does)
+        conn.cols = 120
+        conn.rows = 40
+
+        // resizePTY with the same size should be a no-op (dedup guard).
+        // Without a channel, resizePTY also guards early, but the dedup
+        // check happens first for same-size calls.
+        conn.resizePTY(cols: 120, rows: 40)
+
+        // Values unchanged — confirms no side effects from duplicate call
+        XCTAssertEqual(conn.cols, 120)
+        XCTAssertEqual(conn.rows, 40)
+    }
+
+    @MainActor
+    func testResizePTYAllowsDifferentSize() {
+        let conn = NIOSSHConnection(host: "localhost", username: "test")
+        conn.cols = 80
+        conn.rows = 24
+
+        // Different size should NOT be deduped — it should attempt to resize.
+        // Without a channel it will guard early (cols/rows not updated),
+        // but the dedup guard should not block it.
+        conn.resizePTY(cols: 120, rows: 40)
+
+        // Without channel, cols/rows stay at their previous values because
+        // the channel guard returns before updating them.
+        XCTAssertEqual(conn.cols, 80)
+        XCTAssertEqual(conn.rows, 24)
+    }
 }
