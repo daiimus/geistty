@@ -56,11 +56,11 @@ class TmuxSessionManager: ObservableObject {
     /// All panes in the current session
     @Published private(set) var panes: [String: TmuxPane] = [:]
     
-    /// Currently focused pane ID
-    @Published private(set) var focusedPaneId: String = "%0"
+    /// Currently focused pane ID (empty until first layout/output event resolves it)
+    @Published private(set) var focusedPaneId: String = ""
     
-    /// Currently focused window ID
-    @Published private(set) var focusedWindowId: String = "@0"
+    /// Currently focused window ID (empty until first session-changed/layout event)
+    @Published private(set) var focusedWindowId: String = ""
     
     /// Connection state (legacy bool for compatibility)
     @Published private(set) var isConnected: Bool = false
@@ -677,8 +677,8 @@ class TmuxSessionManager: ObservableObject {
                     // tmux should send %exit when last window closes
                     logger.warning("🗑️ All windows closed but no %exit received")
                     currentSplitTree = TmuxSplitTree()
-                    focusedPaneId = "%0"
-                    focusedWindowId = "@0"
+                    focusedPaneId = ""
+                    focusedWindowId = ""
                 }
             }
         }
@@ -876,8 +876,13 @@ class TmuxSessionManager: ObservableObject {
             logTreeNode(rootNode, prefix: "📐 Tree: ")
         }
         
-        // Update current split tree if this is the focused window
-        if windowId == focusedWindowId {
+        // Update current split tree if this is the focused window,
+        // or if focusedWindowId hasn't been set yet (initial connection)
+        if windowId == focusedWindowId || focusedWindowId.isEmpty {
+            if focusedWindowId.isEmpty {
+                logger.info("📐 Setting focusedWindowId from first layout: \(windowId)")
+                focusedWindowId = windowId
+            }
             currentSplitTree = newTree
             logger.info("📐 ✅ Updated currentSplitTree: \(newTree.paneIds.count) panes, isSplit=\(newTree.isSplit)")
             
@@ -979,6 +984,13 @@ class TmuxSessionManager: ObservableObject {
     /// when the surface is created. tmux sends %output for the visible screen
     /// on attach — this is the canonical way content reaches the terminal.
     func routeOutput(_ data: Data, to paneId: String) {
+        // Set focusedPaneId from first output if not yet resolved.
+        // This is critical when our session's pane is not %0.
+        if focusedPaneId.isEmpty {
+            logger.info("Setting focusedPaneId from first output: \(paneId)")
+            focusedPaneId = paneId
+        }
+        
         // Get existing surface or create one if factory is available
         guard let surface = getSurfaceOrCreate(for: paneId) else {
             // No surface available — buffer output until surface is created
@@ -1017,13 +1029,13 @@ class TmuxSessionManager: ObservableObject {
         // Don't create surfaces for panes that no longer exist in the split tree
         // This prevents race conditions during pane close transitions
         // BUT: allow creation when split tree is empty (initial connection state)
-        // or for pane %0 which always exists initially
+        // or when no surfaces exist yet (first pane of a new session)
         if let numericId = Int(paneId.dropFirst()) {  // "%0" -> 0
             let treeIsEmpty = currentSplitTree.paneIds.isEmpty
             let paneExistsInTree = currentSplitTree.paneIds.contains(numericId)
-            let isPrimaryPane = numericId == 0
+            let noSurfacesYet = paneSurfaces.isEmpty
             
-            if !treeIsEmpty && !paneExistsInTree && !isPrimaryPane {
+            if !treeIsEmpty && !paneExistsInTree && !noSurfacesYet {
                 logger.debug("Not creating surface for closed pane \(paneId)")
                 return nil
             }
@@ -1063,8 +1075,11 @@ class TmuxSessionManager: ObservableObject {
         
         paneSurfaces[paneId] = surface
         
-        // If this is %0, also set as primary surface and wire up cell size callback
-        if paneId == "%0" {
+        // Assign primary surface if none exists yet.
+        // The first surface created becomes primary — this is NOT always %0.
+        // When another tmux client (e.g., ShellFish) owns %0, our session's
+        // initial pane might be %2, %3, etc.
+        if primarySurface == nil {
             assignPrimarySurface(surface, forPaneId: paneId)
         }
         
@@ -1122,28 +1137,59 @@ class TmuxSessionManager: ObservableObject {
         logger.info("✅ Surface management configured")
     }
     
-    /// Create the primary surface for pane %0
-    /// This should be called early in the connection lifecycle
+    /// Create the primary surface for the session's initial pane.
+    /// The pane ID is determined dynamically — it may be %0, %2, etc. depending on
+    /// what other tmux clients have already claimed. We use the first pane from the
+    /// split tree, or the first pane with pending output, or fall back to focusedPaneId.
     func createPrimarySurface() -> Ghostty.SurfaceView? {
         guard surfaceFactory != nil else {
             logger.warning("⚠️ Cannot create primary surface - factory not configured")
             return nil
         }
         
-        // Create surface for %0 if it doesn't exist (getSurfaceOrCreate handles primarySurface assignment)
-        if let existing = paneSurfaces["%0"] {
-            logger.info("Primary surface already exists")
+        // Determine the initial pane ID (may not be %0 if other clients exist)
+        let initialPaneId = resolveInitialPaneId()
+        
+        if let existing = paneSurfaces[initialPaneId] {
+            logger.info("Primary surface already exists for \(initialPaneId)")
             return existing
         }
         
-        let surface = getSurfaceOrCreate(for: "%0")
-        logger.info("✅ Created primary surface for %0")
+        let surface = getSurfaceOrCreate(for: initialPaneId)
+        logger.info("✅ Created primary surface for \(initialPaneId)")
         return surface
     }
     
     /// Get surface for a pane (returns nil if not created)
     func getSurface(for paneId: String) -> Ghostty.SurfaceView? {
         return paneSurfaces[paneId]
+    }
+    
+    /// Resolve the initial pane ID for this session.
+    /// Priority: split tree pane > pane with pending output > focusedPaneId > "%0"
+    private func resolveInitialPaneId() -> String {
+        // 1. Use first pane from split tree (authoritative source from layout)
+        if let firstPaneId = currentSplitTree.paneIds.first {
+            let paneId = "%\(firstPaneId)"
+            logger.info("resolveInitialPaneId: from split tree → \(paneId)")
+            return paneId
+        }
+        
+        // 2. Use first pane that has pending output (data has arrived)
+        if let firstPendingPaneId = pendingOutput.keys.sorted().first {
+            logger.info("resolveInitialPaneId: from pending output → \(firstPendingPaneId)")
+            return firstPendingPaneId
+        }
+        
+        // 3. Use focusedPaneId if it's been set to something meaningful
+        if !focusedPaneId.isEmpty {
+            logger.info("resolveInitialPaneId: from focusedPaneId → \(focusedPaneId)")
+            return focusedPaneId
+        }
+        
+        // 4. Fallback — shouldn't normally reach here
+        logger.warning("resolveInitialPaneId: fallback to %0")
+        return "%0"
     }
     
     /// Get surface for a numeric pane ID (e.g., 0 -> "%0")

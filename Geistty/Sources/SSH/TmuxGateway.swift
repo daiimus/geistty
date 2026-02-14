@@ -131,7 +131,12 @@ public actor TmuxGateway {
     public private(set) var isActive: Bool = false
     
     /// Active pane ID
-    public private(set) var activePaneId: String = "%0"
+    /// The active pane for input routing. Initially nil until we learn the real pane ID
+    /// from %output, %session-changed, or %window-pane-changed events.
+    /// IMPORTANT: Do NOT default to "%0" — when another client (e.g., ShellFish) already
+    /// owns %0, our session's pane will be %1, %2, etc. Defaulting to %0 would send
+    /// keystrokes to the wrong session's pane.
+    public private(set) var activePaneId: String?
     
     /// Set the active pane ID for input routing
     /// Called when user taps on a different pane surface
@@ -291,6 +296,14 @@ public actor TmuxGateway {
             }
             
         case .output(let paneId, let data), .extendedOutput(let paneId, _, let data):
+            // Set active pane from first output if not yet known.
+            // This is critical when our session's pane is not %0 (e.g., %2 when
+            // another client already owns %0).
+            if activePaneId == nil {
+                logger.info("Setting activePaneId from first output: \(paneId)")
+                activePaneId = paneId
+            }
+            
             // Append to buffer
             if paneBuffers[paneId] == nil {
                 paneBuffers[paneId] = Data()
@@ -553,7 +566,10 @@ public actor TmuxGateway {
     public func sendKeys(_ data: Data, toPaneId paneId: String? = nil) {
         guard let write = writeCallback else { return }
         
-        let targetPane = paneId ?? activePaneId
+        guard let targetPane = paneId ?? activePaneId else {
+            logger.warning("🔑 Cannot send keys — no active pane ID set yet")
+            return
+        }
         
         // Debug: log raw input
         let inputHex = data.map { String(format: "%02x", $0) }.joined(separator: " ")
@@ -654,7 +670,10 @@ public actor TmuxGateway {
     /// Resume a paused pane
     /// - Parameter paneId: Pane to resume (default: active pane)
     public func resumePausedPane(paneId: String? = nil) {
-        let targetPane = paneId ?? activePaneId
+        guard let targetPane = paneId ?? activePaneId else {
+            logger.warning("Cannot resume pane — no active pane ID set yet")
+            return
+        }
         pausedPanes.remove(targetPane)
         sendCommandFireAndForget("refresh-client -A '\(targetPane):continue'")
     }
@@ -665,8 +684,8 @@ public actor TmuxGateway {
             resumePausedPane(paneId: paneId)
         }
         // Also resume active pane if not tracked
-        if !pausedPanes.contains(activePaneId) {
-            resumePausedPane(paneId: activePaneId)
+        if let activePane = activePaneId, !pausedPanes.contains(activePane) {
+            resumePausedPane(paneId: activePane)
         }
     }
     
@@ -694,6 +713,7 @@ public actor TmuxGateway {
         isPauseEnabled = false
         isCommandQueuePaused = false
         connectionHealth = .healthy
+        activePaneId = nil
         pausedPanes.removeAll()
         parseBuffer = Data()
         blockState = nil
