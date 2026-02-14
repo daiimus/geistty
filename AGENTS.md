@@ -79,16 +79,14 @@ Geistty/
 
 ## Key Files
 
-- `Sources/Ghostty/Ghostty.swift` - Main Ghostty integration, Config, App, Surface
+- `Sources/Ghostty/Ghostty.swift` - Main Ghostty integration, Config, App, Surface; tmux action callbacks
 - `Sources/Ghostty/FontMapping.swift` - Centralized font name mapping (GUI ↔ Ghostty/CoreText)
 - `Sources/Terminal/TerminalContainerView.swift` - Terminal session UI
 - `Sources/Terminal/KeyTableIndicatorView.swift` - Vim-style key table indicator
 - `Sources/SSH/NIOSSHConnection.swift` - SwiftNIO-SSH connection with Network.framework
-- `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux integration, data flow
-- `Sources/SSH/TmuxGateway.swift` - **Actor-based tmux Control Mode gateway (replaces TmuxControlClient)**
-- `Sources/SSH/TmuxProtocolParser.swift` - Pure synchronous tmux protocol parser
-- `Sources/SSH/KittyKeyboardTranslator.swift` - Kitty → legacy keyboard translation
+- `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux notification observer, data flow
 - `Sources/SSH/TmuxSessionManager.swift` - Multi-pane state management, surface ownership
+- `Sources/SSH/TmuxLayout.swift` - tmux layout string parser for split pane geometry
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
 - `Sources/UI/SettingsView.swift` - App settings UI
 - `Sources/SFTP/SFTPChannel.swift` - Low-level SFTP protocol implementation
@@ -127,6 +125,14 @@ The `ios-external-backend` branch adds:
    - `ghostty_config_load_file(config, path, len)` - Load config from file
    - `ghostty_config_load_string(config, str, len)` - Load config from string
 
+3. **tmux C API** (actions + surface queries)
+   - `GHOSTTY_ACTION_TMUX_STATE_CHANGED` - Action with window_count, pane_count
+   - `GHOSTTY_ACTION_TMUX_EXIT` - Action when tmux control mode exits
+   - `ghostty_surface_tmux_pane_count()` - Get number of panes
+   - `ghostty_surface_tmux_pane_ids()` - Get array of pane IDs
+   - `ghostty_surface_tmux_set_active_pane(id)` - Set active pane for input routing
+   - `ghostty_surface_tmux_reset_active_pane()` - Reset to default pane
+
 ## Font Configuration
 
 Fonts are configured via the `font-family` config option:
@@ -150,32 +156,66 @@ Live font updates use `ghostty_surface_update_config()` with a new config.
 
 ## tmux Integration
 
-Geistty uses tmux Control Mode (`tmux -CC`) with an actor-based architecture:
+Geistty uses tmux Control Mode (`tmux -CC`) with Ghostty's native tmux viewer handling the protocol.
 
-### Architecture (Dec 2025)
+### Architecture (Feb 2026 — Ghostty Native tmux)
+
+Ghostty's upstream code (`viewer.zig`, `control.zig`) handles all tmux control mode protocol parsing,
+output routing to per-pane Terminal instances, and session restore via `capture-pane`. The Swift side
+receives state change notifications and manages iOS-specific UI.
 
 ```
-SSH Server → NIOSSHConnection → SSHSession → TmuxGateway.receive()
-                                                   ↓
-                                        TmuxProtocolParser.parse()
-                                                   ↓
-                                        AsyncStream<TmuxGatewayEvent>
-                                                   ↓
-                              SSHSession.handleGatewayEvent() → TmuxSessionManager
-                                                   ↓
-                                        Ghostty.SurfaceView
+SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
+                                        ↓
+                              delegate.sshSession(didReceiveData:)
+                                        ↓
+                              Ghostty.Surface.writeOutput()
+                                        ↓
+                              [Ghostty detects DCS 1000p, creates tmux Viewer]
+                                        ↓
+                              viewer.zig parses %output/%begin/%end/%layout-change/etc.
+                              Routes output to per-pane Terminal instances
+                                        ↓
+                              Action callback → TMUX_STATE_CHANGED / TMUX_EXIT
+                                        ↓
+                              NotificationCenter → SSHSession.observeTmuxNotifications()
+                                        ↓
+                              TmuxSessionManager.handleTmuxStateChanged()
+                                        ↓
+                              UI updates (pane count, window state)
+
+User Input → Ghostty encodes keystroke → External.queueWrite()
+                                        ↓
+                              write_callback → SSHSession.performWrite()
+                                        ↓
+                              NIOSSHConnection.write() → SSH → tmux stdin → active pane
 ```
 
 ### Key Components
 
 | Component | Purpose |
 |-----------|----------|
-| `TmuxGateway` | Swift actor with command queue, health observation, async/await API |
-| `TmuxProtocolParser` | Pure synchronous parser: `parse(data, buffer, state) → (messages, buffer, state)` |
-| `KittyKeyboardTranslator` | Converts Kitty keyboard protocol to legacy terminal codes for tmux |
-| `TmuxSessionManager` | Multi-pane state, surface ownership, layout parsing |
+| `viewer.zig` (Ghostty) | State machine for tmux control mode: parses protocol, manages per-pane terminals, handles `capture-pane` restore |
+| `control.zig` (Ghostty) | Protocol parser for `%begin/%end/%error/%output/%session-changed/%layout-change` etc. |
+| `stream_handler.zig` (Ghostty) | DCS 1000p detection, creates Viewer, dispatches actions to Swift via callback |
+| `External.zig` (Ghostty) | Pure pass-through: `queueWrite()` → `write_callback` → Swift |
+| `Ghostty.swift` | Action callback handles `TMUX_STATE_CHANGED`/`TMUX_EXIT`, posts notifications; Swift wrappers for pane queries |
+| `SSHSession.swift` | Observes tmux notifications, forwards to TmuxSessionManager, manages connection state |
+| `TmuxSessionManager` | Multi-pane state, surface ownership, layout parsing (partially wired — layout exposure pending) |
+| `TmuxLayout.swift` | Parses tmux layout geometry strings for split pane UI |
 
-### Control Mode Protocol
+### Key Design Decisions
+
+1. **No send-keys**: In native tmux control mode, keystrokes on stdin go directly to the active pane. Ghostty's viewer handles routing.
+2. **No command/response**: With Ghostty handling the protocol, Swift can only do fire-and-forget commands written to stdin. `%begin/%end` responses go to Ghostty's viewer, not Swift.
+3. **Session restore by Ghostty**: `viewer.zig` does `capture-pane` during its startup sequence.
+4. **No DCS filter needed**: The old dual-parser conflict is gone — Ghostty is the sole tmux parser.
+
+### Known Limitations
+
+- `TMUX_STATE_CHANGED` only carries `window_count` and `pane_count` — no layout geometry string. The viewer internally parses `%layout-change` but this is NOT exposed via the C API. Split tree UI needs new C API functions to access layout data (future work).
+- `captureTmuxPane()` for search is stubbed — it relied on the old gateway command/response pattern. Use Ghostty's built-in search instead.
+
 ### Control Mode Protocol Reference
 
 From tmux wiki: https://github.com/tmux/tmux/wiki/Control-Mode
@@ -224,11 +264,9 @@ If revisiting, start fresh from the archive branch and read the learnings doc fi
 |----------|-----|
 | External Backend | iOS sandboxing prevents fork/exec/PTY |
 | SwiftNIO-SSH | Pure Swift, Network.framework integration, native async/await |
-| tmux Control Mode | Proper protocol integration; Geistty owns scrollback buffer |
-| TmuxGateway Actor | Proper concurrency isolation; async/await API; follows SFTPClient pattern |
-| TmuxProtocolParser | Pure synchronous parsing; state passed in/out explicitly; actor-friendly |
-| DCS 1000p Filter | Prevents dual-parser conflict between Ghostty and TmuxGateway |
-| capture-pane for search | Alternate screen mode (tmux, vim) has 0 scrollback by design in terminal emulators |
+| Ghostty Native tmux | Ghostty's upstream viewer.zig/control.zig handles all protocol parsing, output routing, and session restore — eliminates dual-parser conflicts |
+| Fire-and-forget tmux commands | With Ghostty owning the protocol, Swift can only write commands to stdin; %begin/%end responses go to Ghostty's viewer |
+| Stdin keystrokes (no send-keys) | In native tmux control mode, keystrokes on stdin go directly to the active pane |
 | libxev fork | iOS uses `kevent`, not `kevent64` |
 | Custom module.modulemap name | Renamed to avoid Xcode module conflicts |
 
@@ -243,44 +281,33 @@ SSH Server → NIOSSHConnection (SwiftNIO-SSH) → SSHSession → Ghostty.Surfac
 User Input → Ghostty write callback → SSHSession → NIOSSHConnection.write()
 ```
 
-### Control Mode (tmux -CC) - Current Architecture
+### Control Mode (tmux -CC) — Ghostty Native tmux
 ```
 SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
                                         ↓
-                              [DCS 1000p filter - prevents Ghostty internal tmux parser conflict]
-                                        ↓
-                              TmuxGateway.receive(data)
-                                        ↓
-                              TmuxProtocolParser.parse()
-                                        ↓
-                              AsyncStream<TmuxGatewayEvent>
-                                        ↓
-                              SSHSession.handleGatewayEvent()
-                                        ↓
-                              TmuxSessionManager.routeOutput()
-                                        ↓
                               Ghostty.Surface.writeOutput()
+                                        ↓
+                              [Ghostty detects DCS 1000p internally]
+                              [viewer.zig state machine activates]
+                                        ↓
+                              control.zig parses %output/%begin/%end/etc.
+                              viewer.zig routes output to per-pane Terminal
+                                        ↓
+                              Action: TMUX_STATE_CHANGED → NotificationCenter
+                                        ↓
+                              SSHSession → TmuxSessionManager (UI state updates)
                                         ↓
                               Terminal UI (Metal)
                                         ↓
-User Input → Ghostty write callback → SSHSession.write()
+User Input → Ghostty encodes → External.queueWrite() → write_callback
                                         ↓
-                              TmuxGateway.sendKeys(data)
+                              SSHSession.performWrite() → NIOSSHConnection.write()
                                         ↓
-                              KittyKeyboardTranslator.translate()
-                                        ↓
-                              "send-keys -H -t %pane hex..." → NIOSSHConnection.write()
+                              SSH → tmux stdin → active pane
 ```
 
-### Critical: DCS 1000p Filter
-
-The `SSHSession.handleReceivedData()` method filters out `\x1bP1000p` (DCS 1000p) sequences
-before forwarding to Ghostty. This is critical because:
-
-1. tmux sends DCS 1000p to signal control mode entry
-2. Ghostty has an internal tmux control mode parser that activates on this sequence
-3. If both Ghostty's parser AND our TmuxGateway parse the same data, it causes conflicts
-4. The filter ensures only TmuxGateway handles the control mode protocol
+Note: Ghostty is the sole tmux protocol parser. No DCS filter is needed —
+there is no dual-parser conflict since the Swift-side parser was removed.
 
 ## Common Pitfalls
 
@@ -369,6 +396,7 @@ xcrun devicectl device process launch --device <device-id> --console com.geistty
 - `ghostty` (daiimus/ghostty, branch: ios-external-backend)
   - External termio backend for SSH/iOS
   - C API extensions for config loading
+  - tmux C API: state change actions, pane queries, active pane switching
   
 - `libxev-ios` (daiimus/libxev-ios)
   - iOS kqueue support (uses kevent instead of kevent64)
