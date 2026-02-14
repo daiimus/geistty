@@ -881,6 +881,8 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // Wire up resize handler for single-pane mode
+        // onResize fires synchronously from layoutSubviews on main thread —
+        // no Task deferral needed (same fix as createDirectSurface).
         if surfaceResizeHandler != nil {
             surface.onResize = { [weak self] cols, rows in
                 guard let self = self else { return }
@@ -888,9 +890,7 @@ class TmuxSessionManager: ObservableObject {
                     logger.debug("Ignoring surface resize in multi-pane mode (handled by container)")
                     return
                 }
-                Task { @MainActor in
-                    self.surfaceResizeHandler?(cols, rows)
-                }
+                self.surfaceResizeHandler?(cols, rows)
             }
         }
         

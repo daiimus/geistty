@@ -244,6 +244,14 @@ class TerminalViewModel: ObservableObject {
                 isConnected = true
                 startDurationTimer()
                 
+                // Read the actual grid size from Ghostty surface rather than
+                // relying on callback-updated cols/rows which may still be the
+                // 80x24 defaults if onResize hasn't fired yet.
+                if let size = surfaceView?.surfaceSize, size.columns > 0, size.rows > 0 {
+                    cols = Int(size.columns)
+                    rows = Int(size.rows)
+                }
+                
                 // Send initial terminal size
                 logger.info("📡 Setting terminal size: \(cols)x\(rows)")
                 sshSession?.resize(cols: cols, rows: rows)
@@ -263,6 +271,14 @@ class TerminalViewModel: ObservableObject {
         sshSession?.ghosttySurface = surfaceView
         isConnected = true
         startDurationTimer()
+        
+        // Read the actual grid size from Ghostty surface. The SSH PTY was
+        // created with 80x24 defaults before the terminal view existed.
+        // Now that the surface is laid out, read the real dimensions.
+        if let size = surfaceView?.surfaceSize, size.columns > 0, size.rows > 0 {
+            cols = Int(size.columns)
+            rows = Int(size.rows)
+        }
         
         // Send initial terminal size
         logger.info("📡 Setting terminal size: \(cols)x\(rows)")
@@ -1607,22 +1623,20 @@ class RawTerminalUIViewController: UIViewController {
         
         // Input handler wires surface.onWrite through SSHSession
         // In native Ghostty tmux mode, keystrokes on stdin go directly to the active pane.
+        // onWrite arrives on main thread (C callback dispatches via DispatchQueue.main.async)
         let inputHandler: (Ghostty.SurfaceView, String) -> Void = { [weak self] surface, paneId in
             surface.onWrite = { [weak self] data in
-                Task { @MainActor in
-                    // Track which pane has focus locally
-                    self?.viewModel?.tmuxManager?.setFocusedPane(paneId)
-                    // Write directly — Ghostty's tmux viewer routes to the active pane
-                    self?.viewModel?.sendInput(data)
-                }
+                // Track which pane has focus locally
+                self?.viewModel?.tmuxManager?.setFocusedPane(paneId)
+                // Write directly — Ghostty's tmux viewer routes to the active pane
+                self?.viewModel?.sendInput(data)
             }
         }
         
-        // Resize handler
+        // Resize handler — called synchronously from layoutSubviews on main thread.
+        // No Task deferral: cols/rows must update before connect()/useExistingSession() reads them.
         let resizeHandler: (Int, Int) -> Void = { [weak self] cols, rows in
-            Task { @MainActor in
-                self?.viewModel?.resize(cols: cols, rows: rows)
-            }
+            self?.viewModel?.resize(cols: cols, rows: rows)
         }
         
         tmuxManager.configureSurfaceManagement(
@@ -1653,16 +1667,17 @@ class RawTerminalUIViewController: UIViewController {
         surface.shortcutDelegate = self
         
         // Wire up callbacks directly to SSH (non-tmux mode)
+        // onWrite arrives on main thread (C callback dispatches via DispatchQueue.main.async)
         surface.onWrite = { [weak self] data in
-            Task { @MainActor in
-                self?.viewModel?.sendInput(data)
-            }
+            self?.viewModel?.sendInput(data)
         }
         
+        // onResize fires synchronously from layoutSubviews → sizeDidChange(),
+        // which is always on the main thread. Do NOT wrap in Task — the async
+        // deferral introduces a race where connect()/useExistingSession() reads
+        // stale 80x24 defaults before the deferred Task updates cols/rows.
         surface.onResize = { [weak self] cols, rows in
-            Task { @MainActor in
-                self?.viewModel?.resize(cols: cols, rows: rows)
-            }
+            self?.viewModel?.resize(cols: cols, rows: rows)
         }
         
         displaySurface(surface)
