@@ -944,7 +944,7 @@ extension Ghostty {
         init() {}
         
         /// Convert to C struct for passing to ghostty_surface_new
-        func withCValue<T>(view: UIView, writeCallback: ghostty_write_callback_fn? = nil, _ body: (inout ghostty_surface_config_s) -> T) -> T {
+        func withCValue<T>(view: UIView, writeCallback: ghostty_write_callback_fn? = nil, resizeCallback: ghostty_resize_callback_fn? = nil, _ body: (inout ghostty_surface_config_s) -> T) -> T {
             var config = ghostty_surface_config_new()
             
             // Set platform info
@@ -963,8 +963,9 @@ extension Ghostty {
             // Set backend type
             config.backend_type = ghostty_backend_type_e(UInt32(backendType.rawValue))
             
-            // Set write callback for external backend
+            // Set callbacks for external backend
             config.write_callback = writeCallback
+            config.resize_callback = resizeCallback
             
             // Set command if provided (only relevant for exec backend)
             if let cmd = command {
@@ -1351,7 +1352,13 @@ extension Ghostty {
                 ? Self.externalWriteCallback
                 : nil
             
-            let surface = surfaceConfig.withCValue(view: self, writeCallback: writeCallback) { config in
+            // For external backend, set up a resize callback
+            // The callback will be invoked from the IO thread when the terminal is resized
+            let resizeCallback: ghostty_resize_callback_fn? = surfaceConfig.backendType == .external
+                ? Self.externalResizeCallback
+                : nil
+            
+            let surface = surfaceConfig.withCValue(view: self, writeCallback: writeCallback, resizeCallback: resizeCallback) { config in
                 ghostty_surface_new(app, &config)
             }
             
@@ -2521,6 +2528,33 @@ extension Ghostty {
             }
         }
         
+        /// C callback for external backend resize operations.
+        /// This is called from the IO thread when the terminal grid size changes.
+        /// The External backend invokes this during its resize() method, making
+        /// the backend self-contained (same pattern as Exec backend's PTY ioctl).
+        private static let externalResizeCallback: ghostty_resize_callback_fn = { surface, cols, rows, widthPx, heightPx in
+            _ = widthPx
+            _ = heightPx
+            
+            guard let surface = surface,
+                  let userdata = ghostty_surface_userdata(surface) else {
+                Ghostty.logger.warning("externalResizeCallback: surface or userdata is nil")
+                return
+            }
+            
+            let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            
+            guard surfaceView.surface != nil else {
+                Ghostty.logger.warning("externalResizeCallback: surfaceView.surface is nil (closed)")
+                return
+            }
+            
+            // Dispatch to main thread since this callback fires from the IO thread
+            DispatchQueue.main.async {
+                surfaceView.onResize?(Int(cols), Int(rows))
+            }
+        }
+        
         required init?(coder: NSCoder) {
             fatalError("init(coder:) is not supported")
         }
@@ -2529,8 +2563,9 @@ extension Ghostty {
             // Remove notification observers
             NotificationCenter.default.removeObserver(self)
             
-            // Clear the onWrite callback to prevent callbacks during/after free
+            // Clear callbacks to prevent invocations during/after free
             onWrite = nil
+            onResize = nil
             
             // deinit is not guaranteed to happen on the main actor and our API
             // calls into libghostty must happen there. Capture the surface handle
@@ -2549,8 +2584,9 @@ extension Ghostty {
             assert(Thread.isMainThread, "close() must be called on the main thread")
             guard let surface = surface else { return }
             
-            // Clear the onWrite callback to prevent callbacks during/after free
+            // Clear callbacks to prevent invocations during/after free
             onWrite = nil
+            onResize = nil
             
             // Free the surface — this must happen on main thread
             ghostty_surface_free(surface)
