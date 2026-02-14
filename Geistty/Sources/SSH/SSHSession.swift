@@ -37,37 +37,26 @@ enum TmuxMode {
 }
 
 /// Control mode lifecycle state
-/// Tracks the progression from initial connection through full activation
+/// Tracks whether Ghostty's native tmux viewer is active.
+/// Ghostty handles DCS 1000p detection, protocol parsing, and pane output routing
+/// internally — we only need to know when it's active for input queueing and UI.
 enum ControlModeState: Equatable, CustomStringConvertible {
     /// Not using tmux control mode (or tmux exited)
     case inactive
     
-    /// Control mode detected, data routing through gateway
-    /// Gateway is parsing protocol but hasn't signaled activation yet
-    /// User input is queued during this phase
-    case routing
-    
-    /// Gateway fully activated, ready for user input
-    /// Queued input has been flushed, send-keys is operational
+    /// Ghostty's native tmux viewer is active, ready for user input.
+    /// In tmux control mode, keystrokes on stdin go directly to the active pane —
+    /// no send-keys wrapping is needed.
     case active
     
     var description: String {
         switch self {
         case .inactive: return "inactive"
-        case .routing: return "routing"
         case .active: return "active"
         }
     }
     
-    /// Whether data should be routed through the tmux gateway
-    var isRouting: Bool {
-        switch self {
-        case .inactive: return false
-        case .routing, .active: return true
-        }
-    }
-    
-    /// Whether user input can be sent via send-keys
+    /// Whether user input can flow through to tmux
     var isActive: Bool {
         self == .active
     }
@@ -129,23 +118,17 @@ class SSHSession: ObservableObject, Identifiable {
     private var tmuxSessionName: String?
     private var tmuxMode: TmuxMode = .none
     
-    // tmux Control Mode gateway (actor-based, replaces TmuxControlClient)
-    private var tmuxGateway: TmuxGateway?
-    
-    /// Task for consuming tmux gateway events
-    private var gatewayEventTask: Task<Void, Never>?
-    
     /// tmux Session Manager for multi-pane state management
     /// Access this to get session/window/pane info and route output to surfaces
     private(set) var tmuxSessionManager: TmuxSessionManager?
     
-    /// Control mode lifecycle state
-    /// Tracks progression: inactive → routing → active
-    private var controlModeState: ControlModeState = .inactive
+    /// Notification observers for Ghostty's tmux action callbacks
+    private var tmuxNotificationObservers: [NSObjectProtocol] = []
     
-    /// DCS 1000p filter for detecting tmux control mode entry.
-    /// Handles DCS stripping, ST removal, and packet-splitting robustly.
-    private var dcsFilter = DCSFilter()
+    /// Control mode lifecycle state
+    /// Ghostty's native tmux viewer handles DCS 1000p detection and protocol parsing.
+    /// This state tracks whether the viewer is active (from TMUX_STATE_CHANGED action).
+    private var controlModeState: ControlModeState = .inactive
     
     /// Session name discovery state for geistty-N auto-naming.
     /// When no custom tmux session name is set, we query `tmux list-sessions`
@@ -209,9 +192,9 @@ class SSHSession: ObservableObject, Identifiable {
         // Reset reconnect attempts on successful connection
         reconnectAttempts = 0
         
-        // Initialize gateway if using control mode
+        // Initialize session manager if using control mode
         if tmuxMode == .controlMode {
-            setupTmuxGateway()
+            setupTmuxSessionManager()
         }
         
         // Inject shell initialization for best terminal experience
@@ -597,135 +580,95 @@ class SSHSession: ObservableObject, Identifiable {
     
     // MARK: - tmux Control Mode Setup
     
-    /// Set up the tmux control mode gateway (actor-based)
-    private func setupTmuxGateway() {
-        logger.info("Setting up tmux gateway (actor-based)")
+    /// Set up the tmux session manager for control mode.
+    /// Ghostty's native tmux viewer handles DCS 1000p detection, protocol parsing,
+    /// and pane output routing internally. The session manager coordinates iOS-specific
+    /// UI concerns: surface management, split trees, window picker, detach on background.
+    ///
+    /// Data flow with Ghostty's native tmux:
+    /// SSH → SSHSession.handleReceivedData → delegate.didReceiveData → Ghostty.writeOutput
+    ///   → VT parser detects DCS 1000p → tmux viewer activates
+    ///   → viewer parses %output/%layout-change/etc → routes to per-pane Terminals
+    ///   → TMUX_STATE_CHANGED action → NotificationCenter → TmuxSessionManager
+    private func setupTmuxSessionManager() {
+        logger.info("Setting up tmux session manager (native Ghostty tmux)")
         
-        // Create the gateway actor
-        let gateway = TmuxGateway()
-        tmuxGateway = gateway
-        
-        // Set up session manager for multi-pane state tracking
         let manager = TmuxSessionManager()
         tmuxSessionManager = manager
         
-        // Connect session manager with sendCommand callback
-        // Note: We bridge via callback pattern since TmuxSessionManager is not yet fully migrated
-        manager.setupWithGateway(
-            sendCommand: { [weak self] command, callback in
-                guard self != nil else { return }
-                Task {
-                    do {
-                        let result = try await gateway.sendCommand(command)
-                        await MainActor.run { callback(.success(result)) }
-                    } catch {
-                        await MainActor.run { callback(.failure(error)) }
-                    }
-                }
-            },
-            write: { [weak self] command in
-                // Dispatch to MainActor since SSHSession is @MainActor isolated
-                Task { @MainActor in
-                    self?.writeControlCommand(command)
-                }
-            }
-        )
-        
-        // Set up async restore functions for session resume.
-        // These bridge TmuxSessionManager (MainActor) to TmuxGateway (actor).
-        manager.setupRestoreFunctions(
-            asyncSendCommand: { command in
-                try await gateway.sendCommand(command)
-            },
-            pausePane: { paneId in
-                try await gateway.pausePane(paneId: paneId)
-            },
-            unpausePane: { paneId in
-                try await gateway.unpausePane(paneId: paneId)
-            }
-        )
-        
-        // CRITICAL: Configure write callback before starting event loop
-        // This ensures sendKeys can work as soon as data arrives
-        Task { [weak self] in
-            await gateway.setWriteCallback { [weak self] command in
-                // Dispatch to MainActor since SSHSession is @MainActor isolated
-                Task { @MainActor in
-                    self?.writeControlCommand(command)
-                }
+        // Provide the write function for fire-and-forget tmux commands.
+        // In control mode, commands written to stdin go directly to tmux.
+        manager.setupWithDirectWrite { [weak self] command in
+            Task { @MainActor in
+                self?.writeControlCommand(command)
             }
         }
         
-        // Start event loop after write callback is queued
-        startGatewayEventLoop(gateway: gateway)
+        // Observe Ghostty's native tmux notifications.
+        // These fire when Ghostty's internal tmux viewer detects state changes
+        // via the TMUX_STATE_CHANGED and TMUX_EXIT action callbacks.
+        observeTmuxNotifications()
     }
     
-    /// Start the async event loop for consuming gateway events
-    private func startGatewayEventLoop(gateway: TmuxGateway) {
-        gatewayEventTask?.cancel()
-        gatewayEventTask = Task { [weak self] in
-            for await event in await gateway.events {
-                guard let self = self else { break }
-                await self.handleGatewayEvent(event)
+    /// Register for Ghostty's tmux state notifications.
+    /// TMUX_STATE_CHANGED fires when the tmux viewer activates or pane state changes.
+    /// TMUX_EXIT fires when the tmux control mode session ends.
+    private func observeTmuxNotifications() {
+        // Remove any existing observers first (idempotent)
+        removeTmuxNotificationObservers()
+        
+        let stateObserver = NotificationCenter.default.addObserver(
+            forName: .tmuxStateChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            
+            let windowCount = notification.userInfo?["windowCount"] as? UInt ?? 0
+            let paneCount = notification.userInfo?["paneCount"] as? UInt ?? 0
+            
+            logger.info("tmux state changed: \(windowCount) windows, \(paneCount) panes, current state=\(self.controlModeState)")
+            
+            if self.controlModeState == .inactive {
+                // First state change — control mode just activated
+                self.controlModeState = .active
+                logger.info("Control mode activated via TMUX_STATE_CHANGED")
+                self.tmuxSessionManager?.controlModeActivated()
+                self.flushPendingInput()
             }
+            
+            // Subsequent state changes update pane/window info
+            self.tmuxSessionManager?.handleTmuxStateChanged(
+                windowCount: Int(windowCount),
+                paneCount: Int(paneCount)
+            )
         }
-    }
-    
-    /// Handle a single gateway event
-    @MainActor
-    private func handleGatewayEvent(_ event: TmuxGatewayEvent) {
-        switch event {
-        case .output(let paneId, let data):
-            // Route pane output through session manager
-            if let manager = tmuxSessionManager {
-                manager.routeOutput(data, to: paneId)
-            } else {
-                // Fallback: forward directly to delegate
-                delegate?.sshSession(self, didReceiveData: data)
-            }
+        
+        let exitObserver = NotificationCenter.default.addObserver(
+            forName: .tmuxExited,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
             
-        case .activated:
-            logger.info("🎉 Gateway activated - control mode ready! State: \(controlModeState) → active")
-            controlModeState = .active
-            tmuxSessionManager?.controlModeActivated()
-            
-            // Flush queued input
-            flushPendingInput()
-            
-            // Enable pause mode for iOS lifecycle
-            Task {
-                await tmuxGateway?.enablePauseMode(pauseAfter: 1)
-            }
-            
-        case .layoutChanged(let windowId, let windowIndex, let layout):
-            tmuxSessionManager?.handleLayoutChanged(windowId: windowId, windowIndex: windowIndex, layout: layout)
-            
-        case .activePaneChanged(let windowId, let paneId):
-            tmuxSessionManager?.handleWindowPaneChanged(windowId: windowId, paneId: paneId)
-            
-        case .windowAdded(let windowId):
-            tmuxSessionManager?.handleWindowAdd(windowId: windowId)
-            
-        case .windowClosed(let windowId):
-            tmuxSessionManager?.handleWindowClose(windowId: windowId)
-            
-        case .sessionChanged(let sessionId, let sessionName):
-            tmuxSessionManager?.handleSessionChanged(sessionId: sessionId, sessionName: sessionName)
-            
-        case .sessionsChanged:
-            tmuxSessionManager?.handleSessionsChanged()
-            
-        case .exited(let reason):
-            let reasonDesc = reason ?? "unknown"
-            logger.info("Gateway exited: \(reasonDesc)")
-            controlModeState = .inactive
-            dcsFilter = DCSFilter()
-            tmuxSessionManager?.controlModeExited(reason: reason)
-            delegate?.sshSession(self, didDisconnectWithError: SSHSessionError.tmuxExited(reason: reason))
+            logger.info("tmux control mode exited via TMUX_EXIT")
+            self.controlModeState = .inactive
+            self.tmuxSessionManager?.controlModeExited(reason: "Ghostty tmux viewer exited")
         }
+        
+        tmuxNotificationObservers = [stateObserver, exitObserver]
     }
     
-    /// Flush pending input queue after control mode activates
+    /// Remove tmux notification observers
+    private func removeTmuxNotificationObservers() {
+        for observer in tmuxNotificationObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        tmuxNotificationObservers.removeAll()
+    }
+    
+    /// Flush pending input queue after control mode activates.
+    /// In native tmux mode, keystrokes on stdin go directly to the active pane.
     private func flushPendingInput() {
         guard !pendingInputQueue.isEmpty else { return }
         
@@ -733,9 +676,7 @@ class SSHSession: ObservableObject, Identifiable {
         tmuxSessionManager?.clearPendingInputDisplay()
         
         for data in pendingInputQueue {
-            Task {
-                await tmuxGateway?.sendKeys(data)
-            }
+            performWrite(data, originalData: data)
         }
         pendingInputQueue.removeAll()
     }
@@ -818,21 +759,11 @@ class SSHSession: ObservableObject, Identifiable {
     private func sendTmuxAttachCommand(sessionName: String) {
         // Use control mode (-CC) for proper scrollback access
         // exec replaces the shell with tmux
-        if let gateway = tmuxGateway {
-            Task {
-                let command = await gateway.makeAttachCommand(session: sessionName)
-                if let data = command.data(using: .utf8) {
-                    writeControlCommand(data)
-                }
-            }
-            return
-        } else {
-            let command = "exec tmux -CC new-session -A -s \(sessionName)\n"
-            logger.info("Attaching to tmux in control mode: \(sessionName)")
-            // Write directly to connection - don't go through self.write() which would queue it!
-            if let data = command.data(using: .utf8) {
-                writeControlCommand(data)
-            }
+        let command = "exec tmux -CC new-session -A -s \(sessionName)\n"
+        logger.info("Attaching to tmux in control mode: \(sessionName)")
+        // Write directly to connection — don't go through self.write() which would queue it!
+        if let data = command.data(using: .utf8) {
+            writeControlCommand(data)
         }
     }
     
@@ -848,64 +779,22 @@ class SSHSession: ObservableObject, Identifiable {
         return tmuxMode == .controlMode
     }
     
-    /// Capture the current tmux pane's scrollback content
-    /// Uses TmuxGateway for proper protocol-based capture
-    /// - Parameter completion: Called with the captured text or error
-    func captureTmuxPane(completion: @escaping (Result<String, Error>) -> Void) {
-        logger.debug("captureTmuxPane: Called, tmuxMode=\(String(describing: self.tmuxMode))")
-        guard useTmux else {
-            logger.warning("captureTmuxPane: Not in tmux session")
-            completion(.failure(SSHSessionError.notInTmux))
-            return
-        }
-        
-        guard tmuxMode == .controlMode, let gateway = tmuxGateway else {
-            logger.error("captureTmuxPane: Control mode not active")
-            completion(.failure(NIOSSHError.channelError("tmux control mode not active")))
-            return
-        }
-        
-        logger.info("captureTmuxPane: Using gateway")
-        Task {
-            do {
-                let content = try await gateway.capturePane()
-                await MainActor.run { completion(.success(content)) }
-            } catch {
-                await MainActor.run { completion(.failure(error)) }
-            }
-        }
-    }
-    
     /// Resize the PTY
     func resize(cols: Int, rows: Int) {
         terminalCols = cols
         terminalRows = rows
         connection?.resizePTY(cols: cols, rows: rows)
-        
-        // Also notify tmux if in control mode
-        if controlModeState.isActive, tmuxGateway != nil {
-            Task {
-                await tmuxGateway?.resize(cols: cols, rows: rows)
-            }
-        }
     }
     
-    /// Set the active pane for input routing in control mode
-    /// - Parameter paneId: The pane ID (e.g., "%0", "%1")
-    func setActivePaneId(_ paneId: String) {
-        Task {
-            await tmuxGateway?.setActivePaneId(paneId)
-        }
-    }
-    
-    /// Write data to the SSH channel
-    /// Uses async write internally but queues on failure for resilience
+    /// Write data to the SSH channel.
+    /// In tmux control mode, keystrokes on stdin go directly to the active pane —
+    /// Ghostty's native tmux viewer handles routing. No send-keys wrapping needed.
     func write(_ data: Data) {
         if let str = String(data: data, encoding: .utf8) {
             logger.debug("SSHSession.write: \(data.count) bytes: \(str.prefix(20))")
         }
         
-        // Check connection health - if stale/dead, queue instead of sending
+        // Check connection health — if stale/dead, queue instead of sending
         if !connectionHealth.isHealthy {
             logger.debug("Connection unhealthy (\(String(describing: connectionHealth))), queueing \(data.count) bytes of input")
             pendingInputQueue.append(data)
@@ -913,22 +802,10 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        // In control mode, user input must go through send-keys command
-        // Raw characters would be interpreted as tmux control commands!
-        // Use controlModeState.isActive to ensure tmux is ready
-        if controlModeState.isActive, tmuxGateway != nil {
-            logger.info("⌨️ Routing \(data.count) bytes through gateway.sendKeys")
-            Task {
-                await tmuxGateway?.sendKeys(data)
-            }
-            return
-        }
-        
-        // If we're in control mode but tmux isn't ready yet, queue the input
-        // This prevents input from being sent before tmux is ready for send-keys
-        if tmuxMode == .controlMode {
-            // Either gateway doesn't exist yet, or control mode isn't active
-            logger.info("⌨️ Control mode pending (state=\(controlModeState), gateway=\(tmuxGateway != nil)), queueing \(data.count) bytes of input")
+        // If we're in control mode but tmux isn't ready yet, queue the input.
+        // This prevents input from being sent before tmux's viewer is active.
+        if tmuxMode == .controlMode && !controlModeState.isActive {
+            logger.info("⌨️ Control mode pending (state=\(controlModeState)), queueing \(data.count) bytes of input")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
             return
@@ -984,16 +861,8 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        // In control mode, user input must go through send-keys command
-        if controlModeState.isActive, tmuxGateway != nil {
-            Task {
-                await tmuxGateway?.sendKeys(data)
-            }
-            return
-        }
-        
-        // Queue string input too if in control mode but not yet active
-        if tmuxMode == .controlMode {
+        // Queue if in control mode but not yet active
+        if tmuxMode == .controlMode && !controlModeState.isActive {
             logger.debug("Control mode pending, queueing string input: \(data.count) bytes")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
@@ -1062,20 +931,14 @@ class SSHSession: ObservableObject, Identifiable {
     /// Disconnect the session
     func disconnect() {
         controlModeState = .inactive
-        dcsFilter = DCSFilter()
         sessionDiscoveryState = .idle
         pendingInputQueue.removeAll()
-        gatewayEventTask?.cancel()
-        gatewayEventTask = nil
+        removeTmuxNotificationObservers()
         
         // Send clean detach before tearing down, so tmux session survives
         // on the server and can be reattached later (like iTerm2's behavior)
         tmuxSessionManager?.detach()
         
-        Task {
-            await tmuxGateway?.reset()
-        }
-        tmuxGateway = nil
         tmuxSessionManager?.cleanup()
         tmuxSessionManager = nil
         connection?.disconnect()
@@ -1107,7 +970,7 @@ class SSHSession: ObservableObject, Identifiable {
     /// tmux session would show as "attached" to a dead client until the
     /// TCP keepalive timeout expires.
     func appWillResignActive() {
-        guard controlModeState.isActive, tmuxGateway != nil else { return }
+        guard controlModeState.isActive else { return }
         logger.info("App resigning active, sending clean detach to tmux")
         tmuxSessionManager?.detach()
     }
@@ -1123,16 +986,14 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        // If connection is alive and tmux is active, just resume paused panes
-        if isConnectionAlive, controlModeState.isActive, tmuxGateway != nil {
-            logger.info("🔄 Connection alive, resuming paused panes")
-            Task {
-                await tmuxGateway?.resumeAllPausedPanes()
-            }
+        // If connection is alive, nothing to do — tmux session was detached
+        // on background and will be reattached via reconnect flow
+        if isConnectionAlive, controlModeState.isActive {
+            logger.info("🔄 Connection alive, control mode active")
             return
         }
         
-        // Connection is dead - attempt to reconnect if we have credentials
+        // Connection is dead — attempt to reconnect if we have credentials
         if !isConnectionAlive && canReconnect {
             logger.info("🔄 Connection dead, attempting auto-reconnect...")
             Task {
@@ -1160,13 +1021,6 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
         controlModeState = .inactive
-        dcsFilter = DCSFilter()
-        gatewayEventTask?.cancel()
-        gatewayEventTask = nil
-        Task {
-            await tmuxGateway?.reset()
-        }
-        tmuxGateway = nil
         connection?.disconnect()
         connection = nil
         
@@ -1208,9 +1062,9 @@ class SSHSession: ObservableObject, Identifiable {
         
         try await conn.connect(authMethod: authMethod)
         
-        // Re-setup tmux control mode
+        // Re-setup tmux session manager (Ghostty handles tmux protocol natively)
         if tmuxMode == .controlMode {
-            setupTmuxGateway()
+            setupTmuxSessionManager()
         }
         
         // Re-attach to tmux session
@@ -1255,44 +1109,9 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        // If control mode data routing is active, send through the gateway
-        if controlModeState.isRouting, let gateway = tmuxGateway {
-            logger.info("📥 Routing \(data.count)B to gateway")
-            Task {
-                await gateway.receive(data)
-            }
-            return
-        }
-        
-        // Detect and activate tmux control mode.
-        // Uses DCSFilter to robustly handle DCS 1000p detection, ST stripping,
-        // and arbitrary packet boundaries. Once DCS is detected, all subsequent
-        // data routes to the gateway (following iTerm2's pattern).
-        if tmuxMode == .controlMode, controlModeState == .inactive {
-            let result = dcsFilter.process(data)
-            
-            switch result {
-            case .routeToGateway(let filteredData):
-                logger.info("✅ Control mode detected! \(controlModeState) → routing (\(filteredData.count)B to gateway)")
-                controlModeState = .routing
-                Task {
-                    await tmuxGateway?.receive(filteredData)
-                }
-                return
-                
-            case .forwardToTerminal(let terminalData):
-                // Shell echo, MOTD, etc. — forward to Ghostty for rendering
-                logger.info("📥 Forwarding \(terminalData.count)B to delegate (pre-control-mode)")
-                delegate?.sshSession(self, didReceiveData: terminalData)
-                return
-                
-            case .consumed:
-                // Partial DCS or DCS-only packet — filter is accumulating
-                logger.info("📥 DCS filter consumed \(data.count)B (waiting for more)")
-                return
-            }
-        }
-        
+        // All data goes to Ghostty, which handles DCS 1000p detection and tmux
+        // control mode protocol parsing natively via its internal tmux viewer.
+        // No gateway routing or DCS filtering needed on the Swift side.
         logger.info("📥 Forwarding \(data.count)B to delegate")
         delegate?.sshSession(self, didReceiveData: data)
     }
@@ -1341,13 +1160,6 @@ extension SSHSession: NIOSSHConnectionDelegate {
             self.connectionHealth = health
             logger.info("🔌 Connection health changed: \(String(describing: health))")
             
-            // Update gateway health (actor-isolated)
-            if let gateway = self.tmuxGateway {
-                Task {
-                    await gateway.updateHealth(health)
-                }
-            }
-            
             // Notify delegate
             self.delegate?.sshSession(self, healthDidChange: health)
             
@@ -1357,13 +1169,7 @@ extension SSHSession: NIOSSHConnectionDelegate {
                 self.tmuxSessionManager?.clearPendingInputDisplay()
                 
                 for data in self.pendingInputQueue {
-                    if self.controlModeState.isActive, let gateway = self.tmuxGateway {
-                        Task {
-                            await gateway.sendKeys(data)
-                        }
-                    } else {
-                        self.performWrite(data, originalData: data)
-                    }
+                    self.performWrite(data, originalData: data)
                 }
                 self.pendingInputQueue.removeAll()
             }
