@@ -184,11 +184,14 @@ class TmuxSessionManager: ObservableObject {
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
         
-        logger.info("✅ Control mode activated, resize state reset")
+        logger.info("Control mode activated, resize state reset")
         
-        // Now that we have proper command routing, we can safely query state
-        // The responses will be routed to our callbacks, not mixed with session restore
-        refreshState()
+        // NOTE: Do NOT send any commands here (e.g. refresh-client).
+        // Ghostty's viewer.zig handles all startup commands (display-message,
+        // list-windows, capture-pane, list-panes) through its own command queue.
+        // Sending commands from Swift would interleave bytes on the SSH channel
+        // with Ghostty's commands, potentially corrupting both and causing tmux
+        // parse errors.
     }
     
     /// Called when control mode exits
