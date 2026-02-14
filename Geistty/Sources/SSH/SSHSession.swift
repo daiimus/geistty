@@ -922,9 +922,15 @@ class SSHSession: ObservableObject, Identifiable {
         connection?.resizePTY(cols: cols, rows: rows)
     }
     
-    /// Write data to the SSH channel.
-    /// In tmux control mode, keystrokes on stdin go directly to the active pane —
-    /// Ghostty's native tmux viewer handles routing. No send-keys wrapping needed.
+    /// Write user input data to the SSH channel.
+    ///
+    /// Called from `TerminalContainerView.send(text:)` for paste and special-key
+    /// fallback. This is ALWAYS user input — never viewer commands.
+    ///
+    /// In tmux control mode, ALL stdin is parsed as tmux commands. Raw user input
+    /// like "ls\r" would be interpreted as tmux's "list-sessions" command (tmux
+    /// uses prefix matching). User input must be wrapped in `send-keys` commands
+    /// to reach the active pane.
     func write(_ data: Data) {
         if let str = String(data: data, encoding: .utf8) {
             logger.debug("SSHSession.write: \(data.count) bytes: \(str.prefix(20))")
@@ -944,6 +950,20 @@ class SSHSession: ObservableObject, Identifiable {
             logger.info("⌨️ Control mode pending (state=\(controlModeState)), queueing \(data.count) bytes of input")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
+            return
+        }
+        
+        // In active tmux control mode, user input MUST be wrapped in send-keys.
+        // Without wrapping, raw bytes are parsed as tmux commands (e.g., "ls" → "list-sessions").
+        if controlModeState.isActive {
+            if let wrapped = wrapInSendKeys(data) {
+                performWrite(wrapped, originalData: data)
+            } else {
+                // No active pane yet — queue for later (flushed when pane activates)
+                logger.debug("tmux active but no pane yet (write path), queueing \(data.count) bytes")
+                pendingInputQueue.append(data)
+                updatePendingInputDisplay()
+            }
             return
         }
         
@@ -986,24 +1006,35 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        // In tmux control mode with an active pane, we must distinguish between:
+        // In tmux control mode, ALL stdin is parsed as tmux commands. We must distinguish:
         // 1. Viewer commands (end with \n) — pass through as-is (already valid tmux commands)
-        // 2. User input (raw bytes, no trailing \n) — wrap in send-keys
+        // 2. User input (raw bytes, no trailing \n) — wrap in send-keys OR queue
         //
-        // Without send-keys wrapping, raw bytes like "ls -alf\r" get parsed by tmux as
-        // commands (e.g. "ls" → "list-sessions"), producing errors and a blank screen.
-        if controlModeState.isActive, activeTmuxPaneId != nil {
+        // CRITICAL: When controlModeState is active but activeTmuxPaneId is nil (viewer
+        // startup not yet complete), user input must be QUEUED — not sent raw. Sending
+        // raw bytes like "ls -a" causes tmux to parse them as commands (tmux uses prefix
+        // matching: "ls" → "list-sessions"), generating %begin/%error blocks that corrupt
+        // the viewer's command/response state machine.
+        if controlModeState.isActive {
             if data.last == 0x0A {
                 // Ends with \n — this is a viewer command (display-message, list-windows,
-                // capture-pane, etc.). Pass through directly to tmux.
+                // capture-pane, etc.). Pass through directly to tmux. These MUST reach
+                // tmux immediately even during viewer startup.
                 performWrite(data, originalData: data)
-            } else {
-                // User input — wrap in send-keys for the active pane
+            } else if activeTmuxPaneId != nil {
+                // User input with active pane — wrap in send-keys
                 if let wrapped = wrapInSendKeys(data) {
                     performWrite(wrapped, originalData: data)
                 } else {
                     logger.warning("wrapInSendKeys returned nil for \(data.count) bytes, dropping")
                 }
+            } else {
+                // User input but no pane yet (viewer still starting up).
+                // Queue for later — will be flushed when TMUX_READY fires
+                // and activateFirstTmuxPane() sets activeTmuxPaneId.
+                logger.debug("tmux active but no pane yet, queueing \(data.count) bytes")
+                pendingInputQueue.append(data)
+                updatePendingInputDisplay()
             }
             return
         }
@@ -1044,29 +1075,13 @@ class SSHSession: ObservableObject, Identifiable {
         }
     }
     
-    /// Write string to the SSH channel
+    /// Write string to the SSH channel.
+    /// Delegates to `write(_ data: Data)` for consistent send-keys wrapping in
+    /// tmux control mode.
     func write(_ string: String) {
         logger.debug("SSHSession.write(string): \(string.prefix(20))")
-        
         guard let data = string.data(using: .utf8) else { return }
-        
-        // Check connection health first
-        if !connectionHealth.isHealthy {
-            logger.debug("Connection unhealthy, queueing string input")
-            pendingInputQueue.append(data)
-            updatePendingInputDisplay()
-            return
-        }
-        
-        // Queue if in control mode but not yet active
-        if tmuxMode == .controlMode && !controlModeState.isActive {
-            logger.debug("Control mode pending, queueing string input: \(data.count) bytes")
-            pendingInputQueue.append(data)
-            updatePendingInputDisplay()
-            return
-        }
-        
-        performWrite(data, originalData: data)
+        write(data)
     }
     
     /// Update the visual display of pending input using preedit
@@ -1326,6 +1341,30 @@ class SSHSession: ObservableObject, Identifiable {
             earlyReceiveBuffer.append(data)
         }
     }
+    
+    // MARK: - Test Helpers
+    
+    #if DEBUG
+    /// Set control mode state for testing. Only available in DEBUG builds.
+    func setControlModeStateForTesting(_ state: ControlModeState) {
+        controlModeState = state
+    }
+    
+    /// Set active tmux pane ID for testing. Only available in DEBUG builds.
+    func setActiveTmuxPaneIdForTesting(_ paneId: Int?) {
+        activeTmuxPaneId = paneId
+    }
+    
+    /// Set tmux mode for testing. Only available in DEBUG builds.
+    func setTmuxModeForTesting(_ mode: TmuxMode) {
+        tmuxMode = mode
+    }
+    
+    /// Set connection health for testing. Only available in DEBUG builds.
+    func setConnectionHealthForTesting(_ health: ConnectionHealth) {
+        connectionHealth = health
+    }
+    #endif
 }
 
 // MARK: - NIOSSHConnectionDelegate
@@ -1374,13 +1413,14 @@ extension SSHSession: NIOSSHConnectionDelegate {
             // Notify delegate
             self.delegate?.sshSession(self, healthDidChange: health)
             
-            // If connection became healthy again and we have pending input, flush it
+            // If connection became healthy again and we have pending input, flush it.
+            // Route through writeFromGhostty() so tmux send-keys wrapping is applied.
             if health.isHealthy && !self.pendingInputQueue.isEmpty {
                 logger.info("🔌 Connection healthy, flushing \(self.pendingInputQueue.count) queued inputs")
                 self.tmuxSessionManager?.clearPendingInputDisplay()
                 
                 for data in self.pendingInputQueue {
-                    self.performWrite(data, originalData: data)
+                    self.writeFromGhostty(data)
                 }
                 self.pendingInputQueue.removeAll()
             }
