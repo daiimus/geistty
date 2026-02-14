@@ -62,23 +62,14 @@
 		A1000090 /* NIOSSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000090 /* NIOSSHConnection.swift */; };
 		A1000091 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000002 /* NIOSSH */; };
 		A1000092 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = AE000003 /* NIOTransportServices */; };
-		A1000093 /* TmuxGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000093 /* TmuxGateway.swift */; };
 		A1000096 /* TmuxSessionNameResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000096 /* TmuxSessionNameResolver.swift */; };
-		A1000097 /* DCSFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000097 /* DCSFilter.swift */; };
-		A1000094 /* TmuxProtocolParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000094 /* TmuxProtocolParser.swift */; };
-		A1000095 /* KittyKeyboardTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000095 /* KittyKeyboardTranslator.swift */; };
-		D1000011 /* TmuxProtocolParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000011 /* TmuxProtocolParserTests.swift */; };
-		D1000012 /* KittyKeyboardTranslatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000012 /* KittyKeyboardTranslatorTests.swift */; };
 		D1000013 /* FontMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000013 /* FontMappingTests.swift */; };
 		D1000014 /* ConnectionProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000014 /* ConnectionProfileTests.swift */; };
 		D1000015 /* GhosttyInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000015 /* GhosttyInputTests.swift */; };
 		D1000016 /* TmuxModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000016 /* TmuxModelsTests.swift */; };
 		D1000017 /* TmuxLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000017 /* TmuxLayoutTests.swift */; };
 		D1000018 /* TmuxSplitTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000018 /* TmuxSplitTreeTests.swift */; };
-		D1000019 /* TmuxSessionRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000019 /* TmuxSessionRestoreTests.swift */; };
 		D1000020 /* TmuxSessionNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000020 /* TmuxSessionNameResolverTests.swift */; };
-		D1000021 /* TmuxMultiClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000021 /* TmuxMultiClientTests.swift */; };
-		D1000022 /* DCSFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000022 /* DCSFilterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -177,24 +168,15 @@
 		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
 		A20000A2 /* KeyTableIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTableIndicatorView.swift; sourceTree = "<group>"; };
 		A20000A3 /* SessionResumeToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionResumeToastView.swift; sourceTree = "<group>"; };
-		A2000093 /* TmuxGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxGateway.swift; sourceTree = "<group>"; };
-		A2000094 /* TmuxProtocolParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxProtocolParser.swift; sourceTree = "<group>"; };
-		A2000095 /* KittyKeyboardTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyKeyboardTranslator.swift; sourceTree = "<group>"; };
 		A2000096 /* TmuxSessionNameResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolver.swift; sourceTree = "<group>"; };
-		A2000097 /* DCSFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DCSFilter.swift; sourceTree = "<group>"; };
 		D1000001 /* GeisttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		D2000011 /* TmuxProtocolParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxProtocolParserTests.swift; sourceTree = "<group>"; };
-		D2000012 /* KittyKeyboardTranslatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyKeyboardTranslatorTests.swift; sourceTree = "<group>"; };
 		D2000013 /* FontMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMappingTests.swift; sourceTree = "<group>"; };
 		D2000014 /* ConnectionProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionProfileTests.swift; sourceTree = "<group>"; };
 		D2000015 /* GhosttyInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInputTests.swift; sourceTree = "<group>"; };
 		D2000016 /* TmuxModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModelsTests.swift; sourceTree = "<group>"; };
 		D2000017 /* TmuxLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxLayoutTests.swift; sourceTree = "<group>"; };
 		D2000018 /* TmuxSplitTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitTreeTests.swift; sourceTree = "<group>"; };
-		D2000019 /* TmuxSessionRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionRestoreTests.swift; sourceTree = "<group>"; };
 		D2000020 /* TmuxSessionNameResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolverTests.swift; sourceTree = "<group>"; };
-		D2000021 /* TmuxMultiClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiClientTests.swift; sourceTree = "<group>"; };
-		D2000022 /* DCSFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DCSFilterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -277,14 +259,10 @@
 		A5000005 /* SSH */ = {
 			isa = PBXGroup;
 			children = (
-				A2000097 /* DCSFilter.swift */,
 				A2000004 /* SSHSession.swift */,
 				A2000090 /* NIOSSHConnection.swift */,
-				A2000095 /* KittyKeyboardTranslator.swift */,
-				A2000093 /* TmuxGateway.swift */,
 				A2000084 /* TmuxLayout.swift */,
 				A2000082 /* TmuxModels.swift */,
-				A2000094 /* TmuxProtocolParser.swift */,
 				A2000083 /* TmuxSessionManager.swift */,
 				A2000096 /* TmuxSessionNameResolver.swift */,
 				A2000085 /* TmuxSplitTree.swift */,
@@ -402,18 +380,13 @@
 		D5000002 /* GeisttyTests */ = {
 			isa = PBXGroup;
 			children = (
-				D2000011 /* TmuxProtocolParserTests.swift */,
-				D2000012 /* KittyKeyboardTranslatorTests.swift */,
 				D2000013 /* FontMappingTests.swift */,
 				D2000014 /* ConnectionProfileTests.swift */,
 			D2000015 /* GhosttyInputTests.swift */,
 				D2000016 /* TmuxModelsTests.swift */,
 				D2000017 /* TmuxLayoutTests.swift */,
 				D2000018 /* TmuxSplitTreeTests.swift */,
-				D2000019 /* TmuxSessionRestoreTests.swift */,
 				D2000020 /* TmuxSessionNameResolverTests.swift */,
-				D2000021 /* TmuxMultiClientTests.swift */,
-				D2000022 /* DCSFilterTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -581,11 +554,7 @@
 				A1000082 /* TmuxModels.swift in Sources */,
 				A1000083 /* TmuxSessionManager.swift in Sources */,
 				A1000096 /* TmuxSessionNameResolver.swift in Sources */,
-				A1000097 /* DCSFilter.swift in Sources */,
 				A1000085 /* TmuxSplitTree.swift in Sources */,
-				A1000093 /* TmuxGateway.swift in Sources */,
-				A1000094 /* TmuxProtocolParser.swift in Sources */,
-				A1000095 /* KittyKeyboardTranslator.swift in Sources */,
 				A1000086 /* TmuxSplitView.swift in Sources */,
 				A1000087 /* TmuxMultiPaneView.swift in Sources */,
 				A1000088 /* TmuxWindowPickerView.swift in Sources */,
@@ -623,18 +592,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D1000011 /* TmuxProtocolParserTests.swift in Sources */,
-				D1000012 /* KittyKeyboardTranslatorTests.swift in Sources */,
 				D1000013 /* FontMappingTests.swift in Sources */,
 				D1000014 /* ConnectionProfileTests.swift in Sources */,
 			D1000015 /* GhosttyInputTests.swift in Sources */,
 				D1000016 /* TmuxModelsTests.swift in Sources */,
 				D1000017 /* TmuxLayoutTests.swift in Sources */,
 				D1000018 /* TmuxSplitTreeTests.swift in Sources */,
-				D1000019 /* TmuxSessionRestoreTests.swift in Sources */,
 				D1000020 /* TmuxSessionNameResolverTests.swift in Sources */,
-				D1000021 /* TmuxMultiClientTests.swift in Sources */,
-				D1000022 /* DCSFilterTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};

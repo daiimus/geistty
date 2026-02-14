@@ -282,11 +282,6 @@ class TerminalViewModel: ObservableObject {
         sshSession?.write(data)
     }
     
-    /// Set the active pane for tmux input routing
-    func setActivePaneId(_ paneId: String) {
-        sshSession?.setActivePaneId(paneId)
-    }
-    
     func resize(cols: Int, rows: Int) {
         self.cols = cols
         self.rows = rows
@@ -442,12 +437,17 @@ class TerminalViewModel: ObservableObject {
     
     /// Capture tmux pane content for search
     /// - Parameter completion: Called with the captured content or error
+    /// NOTE: capture-pane requires command/response pattern which is not available
+    /// after migration to Ghostty's native tmux. Ghostty's native search should be
+    /// used instead. This stub remains to keep the search overlay wiring compilable.
     func captureTmuxPane(completion: @escaping (Result<String, Error>) -> Void) {
-        guard let session = sshSession else {
-            completion(.failure(NIOSSHError.notConnected))
-            return
-        }
-        session.captureTmuxPane(completion: completion)
+        // capture-pane requires the old gateway command/response pattern.
+        // With Ghostty handling tmux natively, use Ghostty's built-in search instead.
+        completion(.failure(NSError(
+            domain: "com.geistty",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Tmux pane capture not available — use terminal search"]
+        )))
     }
     
     /// Navigate to a specific line in tmux using copy mode
@@ -1592,15 +1592,14 @@ class RawTerminalUIViewController: UIViewController {
             return surface
         }
         
-        // Input handler wires surface.onWrite through SSHSession (which routes via TmuxGateway)
+        // Input handler wires surface.onWrite through SSHSession
+        // In native Ghostty tmux mode, keystrokes on stdin go directly to the active pane.
         let inputHandler: (Ghostty.SurfaceView, String) -> Void = { [weak self] surface, paneId in
             surface.onWrite = { [weak self] data in
                 Task { @MainActor in
-                    // Update both TmuxSessionManager and SSHSession/Gateway active pane
+                    // Track which pane has focus locally
                     self?.viewModel?.tmuxManager?.setFocusedPane(paneId)
-                    self?.viewModel?.setActivePaneId(paneId)
-                    // Route through SSHSession.write() which uses TmuxGateway.sendKeys()
-                    // with proper Kitty keyboard protocol translation
+                    // Write directly — Ghostty's tmux viewer routes to the active pane
                     self?.viewModel?.sendInput(data)
                 }
             }
