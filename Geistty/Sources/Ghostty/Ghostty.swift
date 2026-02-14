@@ -790,18 +790,18 @@ extension Ghostty {
                 let tmuxState = action.action.tmux_state_changed
                 logger.info("🪟 tmux state changed: \(tmuxState.window_count) windows, \(tmuxState.pane_count) panes")
                 
-                // Post notification for TmuxSessionManager to handle
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .tmuxStateChanged,
-                        object: nil,
-                        userInfo: [
-                            "surface": surface,
-                            "windowCount": tmuxState.window_count,
-                            "paneCount": tmuxState.pane_count
-                        ]
-                    )
-                }
+                // Post synchronously — we're already on main thread (via tick()),
+                // and eliminating the async hop reduces the window between viewer
+                // state changes and Swift reacting to them.
+                NotificationCenter.default.post(
+                    name: .tmuxStateChanged,
+                    object: nil,
+                    userInfo: [
+                        "surface": surface,
+                        "windowCount": tmuxState.window_count,
+                        "paneCount": tmuxState.pane_count
+                    ]
+                )
                 return true
                 
             case GHOSTTY_ACTION_TMUX_EXIT:
@@ -813,14 +813,12 @@ extension Ghostty {
                 
                 logger.info("🪟 tmux control mode exited")
                 
-                // Post notification for TmuxSessionManager to handle
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .tmuxExited,
-                        object: nil,
-                        userInfo: ["surface": surface]
-                    )
-                }
+                // Post synchronously — already on main thread via tick().
+                NotificationCenter.default.post(
+                    name: .tmuxExited,
+                    object: nil,
+                    userInfo: ["surface": surface]
+                )
                 return true
                 
             case GHOSTTY_ACTION_TMUX_READY:
@@ -834,13 +832,14 @@ extension Ghostty {
                 
                 logger.info("🪟 tmux viewer startup complete")
                 
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .tmuxReady,
-                        object: nil,
-                        userInfo: ["surface": surface]
-                    )
-                }
+                // Post synchronously — already on main thread via tick().
+                // This ensures activateFirstTmuxPane() runs immediately,
+                // minimizing the window where active_pane_id is unset.
+                NotificationCenter.default.post(
+                    name: .tmuxReady,
+                    object: nil,
+                    userInfo: ["surface": surface]
+                )
                 return true
                 
             default:
