@@ -245,6 +245,7 @@ extension Notification.Name {
     // tmux control mode (from Ghostty)
     static let tmuxStateChanged = Notification.Name("tmuxStateChanged")
     static let tmuxExited = Notification.Name("tmuxExited")
+    static let tmuxReady = Notification.Name("tmuxReady")
 }
 
 /// Global application state
