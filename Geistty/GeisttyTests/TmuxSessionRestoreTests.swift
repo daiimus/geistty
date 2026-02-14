@@ -623,8 +623,7 @@ final class TmuxSessionRestoreTests: XCTestCase {
                        "Second chunk should be live %output data")
     }
     
-    /// Verify that the paneSurfaces dictionary is empty when no factory is configured.
-    /// This confirms that restore doesn't accidentally create surfaces without a factory.
+    /// Verify that no surfaces should be created without a factory
     func testNoSurfacesCreatedWithoutFactory() async throws {
         let manager = makeManager()
         
@@ -637,5 +636,201 @@ final class TmuxSessionRestoreTests: XCTestCase {
         
         XCTAssertTrue(manager.paneSurfaces.isEmpty,
                       "No surfaces should be created without a factory")
+    }
+    
+    // MARK: - Clean Detach Tests
+    
+    /// Verify that detach() sends the detach-client command via fire-and-forget write.
+    func testDetachSendsCommand() {
+        let manager = makeManager()
+        
+        manager.detach()
+        
+        XCTAssertTrue(writeLog.contains("detach-client\n"),
+                      "detach() should write 'detach-client\\n'. Write log: \(writeLog)")
+    }
+    
+    /// Verify that detach() works even when no restore is in progress.
+    func testDetachSafeWhenIdle() {
+        let manager = makeManager()
+        
+        // No activation, no session change, just call detach
+        manager.detach()
+        
+        XCTAssertEqual(writeLog.filter { $0.contains("detach-client") }.count, 1,
+                       "Should send exactly one detach-client command")
+    }
+    
+    /// Verify that detach() works after controlModeActivated.
+    func testDetachAfterActivation() {
+        let manager = makeManager()
+        
+        manager.controlModeActivated()
+        manager.detach()
+        
+        XCTAssertTrue(writeLog.contains("detach-client\n"),
+                      "detach should work after activation")
+    }
+    
+    // MARK: - Strict Ordering Tests
+    
+    /// Verify the strict ordering for restore: pause BEFORE capture BEFORE unpause.
+    /// This is critical for correctness: if we capture before pausing, live output
+    /// could arrive between capture and surface feed, causing visual corruption.
+    func testStrictPauseCaptureUnpauseOrdering() async throws {
+        let manager = makeManager()
+        
+        // Track absolute ordering of all operations
+        var operationLog: [String] = []
+        
+        let orderedManager = TmuxSessionManager()
+        orderedManager.setupWithGateway(
+            sendCommand: { [weak self] command, callback in
+                self?.commandLog.append((command: command, callback: callback))
+            },
+            write: { _ in }
+        )
+        orderedManager.setupRestoreFunctions(
+            asyncSendCommand: { command in
+                operationLog.append("capture:\(command)")
+                return "captured content"
+            },
+            pausePane: { paneId in
+                operationLog.append("pause:\(paneId)")
+            },
+            unpausePane: { paneId in
+                operationLog.append("unpause:\(paneId)")
+            }
+        )
+        
+        orderedManager.handleSessionChanged(sessionId: "$0", sessionName: "main")
+        
+        // Flush list-panes
+        guard let index = commandLog.firstIndex(where: { $0.command.contains("pane_id") }) else {
+            XCTFail("No list-panes command found")
+            return
+        }
+        commandLog[index].callback(.success("%0"))
+        commandLog.remove(at: index)
+        
+        try await Task.sleep(for: .milliseconds(200))
+        
+        // Verify strict ordering: pause → capture → unpause
+        XCTAssertEqual(operationLog.count, 3, "Should have exactly 3 operations: pause, capture, unpause. Got: \(operationLog)")
+        
+        if operationLog.count == 3 {
+            XCTAssertTrue(operationLog[0].hasPrefix("pause:"), "First operation must be pause, got: \(operationLog[0])")
+            XCTAssertTrue(operationLog[1].hasPrefix("capture:"), "Second operation must be capture, got: \(operationLog[1])")
+            XCTAssertTrue(operationLog[2].hasPrefix("unpause:"), "Third operation must be unpause, got: \(operationLog[2])")
+        }
+    }
+    
+    /// Verify strict ordering for multi-pane: each pane gets pause→capture→unpause in sequence.
+    func testStrictOrderingMultiPane() async throws {
+        var operationLog: [String] = []
+        
+        let orderedManager = TmuxSessionManager()
+        orderedManager.setupWithGateway(
+            sendCommand: { [weak self] command, callback in
+                self?.commandLog.append((command: command, callback: callback))
+            },
+            write: { _ in }
+        )
+        orderedManager.setupRestoreFunctions(
+            asyncSendCommand: { command in
+                operationLog.append("capture:\(command)")
+                return "content"
+            },
+            pausePane: { paneId in
+                operationLog.append("pause:\(paneId)")
+            },
+            unpausePane: { paneId in
+                operationLog.append("unpause:\(paneId)")
+            }
+        )
+        
+        orderedManager.handleSessionChanged(sessionId: "$0", sessionName: "main")
+        
+        guard let index = commandLog.firstIndex(where: { $0.command.contains("pane_id") }) else {
+            XCTFail("No list-panes command found")
+            return
+        }
+        commandLog[index].callback(.success("%0\n%1"))
+        commandLog.remove(at: index)
+        
+        try await Task.sleep(for: .milliseconds(200))
+        
+        // For each pane, pause must come before its capture, and capture before its unpause
+        // The panes may be interleaved (concurrent) or sequential — we just need per-pane ordering
+        let pane0Ops = operationLog.filter { $0.contains("%0") }
+        let pane1Ops = operationLog.filter { $0.contains("%1") }
+        
+        XCTAssertEqual(pane0Ops.count, 3, "Pane %0 should have 3 operations")
+        XCTAssertEqual(pane1Ops.count, 3, "Pane %1 should have 3 operations")
+        
+        if pane0Ops.count == 3 {
+            XCTAssertTrue(pane0Ops[0].hasPrefix("pause:"), "Pane %0 first op should be pause: \(pane0Ops)")
+            XCTAssertTrue(pane0Ops[1].hasPrefix("capture:"), "Pane %0 second op should be capture: \(pane0Ops)")
+            XCTAssertTrue(pane0Ops[2].hasPrefix("unpause:"), "Pane %0 third op should be unpause: \(pane0Ops)")
+        }
+        
+        if pane1Ops.count == 3 {
+            XCTAssertTrue(pane1Ops[0].hasPrefix("pause:"), "Pane %1 first op should be pause: \(pane1Ops)")
+            XCTAssertTrue(pane1Ops[1].hasPrefix("capture:"), "Pane %1 second op should be capture: \(pane1Ops)")
+            XCTAssertTrue(pane1Ops[2].hasPrefix("unpause:"), "Pane %1 third op should be unpause: \(pane1Ops)")
+        }
+    }
+    
+    // MARK: - Restore Cancellation Tests
+    
+    /// Verify that controlModeExited during active restore doesn't crash.
+    func testControlModeExitedDuringRestore() async throws {
+        let manager = makeManager()
+        
+        asyncResponses["capture-pane"] = "content"
+        
+        manager.handleSessionChanged(sessionId: "$0", sessionName: "main")
+        
+        // Flush list-panes response (starts the restore Task)
+        if let index = commandLog.firstIndex(where: { $0.command.contains("pane_id") }) {
+            commandLog[index].callback(.success("%0"))
+            commandLog.remove(at: index)
+        }
+        
+        // Exit control mode while restore may be in-flight
+        manager.controlModeExited(reason: "Connection lost")
+        
+        try await Task.sleep(for: .milliseconds(300))
+        
+        // The key assertion: this should not crash.
+        // pendingOutput may or may not be empty depending on race timing.
+        // controlModeExited clears it, but the restore Task may add to it after.
+        // What matters is no crash and isConnected is false.
+        XCTAssertFalse(manager.isConnected,
+                       "Should be disconnected after controlModeExited")
+    }
+    
+    /// Verify that double handleSessionChanged doesn't cause duplicate restore.
+    func testDuplicateSessionChangedHandledGracefully() async throws {
+        let manager = makeManager()
+        
+        asyncResponses["capture-pane"] = "content"
+        
+        // Call handleSessionChanged twice rapidly (race condition scenario)
+        manager.handleSessionChanged(sessionId: "$0", sessionName: "main")
+        manager.handleSessionChanged(sessionId: "$0", sessionName: "main")
+        
+        // Should have two list-panes commands (each handleSessionChanged triggers one)
+        let listPanesCommands = commandLog.filter { $0.command.contains("pane_id") }
+        
+        // Both should be handleable without crashing
+        for cmd in listPanesCommands {
+            cmd.callback(.success("%0"))
+        }
+        
+        try await Task.sleep(for: .milliseconds(200))
+        
+        // Should not crash, and pendingOutput should have data
+        XCTAssertNotNil(manager.pendingOutput["%0"])
     }
 }

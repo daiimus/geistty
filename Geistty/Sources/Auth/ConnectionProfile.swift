@@ -63,7 +63,7 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
     
     // Session options
     var useTmux: Bool  // Auto-attach to or create tmux session
-    var tmuxSessionName: String?  // Custom tmux session name (nil = default "main")
+    var tmuxSessionName: String?  // Custom tmux session name (nil = auto geistty-N)
     
     // Files.app integration
     var enableFilesIntegration: Bool  // Show this server in Files.app sidebar

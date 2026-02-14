@@ -143,6 +143,17 @@ class SSHSession: ObservableObject, Identifiable {
     /// Tracks progression: inactive → routing → active
     private var controlModeState: ControlModeState = .inactive
     
+    /// Session name discovery state for geistty-N auto-naming.
+    /// When no custom tmux session name is set, we query `tmux list-sessions`
+    /// before entering control mode. This state tracks that pre-control-mode query.
+    private enum SessionDiscoveryState {
+        /// Not performing session discovery (custom name set, or already resolved)
+        case idle
+        /// Waiting for `tmux list-sessions` response
+        case querying(buffer: String)
+    }
+    private var sessionDiscoveryState: SessionDiscoveryState = .idle
+    
     // Queue of input data waiting to be sent once control mode activates
     // This prevents input from going to tmux's command prompt before the shell is ready
     private var pendingInputQueue: [Data] = []
@@ -768,16 +779,38 @@ class SSHSession: ObservableObject, Identifiable {
         write(envSetup)
     }
     
-    /// Auto-attach to or create a tmux session
-    /// Uses "tmux -CC new-session -A -s <name>" which:
-    /// - Attaches to session if it exists
-    /// - Creates a new session if it doesn't
-    /// - Uses control mode (-CC) for proper scrollback access
+    /// Auto-attach to or create a tmux session.
+    ///
+    /// If the user set a custom `tmuxSessionName`, uses it directly.
+    /// Otherwise, queries existing sessions to find an unattached `geistty-N`
+    /// session to reattach to, or creates the next `geistty-<N+1>`.
+    ///
+    /// The query happens as a raw shell command before entering control mode:
+    /// 1. Send `tmux list-sessions ...` to the shell
+    /// 2. Intercept the response in `handleReceivedData()` (via `sessionDiscoveryState`)
+    /// 3. Parse the response with `TmuxSessionNameResolver`
+    /// 4. Send `exec tmux -CC new-session -A -s <resolved-name>`
     private func attachToTmuxNow() {
         guard tmuxMode == .controlMode else { return }
         
-        let sessionName = tmuxSessionName ?? "main"
+        // If the user specified a custom session name, skip discovery
+        if let customName = tmuxSessionName, !customName.isEmpty {
+            logger.info("Using custom tmux session name: \(customName)")
+            sendTmuxAttachCommand(sessionName: customName)
+            return
+        }
         
+        // Begin session discovery: query existing sessions
+        logger.info("Starting geistty-N session discovery")
+        sessionDiscoveryState = .querying(buffer: "")
+        let query = TmuxSessionNameResolver.queryCommand
+        if let data = query.data(using: .utf8) {
+            writeControlCommand(data)
+        }
+    }
+    
+    /// Send the actual tmux attach command after session name is resolved
+    private func sendTmuxAttachCommand(sessionName: String) {
         // Use control mode (-CC) for proper scrollback access
         // exec replaces the shell with tmux
         if let gateway = tmuxGateway {
@@ -1024,9 +1057,15 @@ class SSHSession: ObservableObject, Identifiable {
     /// Disconnect the session
     func disconnect() {
         controlModeState = .inactive
+        sessionDiscoveryState = .idle
         pendingInputQueue.removeAll()
         gatewayEventTask?.cancel()
         gatewayEventTask = nil
+        
+        // Send clean detach before tearing down, so tmux session survives
+        // on the server and can be reattached later (like iTerm2's behavior)
+        tmuxSessionManager?.detach()
+        
         Task {
             await tmuxGateway?.reset()
         }
@@ -1057,13 +1096,14 @@ class SSHSession: ObservableObject, Identifiable {
     }
     
     /// Called when the app is about to go to background.
-    /// In tmux control mode, this resumes paused panes to prevent
-    /// the pause timeout from triggering unnecessarily.
+    /// Sends a clean detach to tmux so the session is immediately available
+    /// for reattach when the app returns to foreground. Without this, the
+    /// tmux session would show as "attached" to a dead client until the
+    /// TCP keepalive timeout expires.
     func appWillResignActive() {
         guard controlModeState.isActive, tmuxGateway != nil else { return }
-        logger.info("App resigning active, pause mode enabled")
-        // Pause mode is already enabled - tmux will auto-pause after the timeout
-        // No additional action needed here
+        logger.info("App resigning active, sending clean detach to tmux")
+        tmuxSessionManager?.detach()
     }
     
     /// Called when the app becomes active again.
@@ -1178,6 +1218,34 @@ class SSHSession: ObservableObject, Identifiable {
         logger.info("📥 HEX[\(data.count)]: \(hexDump)")
         if let str = String(data: data, encoding: .utf8) {
             logger.info("📥 TXT: \(str.prefix(300))")
+        }
+        
+        // Session discovery: intercept tmux list-sessions response before control mode starts.
+        // This runs as a raw shell command before `exec tmux -CC`, so the output arrives
+        // as normal shell data. We accumulate it until we see the ---END--- sentinel.
+        if case .querying(var buffer) = sessionDiscoveryState {
+            if let str = String(data: data, encoding: .utf8) {
+                buffer += str
+                
+                if TmuxSessionNameResolver.isResponseComplete(buffer) {
+                    // Parse and resolve
+                    let responseText = TmuxSessionNameResolver.extractResponse(from: buffer) ?? buffer
+                    let sessions = TmuxSessionNameResolver.parseSessions(from: responseText)
+                    let resolvedName = TmuxSessionNameResolver.resolve(from: sessions)
+                    
+                    logger.info("Session discovery complete: found \(sessions.count) sessions, resolved to '\(resolvedName)'")
+                    
+                    // Done with discovery
+                    sessionDiscoveryState = .idle
+                    
+                    // Now send the actual tmux attach command
+                    sendTmuxAttachCommand(sessionName: resolvedName)
+                } else {
+                    // Still accumulating response
+                    sessionDiscoveryState = .querying(buffer: buffer)
+                }
+            }
+            return
         }
         
         // If control mode data routing is active, send through the gateway
