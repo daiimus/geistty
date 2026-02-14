@@ -924,6 +924,7 @@ typedef enum {
   GHOSTTY_ACTION_READONLY,
   GHOSTTY_ACTION_TMUX_STATE_CHANGED,
   GHOSTTY_ACTION_TMUX_EXIT,
+  GHOSTTY_ACTION_TMUX_READY,
 } ghostty_action_tag_e;
 
 typedef union {
