@@ -444,9 +444,11 @@ extension Ghostty {
                 return true
                 
             case GHOSTTY_ACTION_RING_BELL:
-                // Handle bell
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.warning)
+                // Handle bell — UIKit haptics must be on main thread
+                DispatchQueue.main.async {
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.warning)
+                }
                 return true
                 
             case GHOSTTY_ACTION_SCROLLBAR:
@@ -831,20 +833,22 @@ extension Ghostty {
             location: ghostty_clipboard_e,
             state: UnsafeMutableRawPointer?
         ) {
-            // Read from system clipboard and send to Ghostty
+            // Read from system clipboard and send to Ghostty.
+            // UIPasteboard.general must be accessed on the main thread.
+            // The clipboard request state pointer is heap-allocated by Zig and
+            // remains valid until completeClipboardRequest is called, so async
+            // completion is safe (GTK backend does the same).
             guard let userdata = userdata else { return }
             let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
-            guard let surface = surfaceView.surface else { return }
             
-            // Get clipboard contents
-            let str = UIPasteboard.general.string ?? ""
-            
-            // Complete the clipboard request with the content
-            str.withCString { ptr in
-                ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
+            DispatchQueue.main.async {
+                guard let surface = surfaceView.surface else { return }
+                let str = UIPasteboard.general.string ?? ""
+                str.withCString { ptr in
+                    ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
+                }
+                logger.debug("Clipboard read: \(str.count) chars")
             }
-            
-            logger.debug("📋 Read clipboard: \(str.prefix(50))...")
         }
         
         private static func confirmReadClipboard(
@@ -853,13 +857,13 @@ extension Ghostty {
             state: UnsafeMutableRawPointer?,
             request: ghostty_clipboard_request_e
         ) {
-            // For security confirmation before pasting sensitive content
-            // On iOS, we auto-confirm since the system already handles clipboard permissions
+            // For security confirmation before pasting sensitive content.
+            // On iOS, we auto-confirm since the system already handles clipboard permissions.
+            // Must dispatch to main for ghostty_surface_complete_clipboard_request.
             guard let userdata = userdata else { return }
             let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
-            guard let surface = surfaceView.surface else { return }
             
-            // Get the string being requested
+            // Copy the string now (the pointer may not survive the dispatch)
             let str: String
             if let cStr = string {
                 str = String(cString: cStr)
@@ -867,12 +871,13 @@ extension Ghostty {
                 str = ""
             }
             
-            // Auto-confirm on iOS (the system already manages clipboard access)
-            str.withCString { ptr in
-                ghostty_surface_complete_clipboard_request(surface, ptr, state, true)
+            DispatchQueue.main.async {
+                guard let surface = surfaceView.surface else { return }
+                str.withCString { ptr in
+                    ghostty_surface_complete_clipboard_request(surface, ptr, state, true)
+                }
+                logger.debug("Clipboard read confirmed")
             }
-            
-            logger.debug("📋 Confirmed clipboard read")
         }
         
         private static func writeClipboard(
@@ -884,9 +889,12 @@ extension Ghostty {
         ) {
             guard let content = content, len > 0 else { return }
             
-            // Write to system clipboard
-            if let data = content.pointee.data {
-                let str = String(cString: data)
+            // Extract the string now (the pointer may not survive the dispatch)
+            guard let data = content.pointee.data else { return }
+            let str = String(cString: data)
+            
+            // UIPasteboard.general must be accessed on the main thread
+            DispatchQueue.main.async {
                 UIPasteboard.general.string = str
             }
         }
@@ -2501,19 +2509,31 @@ extension Ghostty {
         deinit {
             // Remove notification observers
             NotificationCenter.default.removeObserver(self)
-            // Close the surface if it hasn't been closed already
-            close()
+            
+            // Clear the onWrite callback to prevent callbacks during/after free
+            onWrite = nil
+            
+            // deinit is not guaranteed to happen on the main actor and our API
+            // calls into libghostty must happen there. Capture the surface handle
+            // so we don't capture `self`, then dispatch the free to main actor.
+            // This matches upstream Ghostty's Ghostty.Surface.deinit pattern.
+            guard let surface = surface else { return }
+            self.surface = nil
+            Task.detached { @MainActor in
+                ghostty_surface_free(surface)
+            }
         }
         
         /// Explicitly close and release the surface.
-        /// Call this before the view is deallocated to ensure clean shutdown.
+        /// Must be called on the main thread.
         func close() {
+            assert(Thread.isMainThread, "close() must be called on the main thread")
             guard let surface = surface else { return }
             
             // Clear the onWrite callback to prevent callbacks during/after free
             onWrite = nil
             
-            // Free the surface
+            // Free the surface — this must happen on main thread
             ghostty_surface_free(surface)
             self.surface = nil
         }
@@ -2720,8 +2740,13 @@ extension Ghostty {
         /// Returns true if successful, false if pane_id not found or not in tmux mode
         @discardableResult
         func setActiveTmuxPane(_ paneId: Int) -> Bool {
-            guard let surface = surface else { return false }
-            return ghostty_surface_tmux_set_active_pane(surface, paneId)
+            guard let surface = surface else {
+                logger.warning("setActiveTmuxPane: surface is nil")
+                return false
+            }
+            let result = ghostty_surface_tmux_set_active_pane(surface, paneId)
+            logger.debug("setActiveTmuxPane(\(paneId)): result=\(result)")
+            return result
         }
         
         /// Reset to render the main terminal (exit pane-specific view)
