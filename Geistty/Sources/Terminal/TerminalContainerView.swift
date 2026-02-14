@@ -109,6 +109,9 @@ class TerminalViewModel: ObservableObject {
             fontSizeCancellable?.cancel()
             fontSizeCancellable = nil
             
+            // Wire surface to SSHSession for tmux pane switching
+            sshSession?.ghosttySurface = surfaceView
+            
             // Sync font size when surfaceView is set and observe changes
             if let surface = surfaceView {
                 currentFontSize = surface.currentFontSize
@@ -226,6 +229,7 @@ class TerminalViewModel: ObservableObject {
                 logger.info("📡 Creating SSHSession...")
                 sshSession = SSHSession()
                 sshSession?.delegate = self
+                sshSession?.ghosttySurface = surfaceView
                 
                 // Start SSH connection
                 logger.info("📡 Starting SSH connection...")
@@ -256,6 +260,7 @@ class TerminalViewModel: ObservableObject {
         logger.info("📡 Using existing pre-connected session")
         sshSession = session
         sshSession?.delegate = self
+        sshSession?.ghosttySurface = surfaceView
         isConnected = true
         startDurationTimer()
         
@@ -272,14 +277,17 @@ class TerminalViewModel: ObservableObject {
         isConnected = false
     }
     
-    /// Called when user types - send to SSH
+    /// Called when Ghostty's write_callback fires — send to SSH.
+    /// This uses writeFromGhostty() which bypasses the tmux control mode queueing
+    /// guard, because Ghostty's outbound data includes both user keystrokes AND
+    /// internal viewer commands that must reach tmux immediately during startup.
     func sendInput(_ data: Data) {
         if let str = String(data: data, encoding: .utf8) {
             logger.debug("⌨️ sendInput: \(data.count) bytes: \(str.prefix(20))")
         } else {
             logger.debug("⌨️ sendInput: \(data.count) bytes (binary)")
         }
-        sshSession?.write(data)
+        sshSession?.writeFromGhostty(data)
     }
     
     func resize(cols: Int, rows: Int) {
@@ -1692,18 +1700,24 @@ class RawTerminalUIViewController: UIViewController {
         // Configure surface management if not already done
         configureSurfaceManagement()
         
-        // Create/replace primary surface with TmuxSessionManager-owned one
-        // This handles the case where a direct surface was created before tmux activated
+        // CRITICAL: Do NOT replace the existing direct surface with a new one.
+        // When tmux activates, the DCS 1000p response has already been fed to
+        // the direct surface created at viewDidLoad. Ghostty created its tmux
+        // viewer INSIDE that surface's C-side state (viewer.zig, control.zig).
+        // Destroying that surface and creating a new one would lose the viewer
+        // and all protocol state — the new surface would be blank.
+        //
+        // Instead, we adopt the existing surface into TmuxSessionManager so it
+        // gets the tmux-aware input handler (pane tracking) while preserving
+        // the Ghostty-side tmux viewer.
         if let tmuxManager = viewModel?.tmuxManager {
             if let existingSurface = surfaceView, tmuxManager.primarySurface == nil {
-                // There's a direct surface but tmux doesn't have a primary surface yet
-                // Remove the direct surface and create a tmux-owned one
-                logger.info("🔄 Replacing direct surface with tmux-owned primary surface")
-                existingSurface.removeFromSuperview()
-                surfaceView = nil
-            }
-            
-            if surfaceView == nil {
+                // Adopt the existing direct surface as the tmux primary surface.
+                // This preserves Ghostty's internal tmux viewer state.
+                logger.info("🔄 Adopting existing direct surface as tmux primary (preserving viewer state)")
+                tmuxManager.adoptExistingSurface(existingSurface)
+            } else if surfaceView == nil {
+                // No surface exists yet — create one from the factory
                 if let surface = tmuxManager.createPrimarySurface() {
                     displaySurface(surface)
                     logger.info("✅ Created and displayed primary surface from TmuxSessionManager")

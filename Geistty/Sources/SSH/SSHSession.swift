@@ -85,7 +85,25 @@ class SSHSession: ObservableObject, Identifiable {
     let id = UUID()
     
     // Delegate
-    weak var delegate: SSHSessionDelegate?
+    weak var delegate: SSHSessionDelegate? {
+        didSet {
+            // Flush any data that arrived before the delegate was set.
+            // This covers the pre-connected session flow where SSH data
+            // (including DCS 1000p) can arrive between connect() returning
+            // and useExistingSession() setting the delegate.
+            if delegate != nil && !earlyReceiveBuffer.isEmpty {
+                let buffered = earlyReceiveBuffer
+                earlyReceiveBuffer.removeAll()
+                logger.info("Flushing \(buffered.count) early-received chunks (\(buffered.reduce(0) { $0 + $1.count })B) to new delegate")
+                for chunk in buffered {
+                    delegate?.sshSession(self, didReceiveData: chunk)
+                }
+            }
+        }
+    }
+    
+    /// Buffer for data received before delegate is set (pre-connected session flow)
+    private var earlyReceiveBuffer: [Data] = []
     
     // Connection
     private var connection: NIOSSHConnection?
@@ -124,6 +142,11 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Notification observers for Ghostty's tmux action callbacks
     private var tmuxNotificationObservers: [NSObjectProtocol] = []
+    
+    /// Ghostty surface for tmux pane switching.
+    /// Set by TerminalViewModel after creating the surface.
+    /// Used to call setActiveTmuxPane() when TMUX_STATE_CHANGED fires.
+    weak var ghosttySurface: Ghostty.SurfaceView?
     
     /// Control mode lifecycle state
     /// Ghostty's native tmux viewer handles DCS 1000p detection and protocol parsing.
@@ -642,6 +665,17 @@ class SSHSession: ObservableObject, Identifiable {
                 windowCount: Int(windowCount),
                 paneCount: Int(paneCount)
             )
+            
+            // Switch the Metal renderer to display the first tmux pane's Terminal.
+            // Without this, the surface renders the main (empty) terminal instead of
+            // the pane terminal where Ghostty's viewer routes %output data.
+            if paneCount > 0, let surface = self.ghosttySurface {
+                let paneIds = surface.getTmuxPaneIds()
+                if let firstPaneId = paneIds.first {
+                    let success = surface.setActiveTmuxPane(firstPaneId)
+                    logger.info("Set active tmux pane to %\(firstPaneId): \(success)")
+                }
+            }
         }
         
         let exitObserver = NotificationCenter.default.addObserver(
@@ -808,6 +842,32 @@ class SSHSession: ObservableObject, Identifiable {
             logger.info("⌨️ Control mode pending (state=\(controlModeState)), queueing \(data.count) bytes of input")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
+            return
+        }
+        
+        performWrite(data, originalData: data)
+    }
+    
+    /// Write data from Ghostty's write_callback directly to SSH, bypassing the
+    /// tmux control mode queueing guard.
+    ///
+    /// Ghostty's External backend sends ALL outbound data through its write_callback:
+    /// both user keystrokes (encoded by the terminal) AND internal viewer commands
+    /// (e.g., `display-message`, `list-windows`, `capture-pane`). During tmux viewer
+    /// startup, these internal commands MUST reach tmux immediately — if they're
+    /// queued behind the `controlModeState.isActive` gate, the viewer can never
+    /// progress because it's waiting for responses to commands that were never sent.
+    ///
+    /// Connection health checks still apply — if the connection is dead, there's
+    /// nowhere to send data regardless.
+    func writeFromGhostty(_ data: Data) {
+        if let str = String(data: data, encoding: .utf8) {
+            logger.debug("SSHSession.writeFromGhostty: \(data.count) bytes: \(str.prefix(40))")
+        }
+        
+        // Connection health check still applies
+        if !connectionHealth.isHealthy {
+            logger.debug("Connection unhealthy, dropping Ghostty write of \(data.count) bytes")
             return
         }
         
@@ -1112,8 +1172,16 @@ class SSHSession: ObservableObject, Identifiable {
         // All data goes to Ghostty, which handles DCS 1000p detection and tmux
         // control mode protocol parsing natively via its internal tmux viewer.
         // No gateway routing or DCS filtering needed on the Swift side.
-        logger.info("📥 Forwarding \(data.count)B to delegate")
-        delegate?.sshSession(self, didReceiveData: data)
+        if let delegate = delegate {
+            logger.info("📥 Forwarding \(data.count)B to delegate")
+            delegate.sshSession(self, didReceiveData: data)
+        } else {
+            // No delegate yet — buffer for flush when delegate is set.
+            // This happens in the pre-connected session flow between connect()
+            // returning and useExistingSession() setting the delegate.
+            logger.info("📥 Buffering \(data.count)B (no delegate yet, \(earlyReceiveBuffer.count) chunks queued)")
+            earlyReceiveBuffer.append(data)
+        }
     }
 }
 
