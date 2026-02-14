@@ -1696,10 +1696,10 @@ class RawTerminalUIViewController: UIViewController {
         // Create/replace primary surface with TmuxSessionManager-owned one
         // This handles the case where a direct surface was created before tmux activated
         if let tmuxManager = viewModel?.tmuxManager {
-            if let existingSurface = surfaceView, tmuxManager.getSurface(for: "%0") == nil {
-                // There's a direct surface but tmux doesn't have a surface for %0 yet
+            if let existingSurface = surfaceView, tmuxManager.primarySurface == nil {
+                // There's a direct surface but tmux doesn't have a primary surface yet
                 // Remove the direct surface and create a tmux-owned one
-                logger.info("🔄 Replacing direct surface with tmux-owned surface for %0")
+                logger.info("🔄 Replacing direct surface with tmux-owned primary surface")
                 existingSurface.removeFromSuperview()
                 surfaceView = nil
             }
