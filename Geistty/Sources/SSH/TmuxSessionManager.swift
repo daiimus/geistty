@@ -1363,32 +1363,6 @@ class TmuxSessionManager: ObservableObject {
         sendCommandFireAndForget("refresh-client -C \(cols),\(rows)")
     }
     
-    /// Send input to the focused pane
-    /// Note: In native Ghostty tmux mode, keystrokes on stdin go directly to the
-    /// active pane — send-keys is NOT needed. This is legacy dead code.
-    /// Input routing goes through SSHSession → Ghostty write callback → SSH.
-    func sendInput(_ data: Data) {
-        guard let write = writeToSSH else { return }
-        
-        // Convert data to hex for send-keys -H
-        let hexString = data.map { String(format: "%02x", $0) }.joined(separator: " ")
-        let command = "send-keys -H -t \(focusedPaneId) \(hexString)\n"
-        write(command)
-    }
-    
-    /// Send input to a specific pane
-    /// Note: In native Ghostty tmux mode, keystrokes on stdin go directly to the
-    /// active pane — send-keys is NOT needed. This is legacy dead code.
-    /// Input routing goes through SSHSession → Ghostty write callback → SSH.
-    func sendInput(_ data: Data, to paneId: String) {
-        guard let write = writeToSSH else { return }
-        
-        // Convert data to hex for send-keys -H
-        let hexString = data.map { String(format: "%02x", $0) }.joined(separator: " ")
-        let command = "send-keys -H -t \(paneId) \(hexString)\n"
-        write(command)
-    }
-    
     // MARK: - Session Actions
     
     /// Create a new session
