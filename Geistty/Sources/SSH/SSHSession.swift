@@ -163,10 +163,11 @@ class SSHSession: ObservableObject, Identifiable {
     /// Prevents redundant activation calls on subsequent state changes.
     private(set) var tmuxPaneActivated: Bool = false
     
-    /// The tmux pane ID that user input should be routed to via send-keys.
-    /// Set when activateFirstTmuxPane() succeeds. Cleared on tmux exit/disconnect.
-    /// When non-nil and control mode is active, writeFromGhostty() wraps user
-    /// input in `send-keys` commands instead of passing raw bytes to tmux stdin.
+    /// The tmux pane ID that the Ghostty renderer is displaying.
+    /// Set when activateFirstTmuxPane() calls ghostty_surface_tmux_set_active_pane().
+    /// Cleared on tmux exit/disconnect. Ghostty's Zig-side Termio.queueWrite()
+    /// uses the viewer's active_pane_id (set via the same C API call) for
+    /// send-keys wrapping — this Swift property is for UI state tracking only.
     private(set) var activeTmuxPaneId: Int? = nil
     
     /// Whether the tmux viewer's initial command queue has drained.
@@ -751,7 +752,8 @@ class SSHSession: ObservableObject, Identifiable {
     }
     
     /// Flush pending input queue after control mode activates and pane is set.
-    /// Routes through writeFromGhostty() so user input gets send-keys wrapping.
+    /// Routes through Ghostty's sendText() so user input gets Zig-side send-keys wrapping.
+    /// Falls back to writeFromGhostty() for non-text data.
     private func flushPendingInput() {
         guard !pendingInputQueue.isEmpty else { return }
         
@@ -759,7 +761,13 @@ class SSHSession: ObservableObject, Identifiable {
         tmuxSessionManager?.clearPendingInputDisplay()
         
         for data in pendingInputQueue {
-            writeFromGhostty(data)
+            // Try to route through Ghostty for proper send-keys wrapping
+            if let text = String(data: data, encoding: .utf8), let surface = ghosttySurface {
+                surface.sendText(text)
+            } else {
+                // Non-text data or no surface — write directly (best effort)
+                writeFromGhostty(data)
+            }
         }
         pendingInputQueue.removeAll()
     }
@@ -924,13 +932,15 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Write user input data to the SSH channel.
     ///
-    /// Called from `TerminalContainerView.send(text:)` for paste and special-key
-    /// fallback. This is ALWAYS user input — never viewer commands.
+    /// Called as a fallback from `TerminalContainerView.send(text:)` when no Ghostty
+    /// surface is available. Normally, user input is routed through Ghostty's
+    /// `ghostty_surface_text()` → `queueWrite()` → Zig send-keys wrapping →
+    /// `writeFromGhostty()`, which handles tmux control mode automatically.
     ///
-    /// In tmux control mode, ALL stdin is parsed as tmux commands. Raw user input
-    /// like "ls\r" would be interpreted as tmux's "list-sessions" command (tmux
-    /// uses prefix matching). User input must be wrapped in `send-keys` commands
-    /// to reach the active pane.
+    /// This direct path does NOT apply tmux send-keys wrapping. In tmux control
+    /// mode, data written here would be interpreted as raw tmux commands. This is
+    /// acceptable because this path is only used when there's no surface (pre-
+    /// connection, post-disconnect), and we queue the data for later anyway.
     func write(_ data: Data) {
         if let str = String(data: data, encoding: .utf8) {
             logger.debug("SSHSession.write: \(data.count) bytes: \(str.prefix(20))")
@@ -944,58 +954,39 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        // If we're in control mode but tmux isn't ready yet, queue the input.
-        // This prevents input from being sent before tmux's viewer is active.
-        if tmuxMode == .controlMode && !controlModeState.isActive {
-            logger.info("⌨️ Control mode pending (state=\(controlModeState)), queueing \(data.count) bytes of input")
+        // If we're in control mode, queue the input. Without a Ghostty surface,
+        // we can't apply send-keys wrapping, so raw data must not reach tmux stdin.
+        // It will be flushed through Ghostty's path when the surface is ready.
+        if tmuxMode == .controlMode && controlModeState.isActive {
+            logger.info("write() in control mode without Ghostty path, queueing \(data.count) bytes")
             pendingInputQueue.append(data)
             updatePendingInputDisplay()
             return
         }
         
-        // In active tmux control mode, user input MUST be wrapped in send-keys.
-        // Without wrapping, raw bytes are parsed as tmux commands (e.g., "ls" → "list-sessions").
-        if controlModeState.isActive {
-            if let wrapped = wrapInSendKeys(data) {
-                performWrite(wrapped, originalData: data)
-            } else {
-                // No active pane yet — queue for later (flushed when pane activates)
-                logger.debug("tmux active but no pane yet (write path), queueing \(data.count) bytes")
-                pendingInputQueue.append(data)
-                updatePendingInputDisplay()
-            }
+        // If we're in control mode but tmux isn't ready yet, queue the input.
+        if tmuxMode == .controlMode && !controlModeState.isActive {
+            logger.info("Control mode pending (state=\(controlModeState)), queueing \(data.count) bytes of input")
+            pendingInputQueue.append(data)
+            updatePendingInputDisplay()
             return
         }
         
         performWrite(data, originalData: data)
     }
     
-    // MARK: - tmux send-keys wrapping
+    // MARK: - Ghostty write callback
     
-    /// Wrap raw user input bytes in tmux `send-keys` commands for the active pane.
-    /// Delegates to `TmuxSendKeys.wrap` for the actual encoding logic.
+    /// Write data from Ghostty's write_callback directly to SSH.
     ///
-    /// - Parameter data: Raw bytes from Ghostty's key encoder
-    /// - Returns: The wrapped command as Data, or nil if no active pane or empty input
-    private func wrapInSendKeys(_ data: Data) -> Data? {
-        guard let paneId = activeTmuxPaneId else { return nil }
-        return TmuxSendKeys.wrap(data, paneId: paneId)
-    }
-    
-    /// Write data from Ghostty's write_callback directly to SSH, bypassing the
-    /// tmux control mode queueing guard.
+    /// Ghostty's External backend sends ALL outbound data through its write_callback.
+    /// After the Zig-side send-keys routing (Termio.queueWrite → viewer.sendKeys),
+    /// ALL data arriving here is already properly formatted:
+    /// - Viewer commands: "list-windows\n", "capture-pane ...\n"
+    /// - User input: "send-keys -H -t %2 6C 73 0D\n" (wrapped by Zig)
     ///
-    /// Ghostty's External backend sends ALL outbound data through its write_callback:
-    /// both user keystrokes (encoded by the terminal) AND internal viewer commands
-    /// (e.g., `display-message`, `list-windows`, `capture-pane`). During tmux viewer
-    /// startup, these internal commands MUST reach tmux immediately — if they're
-    /// queued behind the `controlModeState.isActive` gate, the viewer can never
-    /// progress because it's waiting for responses to commands that were never sent.
-    ///
-    /// In tmux control mode, ALL data on stdin is parsed as tmux commands. User
-    /// keystrokes must be wrapped in `send-keys` commands to reach the active pane.
-    /// Viewer commands (ending with `\n`) are passed through as-is since they are
-    /// already valid tmux commands.
+    /// The Swift side just passes everything through to SSH. No heuristics,
+    /// no wrapping, no queueing needed.
     ///
     /// Connection health checks still apply — if the connection is dead, there's
     /// nowhere to send data regardless.
@@ -1003,39 +994,6 @@ class SSHSession: ObservableObject, Identifiable {
         // Connection health check still applies
         if !connectionHealth.isHealthy {
             logger.debug("Connection unhealthy, dropping Ghostty write of \(data.count) bytes")
-            return
-        }
-        
-        // In tmux control mode, ALL stdin is parsed as tmux commands. We must distinguish:
-        // 1. Viewer commands (end with \n) — pass through as-is (already valid tmux commands)
-        // 2. User input (raw bytes, no trailing \n) — wrap in send-keys OR queue
-        //
-        // CRITICAL: When controlModeState is active but activeTmuxPaneId is nil (viewer
-        // startup not yet complete), user input must be QUEUED — not sent raw. Sending
-        // raw bytes like "ls -a" causes tmux to parse them as commands (tmux uses prefix
-        // matching: "ls" → "list-sessions"), generating %begin/%error blocks that corrupt
-        // the viewer's command/response state machine.
-        if controlModeState.isActive {
-            if data.last == 0x0A {
-                // Ends with \n — this is a viewer command (display-message, list-windows,
-                // capture-pane, etc.). Pass through directly to tmux. These MUST reach
-                // tmux immediately even during viewer startup.
-                performWrite(data, originalData: data)
-            } else if activeTmuxPaneId != nil {
-                // User input with active pane — wrap in send-keys
-                if let wrapped = wrapInSendKeys(data) {
-                    performWrite(wrapped, originalData: data)
-                } else {
-                    logger.warning("wrapInSendKeys returned nil for \(data.count) bytes, dropping")
-                }
-            } else {
-                // User input but no pane yet (viewer still starting up).
-                // Queue for later — will be flushed when TMUX_READY fires
-                // and activateFirstTmuxPane() sets activeTmuxPaneId.
-                logger.debug("tmux active but no pane yet, queueing \(data.count) bytes")
-                pendingInputQueue.append(data)
-                updatePendingInputDisplay()
-            }
             return
         }
         
@@ -1414,15 +1372,10 @@ extension SSHSession: NIOSSHConnectionDelegate {
             self.delegate?.sshSession(self, healthDidChange: health)
             
             // If connection became healthy again and we have pending input, flush it.
-            // Route through writeFromGhostty() so tmux send-keys wrapping is applied.
+            // Route through Ghostty for proper send-keys wrapping in tmux mode.
             if health.isHealthy && !self.pendingInputQueue.isEmpty {
-                logger.info("🔌 Connection healthy, flushing \(self.pendingInputQueue.count) queued inputs")
-                self.tmuxSessionManager?.clearPendingInputDisplay()
-                
-                for data in self.pendingInputQueue {
-                    self.writeFromGhostty(data)
-                }
-                self.pendingInputQueue.removeAll()
+                logger.info("Connection healthy, flushing \(self.pendingInputQueue.count) queued inputs")
+                self.flushPendingInput()
             }
         }
     }

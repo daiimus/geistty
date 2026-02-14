@@ -336,7 +336,12 @@ class TerminalViewModel: ObservableObject {
     }
     
     func send(text: String) {
-        if let data = text.data(using: .utf8) {
+        // Route through Ghostty's input path so tmux send-keys wrapping
+        // is applied by the Zig side (Termio.queueWrite → viewer.sendKeys).
+        // Falls back to SSHSession.write() if no surface is available.
+        if let surface = surfaceView {
+            surface.sendText(text)
+        } else if let data = text.data(using: .utf8) {
             sshSession?.write(data)
         }
     }

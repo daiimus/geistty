@@ -184,10 +184,14 @@ SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
                                         ↓
                               UI updates (pane count, window state)
 
-User Input → Ghostty encodes keystroke → External.queueWrite()
+User Input → Ghostty encodes keystroke → Termio.queueWrite()
+                              [tmux viewer active?]
+                                YES → viewer.sendKeys(data) → "send-keys -H -t %2 6C 73 0D\n"
+                                NO  → raw bytes (non-tmux mode)
                                         ↓
-                              write_callback → SSHSession.writeFromGhostty()
-                              → wrapInSendKeys() → "send -lt %<id> <chars>\n"
+                              External.queueWrite() → write_callback
+                                        ↓
+                              SSHSession.writeFromGhostty() → performWrite()
                                         ↓
                               NIOSSHConnection.write() → SSH → tmux stdin (as command)
 ```
@@ -196,9 +200,10 @@ User Input → Ghostty encodes keystroke → External.queueWrite()
 
 | Component | Purpose |
 |-----------|----------|
-| `viewer.zig` (Ghostty) | State machine for tmux control mode: parses protocol, manages per-pane terminals, handles `capture-pane` restore |
+| `viewer.zig` (Ghostty) | State machine for tmux control mode: parses protocol, manages per-pane terminals, handles `capture-pane` restore, `sendKeys()` wraps user input |
 | `control.zig` (Ghostty) | Protocol parser for `%begin/%end/%error/%output/%session-changed/%layout-change` etc. |
 | `stream_handler.zig` (Ghostty) | DCS 1000p detection, creates Viewer, dispatches actions to Swift via callback |
+| `Termio.zig` (Ghostty) | `queueWrite()` intercepts writes when tmux viewer is active, calls `viewer.sendKeys()` for send-keys wrapping |
 | `External.zig` (Ghostty) | Pure pass-through: `queueWrite()` → `write_callback` → Swift |
 | `Ghostty.swift` | Action callback handles `TMUX_STATE_CHANGED`/`TMUX_EXIT`, posts notifications; Swift wrappers for pane queries |
 | `SSHSession.swift` | Observes tmux notifications, forwards to TmuxSessionManager, manages connection state |
@@ -207,7 +212,7 @@ User Input → Ghostty encodes keystroke → External.queueWrite()
 
 ### Key Design Decisions
 
-1. **send-keys wrapping**: In tmux control mode, ALL stdin is parsed as tmux commands. User keystrokes are wrapped in `send-keys` commands by `SSHSession.wrapInSendKeys()` (iTerm2-style: literal mode for safe chars, hex mode for everything else). Viewer commands from Ghostty (ending with `\n`) pass through as-is.
+1. **send-keys wrapping**: In tmux control mode, ALL stdin is parsed as tmux commands. User keystrokes are wrapped in `send-keys -H` commands by Ghostty's Zig-side `viewer.sendKeys()` in `Termio.queueWrite()`. All bytes are sent as uppercase hex pairs. The Swift side (`writeFromGhostty`) is a simple pass-through — no wrapping logic.
 2. **No command/response**: With Ghostty handling the protocol, Swift can only do fire-and-forget commands written to stdin. `%begin/%end` responses go to Ghostty's viewer, not Swift.
 3. **Session restore by Ghostty**: `viewer.zig` does `capture-pane` during its startup sequence.
 4. **No DCS filter needed**: The old dual-parser conflict is gone — Ghostty is the sole tmux parser.
@@ -267,7 +272,7 @@ If revisiting, start fresh from the archive branch and read the learnings doc fi
 | SwiftNIO-SSH | Pure Swift, Network.framework integration, native async/await |
 | Ghostty Native tmux | Ghostty's upstream viewer.zig/control.zig handles all protocol parsing, output routing, and session restore — eliminates dual-parser conflicts |
 | Fire-and-forget tmux commands | With Ghostty owning the protocol, Swift can only write commands to stdin; %begin/%end responses go to Ghostty's viewer |
-| send-keys wrapping | In tmux control mode, ALL stdin is tmux commands; user input wrapped in `send-keys` by SSHSession |
+| send-keys wrapping | In tmux control mode, ALL stdin is tmux commands; user input wrapped in `send-keys -H` by Ghostty's Zig-side `viewer.sendKeys()` in `Termio.queueWrite()` |
 | libxev fork | iOS uses `kevent`, not `kevent64` |
 | Custom module.modulemap name | Renamed to avoid Xcode module conflicts |
 
@@ -300,16 +305,20 @@ SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
                                         ↓
                               Terminal UI (Metal)
                                         ↓
-User Input → Ghostty encodes → External.queueWrite() → write_callback
+User Input → Ghostty encodes → Termio.queueWrite()
+                              [tmux viewer active?]
+                                YES → viewer.sendKeys(data) → "send-keys -H -t %2 6C 73 0D\n"
+                                NO  → raw bytes (non-tmux mode)
                                         ↓
-                              SSHSession.writeFromGhostty()
-                              → wrapInSendKeys() → "send -lt %<id> <chars>\n"
+                              External.queueWrite() → write_callback
+                                        ↓
+                              SSHSession.writeFromGhostty() → performWrite()
                                         ↓
                               NIOSSHConnection.write() → SSH → tmux stdin (as command)
 ```
 
-Note: Ghostty is the sole tmux protocol parser. No DCS filter is needed —
-there is no dual-parser conflict since the Swift-side parser was removed.
+Note: Ghostty is the sole tmux protocol parser and handles send-keys wrapping
+on the Zig side. No DCS filter or Swift-side wrapping is needed.
 
 ## Common Pitfalls
 
