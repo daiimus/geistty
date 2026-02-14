@@ -428,6 +428,9 @@ typedef enum {
 // Note: ghostty_surface_t is already typedef'd as void* above
 typedef void (*ghostty_write_callback_fn)(ghostty_surface_t surface, const char* data, size_t len);
 
+// Resize callback for external backend - called when terminal grid size changes
+typedef void (*ghostty_resize_callback_fn)(ghostty_surface_t surface, uint16_t cols, uint16_t rows, uint32_t width_px, uint32_t height_px);
+
 typedef struct {
   void* nsview;
 } ghostty_platform_macos_s;
@@ -462,6 +465,7 @@ typedef struct {
   ghostty_surface_context_e context;
   ghostty_backend_type_e backend_type;          // Backend type (exec or external)
   ghostty_write_callback_fn write_callback;     // Write callback for external backend
+  ghostty_resize_callback_fn resize_callback;   // Resize callback for external backend
 } ghostty_surface_config_s;
 
 typedef struct {

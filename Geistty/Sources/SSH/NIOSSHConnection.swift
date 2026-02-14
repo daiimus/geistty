@@ -658,6 +658,11 @@ public class NIOSSHConnection: ObservableObject {
     public func resizePTY(cols: Int, rows: Int) {
         guard let channel = sshChannel else { return }
         
+        // Deduplicate: skip if size hasn't changed. This prevents redundant
+        // window-change requests when both sizeDidChange() and the Zig-side
+        // resize callback fire for the same layout change.
+        guard cols != self.cols || rows != self.rows else { return }
+        
         self.cols = cols
         self.rows = rows
         
