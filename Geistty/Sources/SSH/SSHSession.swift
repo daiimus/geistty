@@ -148,12 +148,12 @@ class SSHSession: ObservableObject, Identifiable {
     /// Used to call setActiveTmuxPane() when TMUX_STATE_CHANGED fires.
     weak var ghosttySurface: Ghostty.SurfaceView? {
         didSet {
-            logger.debug("ghosttySurface set: \(ghosttySurface != nil ? "non-nil" : "nil"), controlModeState=\(controlModeState)")
-            // If control mode is already active when the surface gets wired,
-            // activate the first pane immediately. This handles the race where
-            // TMUX_STATE_CHANGED fired before ghosttySurface was set.
-            if ghosttySurface != nil && controlModeState.isActive {
-                logger.info("ghosttySurface set while control mode active, attempting pane activation")
+            logger.debug("ghosttySurface set: \(ghosttySurface != nil ? "non-nil" : "nil"), controlModeState=\(controlModeState), viewerReady=\(viewerReady)")
+            // If control mode is already active AND the viewer is ready when the surface
+            // gets wired, activate the first pane immediately. This handles the race where
+            // TMUX_READY fired before ghosttySurface was set.
+            if ghosttySurface != nil && controlModeState.isActive && viewerReady {
+                logger.info("ghosttySurface set while viewer ready, attempting pane activation")
                 activateFirstTmuxPane()
             }
         }
@@ -161,18 +161,28 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Whether we've successfully activated a tmux pane for rendering.
     /// Prevents redundant activation calls on subsequent state changes.
-    private var tmuxPaneActivated: Bool = false
+    private(set) var tmuxPaneActivated: Bool = false
     
     /// The tmux pane ID that user input should be routed to via send-keys.
     /// Set when activateFirstTmuxPane() succeeds. Cleared on tmux exit/disconnect.
     /// When non-nil and control mode is active, writeFromGhostty() wraps user
     /// input in `send-keys` commands instead of passing raw bytes to tmux stdin.
-    private var activeTmuxPaneId: Int? = nil
+    private(set) var activeTmuxPaneId: Int? = nil
+    
+    /// Whether the tmux viewer's initial command queue has drained.
+    /// Set to true when GHOSTTY_ACTION_TMUX_READY fires (viewer.zig emits .ready
+    /// after all startup commands complete). Reset on disconnect/tmux exit.
+    ///
+    /// This gates user input: when false, input is queued in pendingInputQueue
+    /// to prevent interleaving with viewer commands. When true,
+    /// activateFirstTmuxPane() is called which sets activeTmuxPaneId and
+    /// flushes pending input with proper send-keys wrapping.
+    private(set) var viewerReady: Bool = false
     
     /// Control mode lifecycle state
     /// Ghostty's native tmux viewer handles DCS 1000p detection and protocol parsing.
     /// This state tracks whether the viewer is active (from TMUX_STATE_CHANGED action).
-    private var controlModeState: ControlModeState = .inactive
+    private(set) var controlModeState: ControlModeState = .inactive
     
     /// Session name discovery state for geistty-N auto-naming.
     /// When no custom tmux session name is set, we query `tmux list-sessions`
@@ -187,7 +197,7 @@ class SSHSession: ObservableObject, Identifiable {
     
     // Queue of input data waiting to be sent once control mode activates
     // This prevents input from going to tmux's command prompt before the shell is ready
-    private var pendingInputQueue: [Data] = []
+    private(set) var pendingInputQueue: [Data] = []
     
     // State
     @Published var state: NIOSSHState = .disconnected
@@ -681,8 +691,9 @@ class SSHSession: ObservableObject, Identifiable {
                 self.controlModeState = .active
                 logger.info("Control mode activated via TMUX_STATE_CHANGED")
                 self.tmuxSessionManager?.controlModeActivated()
-                // NOTE: pendingInputQueue is flushed in activateFirstTmuxPane()
-                // AFTER activeTmuxPaneId is set, so user input gets send-keys wrapping.
+                // NOTE: Do NOT activate pane or flush input here.
+                // Wait for TMUX_READY which fires after the viewer's command queue drains.
+                // Activating here would cause user input to interleave with viewer commands.
             }
             
             // Subsequent state changes update pane/window info
@@ -691,10 +702,11 @@ class SSHSession: ObservableObject, Identifiable {
                 paneCount: Int(paneCount)
             )
             
-            // Switch the Metal renderer to display the first tmux pane's Terminal.
-            // Without this, the surface renders the main (empty) terminal instead of
-            // the pane terminal where Ghostty's viewer routes %output data.
-            self.activateFirstTmuxPane()
+            // If viewerReady was already set (subsequent state changes after initial ready),
+            // activate pane for any new panes that may have appeared.
+            if self.viewerReady {
+                self.activateFirstTmuxPane()
+            }
         }
         
         let exitObserver = NotificationCenter.default.addObserver(
@@ -708,10 +720,26 @@ class SSHSession: ObservableObject, Identifiable {
             self.controlModeState = .inactive
             self.tmuxPaneActivated = false
             self.activeTmuxPaneId = nil
+            self.viewerReady = false
             self.tmuxSessionManager?.controlModeExited(reason: "Ghostty tmux viewer exited")
         }
         
-        tmuxNotificationObservers = [stateObserver, exitObserver]
+        let readyObserver = NotificationCenter.default.addObserver(
+            forName: .tmuxReady,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            
+            logger.info("tmux viewer startup complete (TMUX_READY), safe to send user input")
+            self.viewerReady = true
+            
+            // NOW it's safe to activate the first pane and flush pending input.
+            // The viewer's command queue has drained — no risk of interleaving.
+            self.activateFirstTmuxPane()
+        }
+        
+        tmuxNotificationObservers = [stateObserver, exitObserver, readyObserver]
     }
     
     /// Remove tmux notification observers
@@ -924,77 +952,14 @@ class SSHSession: ObservableObject, Identifiable {
     
     // MARK: - tmux send-keys wrapping
     
-    /// Characters that can be sent via `send -lt` (literal mode) without escaping.
-    /// This matches iTerm2's safe character set for tmux send-keys.
-    private static let sendKeysLiteralSafe: Set<UInt8> = {
-        var safe = Set<UInt8>()
-        // a-z
-        for c in UInt8(ascii: "a")...UInt8(ascii: "z") { safe.insert(c) }
-        // A-Z
-        for c in UInt8(ascii: "A")...UInt8(ascii: "Z") { safe.insert(c) }
-        // 0-9
-        for c in UInt8(ascii: "0")...UInt8(ascii: "9") { safe.insert(c) }
-        // iTerm2's additional safe chars: + / ) : , _ .
-        for c: UInt8 in [
-            UInt8(ascii: "+"), UInt8(ascii: "/"), UInt8(ascii: ")"),
-            UInt8(ascii: ":"), UInt8(ascii: ","), UInt8(ascii: "_"),
-            UInt8(ascii: ".")
-        ] {
-            safe.insert(c)
-        }
-        return safe
-    }()
-    
     /// Wrap raw user input bytes in tmux `send-keys` commands for the active pane.
-    ///
-    /// Uses iTerm2's proven approach:
-    /// - Safe chars (alphanumeric + `+/):,_.`): `send -lt %<id> <chars>\n`
-    /// - Everything else (control chars, escape seqs, space, special): `send -t %<id> 0x<hex> ...\n`
-    ///
-    /// Batches consecutive same-type bytes. Commands are joined with ` ; ` separators
-    /// (tmux command separator) to reduce the number of SSH writes.
+    /// Delegates to `TmuxSendKeys.wrap` for the actual encoding logic.
     ///
     /// - Parameter data: Raw bytes from Ghostty's key encoder
-    /// - Returns: The wrapped command as Data, or nil if no active pane
+    /// - Returns: The wrapped command as Data, or nil if no active pane or empty input
     private func wrapInSendKeys(_ data: Data) -> Data? {
         guard let paneId = activeTmuxPaneId else { return nil }
-        
-        let target = "%\(paneId)"
-        var commands: [String] = []
-        var literalBuffer = ""
-        
-        /// Flush accumulated literal chars into a send-keys command
-        func flushLiteral() {
-            guard !literalBuffer.isEmpty else { return }
-            // Single-quote the literal string to prevent tmux from interpreting
-            // special characters. Escape embedded single quotes with '\'' .
-            let escaped = literalBuffer.replacingOccurrences(of: "'", with: "'\\''")
-            commands.append("send -lt \(target) '\(escaped)'")
-            literalBuffer = ""
-        }
-        
-        for byte in data {
-            if Self.sendKeysLiteralSafe.contains(byte) {
-                literalBuffer.append(Character(UnicodeScalar(byte)))
-            } else {
-                // Non-literal byte — flush any accumulated literals first
-                flushLiteral()
-                // Send as hex
-                commands.append("send -t \(target) 0x\(String(format: "%02x", byte))")
-            }
-        }
-        
-        // Flush any remaining literals
-        flushLiteral()
-        
-        guard !commands.isEmpty else { return nil }
-        
-        // Join with tmux command separator and terminate with newline.
-        // tmux reads one command per line in control mode, but ` ; ` allows
-        // multiple commands on a single line.
-        let line = commands.joined(separator: " ; ") + "\n"
-        
-        return line.data(using: .utf8)
+        return TmuxSendKeys.wrap(data, paneId: paneId)
     }
     
     /// Write data from Ghostty's write_callback directly to SSH, bypassing the
@@ -1165,6 +1130,7 @@ class SSHSession: ObservableObject, Identifiable {
         controlModeState = .inactive
         tmuxPaneActivated = false
         activeTmuxPaneId = nil
+        viewerReady = false
         sessionDiscoveryState = .idle
         pendingInputQueue.removeAll()
         removeTmuxNotificationObservers()
@@ -1257,6 +1223,7 @@ class SSHSession: ObservableObject, Identifiable {
         controlModeState = .inactive
         tmuxPaneActivated = false
         activeTmuxPaneId = nil
+        viewerReady = false
         connection?.disconnect()
         connection = nil
         

@@ -823,6 +823,26 @@ extension Ghostty {
                 }
                 return true
                 
+            case GHOSTTY_ACTION_TMUX_READY:
+                // tmux control mode: viewer startup complete, command queue drained.
+                // User input is now safe to send — no risk of interleaving with
+                // viewer commands (display-message, list-windows, capture-pane, etc.)
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                logger.info("🪟 tmux viewer startup complete")
+                
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .tmuxReady,
+                        object: nil,
+                        userInfo: ["surface": surface]
+                    )
+                }
+                return true
+                
             default:
                 return false
             }
