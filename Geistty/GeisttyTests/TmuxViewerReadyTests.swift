@@ -14,6 +14,12 @@ import XCTest
 ///   TMUX_READY → viewerReady = true → activateFirstTmuxPane() → flushPendingInput()
 ///   TMUX_EXIT → viewerReady = false, controlModeState = .inactive
 ///   disconnect() → viewerReady = false, controlModeState = .inactive
+///
+/// Data flow (Feb 2026 — Zig-side send-keys):
+///   writeFromGhostty() — simple pass-through. All data from Ghostty is already
+///     properly formatted by Zig (viewer commands AND send-keys-wrapped user input).
+///   write() — fallback path (no Ghostty surface). In tmux control mode, ALL data
+///     is queued since it can't go through Zig's send-keys wrapping.
 final class TmuxViewerReadyTests: XCTestCase {
 
     // MARK: - Initial State
@@ -171,80 +177,61 @@ final class TmuxViewerReadyTests: XCTestCase {
     }
 
     // MARK: - writeFromGhostty Routing
+    //
+    // writeFromGhostty() is now a simple pass-through: connection health check +
+    // performWrite. All data from Ghostty is already properly formatted by Zig:
+    //   - Viewer commands: "list-windows\n" (passed through as-is)
+    //   - User input: "send-keys -H -t %2 6C 73 0D\n" (Zig-wrapped)
+    // No branching on \n, no Swift-side send-keys wrapping.
 
     @MainActor
-    func testWriteFromGhosttyNoConnectionDropsSilently() {
-        // writeFromGhostty with no connection and no tmux mode goes through
-        // performWrite, which queues because connection is nil.
+    func testWriteFromGhosttyNoConnectionQueues() {
+        // writeFromGhostty with no connection goes to performWrite → queued
         let session = SSHSession()
         let testData = "hello".data(using: .utf8)!
 
         session.writeFromGhostty(testData)
 
-        // Without tmux mode active, data goes to performWrite → queued
+        // Without connection, performWrite queues
         XCTAssertEqual(session.pendingInputQueue.count, 1)
     }
 
     @MainActor
+    func testWriteFromGhosttyPassesThroughRegardlessOfControlMode() {
+        // writeFromGhostty always passes through to performWrite, even in control
+        // mode — because all data from Ghostty is already Zig-formatted.
+        // With no connection, performWrite queues.
+        let session = SSHSession()
+        session.setControlModeStateForTesting(.active)
+
+        let sendKeysCmd = "send-keys -H -t %2 6C 73 0D\n".data(using: .utf8)!
+        session.writeFromGhostty(sendKeysCmd)
+
+        XCTAssertEqual(session.pendingInputQueue.count, 1,
+                       "Zig-formatted data should pass through to performWrite")
+        XCTAssertEqual(session.pendingInputQueue.first, sendKeysCmd,
+                       "Data should not be modified by writeFromGhostty")
+    }
+
+    @MainActor
     func testWriteFromGhosttyViewerCommandPassesThrough() {
-        // Viewer commands end with \n and should pass through as-is even in
-        // tmux control mode. Without a connection, they go to performWrite → queue.
+        // Viewer commands end with \n and pass through as-is.
         let session = SSHSession()
         let viewerCmd = "list-windows\n".data(using: .utf8)!
 
         session.writeFromGhostty(viewerCmd)
 
-        // Without tmux mode, goes through performWrite directly
         XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "Viewer command should be queued (no connection)")
+                       "Viewer command should pass through to performWrite")
         XCTAssertEqual(session.pendingInputQueue.first, viewerCmd,
-                       "Viewer command should NOT be wrapped in send-keys")
-    }
-
-    // MARK: - writeFromGhostty Queueing (control mode active, no pane)
-
-    @MainActor
-    func testWriteFromGhosttyQueuesUserInputWhenControlActiveButNoPane() {
-        // CRITICAL: This is the exact bug scenario. When controlModeState is .active
-        // but activeTmuxPaneId is nil (viewer startup not complete), user input like
-        // "ls -a\r" must be QUEUED — not sent raw to tmux. Raw bytes cause tmux to
-        // interpret them as commands ("ls" → "list-sessions"), generating %error blocks
-        // that corrupt the viewer's state machine.
-        let session = SSHSession()
-        session.setControlModeStateForTesting(.active)
-        // activeTmuxPaneId is nil (default)
-        XCTAssertNil(session.activeTmuxPaneId, "Precondition: no pane ID yet")
-
-        let userInput = "ls -a\r".data(using: .utf8)!
-        session.writeFromGhostty(userInput)
-
-        XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "User input must be QUEUED when control mode active but no pane")
-        XCTAssertEqual(session.pendingInputQueue.first, userInput,
-                       "Queued data should be the original user input (not raw)")
+                       "Viewer command should NOT be modified")
     }
 
     @MainActor
-    func testWriteFromGhosttyQueuesMultipleInputsWhenNoPane() {
-        let session = SSHSession()
-        session.setControlModeStateForTesting(.active)
-
-        let input1 = "ls\r".data(using: .utf8)!
-        let input2 = "pwd\r".data(using: .utf8)!
-
-        session.writeFromGhostty(input1)
-        session.writeFromGhostty(input2)
-
-        XCTAssertEqual(session.pendingInputQueue.count, 2,
-                       "Both inputs should be queued")
-        XCTAssertEqual(session.pendingInputQueue[0], input1)
-        XCTAssertEqual(session.pendingInputQueue[1], input2)
-    }
-
-    @MainActor
-    func testWriteFromGhosttyViewerCommandPassesThroughEvenWhenNoPane() {
-        // Viewer commands (ending with \n) must ALWAYS pass through, even during
-        // startup when activeTmuxPaneId is nil. The viewer needs these to progress.
+    func testWriteFromGhosttyPassesThroughEvenWhenNoPane() {
+        // Even without an active pane, writeFromGhostty passes through.
+        // Zig side handles the no-pane case (viewer.sendKeys returns null,
+        // raw bytes go through the backend).
         let session = SSHSession()
         session.setControlModeStateForTesting(.active)
         XCTAssertNil(session.activeTmuxPaneId)
@@ -252,60 +239,49 @@ final class TmuxViewerReadyTests: XCTestCase {
         let viewerCmd = "display-message -p '#{version}'\n".data(using: .utf8)!
         session.writeFromGhostty(viewerCmd)
 
-        // Viewer command goes to performWrite (which queues because no connection)
-        // but critically it is NOT held in pendingInputQueue as "user input"
         XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "Viewer command reaches performWrite → queued (no connection)")
+                       "Data reaches performWrite regardless of pane state")
         XCTAssertEqual(session.pendingInputQueue.first, viewerCmd,
-                       "Viewer command should NOT be wrapped in send-keys")
+                       "Data should not be modified")
     }
 
     @MainActor
-    func testWriteFromGhosttyWrapsInSendKeysWhenPaneActive() {
-        // After TMUX_READY → activateFirstTmuxPane sets activeTmuxPaneId,
-        // user input should be wrapped in send-keys (not queued or sent raw).
+    func testWriteFromGhosttyMultipleCallsAllPassThrough() {
+        // Multiple writeFromGhostty calls all pass through in order
         let session = SSHSession()
         session.setControlModeStateForTesting(.active)
         session.setActiveTmuxPaneIdForTesting(2)
 
-        let userInput = "ls\r".data(using: .utf8)!
-        session.writeFromGhostty(userInput)
+        let cmd1 = "send-keys -H -t %2 6C 73 0D\n".data(using: .utf8)!
+        let cmd2 = "send-keys -H -t %2 70 77 64 0D\n".data(using: .utf8)!
 
-        // With no connection, performWrite queues the ORIGINAL data (not the wrapped
-        // command), because performWrite stores originalData for later re-wrapping.
-        // The important thing is: the code PATH goes through wrapInSendKeys, not raw.
-        // We can verify this by checking that the queued data is the original input
-        // (performWrite was called with originalData: data).
-        XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "Input should reach performWrite and be queued (no connection)")
-        XCTAssertEqual(session.pendingInputQueue.first, userInput,
-                       "performWrite queues originalData for later re-wrapping")
+        session.writeFromGhostty(cmd1)
+        session.writeFromGhostty(cmd2)
+
+        XCTAssertEqual(session.pendingInputQueue.count, 2)
+        XCTAssertEqual(session.pendingInputQueue[0], cmd1)
+        XCTAssertEqual(session.pendingInputQueue[1], cmd2)
     }
 
     @MainActor
-    func testWriteFromGhosttyRawInputNeverReachesTmuxInControlMode() {
-        // Verify the invariant: when controlModeState is .active, raw user input
-        // (without \n terminator) NEVER passes through as-is. It's either:
-        // - Wrapped in send-keys (if activeTmuxPaneId != nil)
-        // - Queued in pendingInputQueue (if activeTmuxPaneId == nil)
-        //
-        // This test ensures "ls -a\r" never becomes a tmux command.
+    func testWriteFromGhosttyDropsWhenConnectionUnhealthy() {
+        // writeFromGhostty checks connection health and drops if unhealthy
         let session = SSHSession()
-        session.setControlModeStateForTesting(.active)
-        // No pane set
+        session.setConnectionHealthForTesting(.dead(reason: "test"))
 
-        let rawInput = "ls -a\r".data(using: .utf8)!
-        session.writeFromGhostty(rawInput)
+        let testData = "hello".data(using: .utf8)!
+        session.writeFromGhostty(testData)
 
-        // Input should be in pendingInputQueue, NOT sent through performWrite
-        XCTAssertEqual(session.pendingInputQueue.count, 1)
-
-        // Verify it's the ORIGINAL input (for later wrapping when pane activates)
-        XCTAssertEqual(session.pendingInputQueue.first, rawInput,
-                       "Queued input should be original data for later send-keys wrapping")
+        XCTAssertTrue(session.pendingInputQueue.isEmpty,
+                      "Data should be dropped when connection is unhealthy")
     }
 
-    // MARK: - write() send-keys wrapping in control mode
+    // MARK: - write() in control mode
+    //
+    // write() is the fallback path when there's no Ghostty surface. In tmux
+    // control mode, ALL data is queued because it can't go through Zig's
+    // send-keys wrapping path. It will be flushed through Ghostty when the
+    // surface becomes available.
 
     @MainActor
     func testWriteQueuesWhenControlModeSetButNotActive() {
@@ -324,28 +300,25 @@ final class TmuxViewerReadyTests: XCTestCase {
     }
 
     @MainActor
-    func testWriteQueuesUserInputWhenControlActiveButNoPane() {
-        // CRITICAL: This is the exact bug scenario for the write() path.
-        // controlModeState is .active but activeTmuxPaneId is nil (viewer startup
-        // not complete). "who\r" must be QUEUED — not sent raw to tmux.
-        // Raw "who" → tmux: "unknown command: who"
+    func testWriteQueuesWhenControlModeActive() {
+        // In control mode active, write() queues ALL data — regardless of pane state.
+        // Without a Ghostty surface, data can't get send-keys wrapping.
         let session = SSHSession()
         session.setTmuxModeForTesting(.controlMode)
         session.setControlModeStateForTesting(.active)
-        // activeTmuxPaneId defaults to nil
 
         let userInput = "who\r".data(using: .utf8)!
         session.write(userInput)
 
         XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "User input must be QUEUED via write() when control mode active but no pane")
+                       "User input must be QUEUED via write() in control mode active")
         XCTAssertEqual(session.pendingInputQueue.first, userInput)
     }
 
     @MainActor
-    func testWriteWrapsInSendKeysWhenPaneActive() {
-        // After pane activation, write() should go through wrapInSendKeys.
-        // With no connection, performWrite queues the originalData.
+    func testWriteQueuesEvenWithActivePaneInControlMode() {
+        // Even with an active pane, write() queues in control mode. The write()
+        // path bypasses Ghostty and can't apply Zig-side send-keys wrapping.
         let session = SSHSession()
         session.setTmuxModeForTesting(.controlMode)
         session.setControlModeStateForTesting(.active)
@@ -354,43 +327,35 @@ final class TmuxViewerReadyTests: XCTestCase {
         let userInput = "ls -a\r".data(using: .utf8)!
         session.write(userInput)
 
-        // performWrite was called with wrapInSendKeys output → queues originalData
         XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "Input should reach performWrite and be queued (no connection)")
-        XCTAssertEqual(session.pendingInputQueue.first, userInput,
-                       "performWrite queues originalData for later re-wrapping")
+                       "write() queues in control mode even with active pane")
+        XCTAssertEqual(session.pendingInputQueue.first, userInput)
     }
 
     @MainActor
     func testWriteStringDelegatesToWriteData() {
         // write(_ string: String) should delegate to write(_ data: Data),
-        // getting the same send-keys wrapping behavior.
+        // getting the same queueing behavior in control mode.
         let session = SSHSession()
         session.setTmuxModeForTesting(.controlMode)
         session.setControlModeStateForTesting(.active)
-        // No pane → should queue
 
         session.write("hello\r")
 
         let expectedData = "hello\r".data(using: .utf8)!
         XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "write(String) should queue via write(Data) when no pane")
+                       "write(String) should queue via write(Data) in control mode")
         XCTAssertEqual(session.pendingInputQueue.first, expectedData)
     }
 
     @MainActor
     func testWriteRawInputNeverReachesTmuxInControlMode() {
-        // Verify the invariant: when controlModeState is .active, raw user input
-        // through write() is NEVER passed through as-is. It's either:
-        // - Wrapped in send-keys (if activeTmuxPaneId != nil)
-        // - Queued in pendingInputQueue (if activeTmuxPaneId == nil)
-        //
-        // This test simulates the exact "ls -a" scenario that caused the
-        // "parse error: command list-sessions: unknown flag -a" bug.
+        // Verify the invariant: when in control mode, raw user input through
+        // write() is ALWAYS queued — never sent directly to tmux stdin.
+        // This prevents "ls -a" from being parsed as "list-sessions -a".
         let session = SSHSession()
         session.setTmuxModeForTesting(.controlMode)
         session.setControlModeStateForTesting(.active)
-        // No pane → must queue, NOT send raw
 
         let rawInput = "ls -a\r".data(using: .utf8)!
         session.write(rawInput)
@@ -403,7 +368,7 @@ final class TmuxViewerReadyTests: XCTestCase {
     @MainActor
     func testWritePassesThroughInNonTmuxMode() {
         // In non-tmux mode (tmuxMode == .none), write() should go directly
-        // to performWrite without any send-keys wrapping.
+        // to performWrite without any queueing for tmux reasons.
         let session = SSHSession()
         // tmuxMode defaults to .none, controlModeState defaults to .inactive
 
