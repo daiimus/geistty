@@ -143,6 +143,10 @@ class SSHSession: ObservableObject, Identifiable {
     /// Tracks progression: inactive → routing → active
     private var controlModeState: ControlModeState = .inactive
     
+    /// DCS 1000p filter for detecting tmux control mode entry.
+    /// Handles DCS stripping, ST removal, and packet-splitting robustly.
+    private var dcsFilter = DCSFilter()
+    
     /// Session name discovery state for geistty-N auto-naming.
     /// When no custom tmux session name is set, we query `tmux list-sessions`
     /// before entering control mode. This state tracks that pre-control-mode query.
@@ -715,6 +719,7 @@ class SSHSession: ObservableObject, Identifiable {
             let reasonDesc = reason ?? "unknown"
             logger.info("Gateway exited: \(reasonDesc)")
             controlModeState = .inactive
+            dcsFilter = DCSFilter()
             tmuxSessionManager?.controlModeExited(reason: reason)
             delegate?.sshSession(self, didDisconnectWithError: SSHSessionError.tmuxExited(reason: reason))
         }
@@ -1057,6 +1062,7 @@ class SSHSession: ObservableObject, Identifiable {
     /// Disconnect the session
     func disconnect() {
         controlModeState = .inactive
+        dcsFilter = DCSFilter()
         sessionDiscoveryState = .idle
         pendingInputQueue.removeAll()
         gatewayEventTask?.cancel()
@@ -1154,6 +1160,7 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
         controlModeState = .inactive
+        dcsFilter = DCSFilter()
         gatewayEventTask?.cancel()
         gatewayEventTask = nil
         Task {
@@ -1258,63 +1265,32 @@ class SSHSession: ObservableObject, Identifiable {
         }
         
         // Detect and activate tmux control mode.
-        // tmux -CC sends control messages starting with % at line start.
-        // Common first messages: %begin, %session-changed, %output, %layout-change
+        // Uses DCSFilter to robustly handle DCS 1000p detection, ST stripping,
+        // and arbitrary packet boundaries. Once DCS is detected, all subsequent
+        // data routes to the gateway (following iTerm2's pattern).
         if tmuxMode == .controlMode, controlModeState == .inactive {
-            if let str = String(data: data, encoding: .utf8) {
-                // CRITICAL: Strip DCS 1000p sequences BEFORE checking for % messages.
-                // tmux sends \x1bP1000p (DCS 1000p) to signal control mode entry.
-                // We must strip this to prevent Ghostty's internal tmux parser from
-                // activating (which conflicts with our TmuxGateway), but we must NOT
-                // drop the entire packet because % messages may arrive in the same
-                // TCP chunk. The old code dropped the whole packet on DCS match,
-                // which could swallow the % messages needed for activation.
-                var filtered = str
-                var hadDCS = false
-                for dcsSeq in ["\u{1b}P1000p", "\u{1b}P1000;"] {
-                    if filtered.contains(dcsSeq) {
-                        logger.info("📥 Stripping DCS sequence from packet")
-                        filtered = filtered.replacingOccurrences(of: dcsSeq, with: "")
-                        hadDCS = true
-                    }
+            let result = dcsFilter.process(data)
+            
+            switch result {
+            case .routeToGateway(let filteredData):
+                logger.info("✅ Control mode detected! \(controlModeState) → routing (\(filteredData.count)B to gateway)")
+                controlModeState = .routing
+                Task {
+                    await tmuxGateway?.receive(filteredData)
                 }
-                if hadDCS {
-                    logger.info("📥 After DCS strip: '\(filtered.prefix(200))'")
-                }
+                return
                 
-                // Check filtered string for tmux control mode messages
-                let hasControlMessage = filtered.contains("\n%") || filtered.contains("\r%") || filtered.hasPrefix("%")
+            case .forwardToTerminal(let terminalData):
+                // Shell echo, MOTD, etc. — forward to Ghostty for rendering
+                logger.info("📥 Forwarding \(terminalData.count)B to delegate (pre-control-mode)")
+                delegate?.sshSession(self, didReceiveData: terminalData)
+                return
                 
-                logger.info("📥 Control mode check: hasControl=\(hasControlMessage) hadDCS=\(hadDCS)")
-                
-                if hasControlMessage {
-                    logger.info("✅ Control mode detected! \(controlModeState) → routing")
-                    controlModeState = .routing
-                    // Send DCS-stripped data to the gateway for parsing
-                    if let filteredData = filtered.data(using: .utf8) {
-                        Task {
-                            await tmuxGateway?.receive(filteredData)
-                        }
-                    }
-                    return
-                }
-                
-                // Had DCS but no % messages yet — DCS stripped, check remainder
-                if hadDCS {
-                    let remaining = filtered.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if remaining.isEmpty {
-                        logger.info("📥 DCS-only packet, waiting for % messages")
-                        return
-                    }
-                    // Forward remaining non-DCS content (MOTD, shell output) to Ghostty
-                    logger.info("📥 Forwarding non-DCS remainder to delegate")
-                    if let remainderData = filtered.data(using: .utf8) {
-                        delegate?.sshSession(self, didReceiveData: remainderData)
-                    }
-                    return
-                }
+            case .consumed:
+                // Partial DCS or DCS-only packet — filter is accumulating
+                logger.info("📥 DCS filter consumed \(data.count)B (waiting for more)")
+                return
             }
-            // No DCS, no % messages — forward normally (MOTD, prompt, command echo)
         }
         
         logger.info("📥 Forwarding \(data.count)B to delegate")
