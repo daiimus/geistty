@@ -145,6 +145,12 @@ class TerminalViewModel: ObservableObject {
     private var cols: Int = 80
     private var rows: Int = 24
     
+    /// Pending resize from layoutSubviews that arrived before sshSession was set.
+    /// When onResize fires during the layout pass, sshSession is still nil (it's set
+    /// later in useExistingSession). We store the resize here and flush it once the
+    /// session is wired up, guaranteeing the SSH PTY gets the real terminal dimensions.
+    var pendingResize: (cols: Int, rows: Int)?
+    
     /// Observers for app lifecycle events
     private var lifecycleObservers: [NSObjectProtocol] = []
     
@@ -272,17 +278,26 @@ class TerminalViewModel: ObservableObject {
         isConnected = true
         startDurationTimer()
         
-        // Read the actual grid size from Ghostty surface. The SSH PTY was
-        // created with 80x24 defaults before the terminal view existed.
-        // Now that the surface is laid out, read the real dimensions.
-        if let size = surfaceView?.surfaceSize, size.columns > 0, size.rows > 0 {
-            cols = Int(size.columns)
-            rows = Int(size.rows)
+        // Flush any pending resize that arrived before the session was wired.
+        // This handles the common case: layoutSubviews → onResize fired with
+        // real dimensions but sshSession was nil, so the resize was stored.
+        if let pending = pendingResize {
+            logger.info("📡 Flushing pending resize: \(pending.cols)x\(pending.rows)")
+            sshSession?.resize(cols: pending.cols, rows: pending.rows)
+            pendingResize = nil
+        } else {
+            // No pending resize — read the actual grid size from Ghostty surface.
+            // The SSH PTY was created with 80x24 defaults before the terminal view
+            // existed. Now that the surface is laid out, read the real dimensions.
+            if let size = surfaceView?.surfaceSize, size.columns > 0, size.rows > 0 {
+                cols = Int(size.columns)
+                rows = Int(size.rows)
+            }
+            
+            // Send initial terminal size
+            logger.info("📡 Setting terminal size: \(cols)x\(rows)")
+            sshSession?.resize(cols: cols, rows: rows)
         }
-        
-        // Send initial terminal size
-        logger.info("📡 Setting terminal size: \(cols)x\(rows)")
-        sshSession?.resize(cols: cols, rows: rows)
     }
     
     func disconnect() {
@@ -309,7 +324,15 @@ class TerminalViewModel: ObservableObject {
     func resize(cols: Int, rows: Int) {
         self.cols = cols
         self.rows = rows
-        sshSession?.resize(cols: cols, rows: rows)
+        if sshSession != nil {
+            sshSession?.resize(cols: cols, rows: rows)
+            pendingResize = nil
+        } else {
+            // SSH session not yet wired — store for flush in useExistingSession().
+            // This handles the common case where layoutSubviews fires before
+            // viewDidAppear sets up the connection.
+            pendingResize = (cols: cols, rows: rows)
+        }
     }
     
     func copy() {
