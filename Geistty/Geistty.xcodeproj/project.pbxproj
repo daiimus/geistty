@@ -29,6 +29,10 @@
 		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
 		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* DepartureMono-Regular.otf */; };
 		A1000010 /* Ghostty.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* Ghostty.swift */; };
+		A1000C01 /* Ghostty.Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C01 /* Ghostty.Config.swift */; };
+		A1000C02 /* Ghostty.App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C02 /* Ghostty.App.swift */; };
+		A1000C03 /* Ghostty.SurfaceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C03 /* Ghostty.SurfaceConfiguration.swift */; };
+		A1000C04 /* Ghostty.SearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C04 /* Ghostty.SearchState.swift */; };
 		A1000012 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000013 /* GhosttyKit.xcframework */; };
 		A1000013 /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* GhosttyInput.swift */; };
 		A1000020 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* KeychainManager.swift */; };
@@ -145,6 +149,10 @@
 		A2000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000010 /* Geistty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Geistty.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000011 /* Ghostty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.swift; sourceTree = "<group>"; };
+		A2000C01 /* Ghostty.Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.Config.swift; sourceTree = "<group>"; };
+		A2000C02 /* Ghostty.App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.App.swift; sourceTree = "<group>"; };
+		A2000C03 /* Ghostty.SurfaceConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.SurfaceConfiguration.swift; sourceTree = "<group>"; };
+		A2000C04 /* Ghostty.SearchState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.SearchState.swift; sourceTree = "<group>"; };
 		A2000013 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		A2000014 /* GhosttyInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInput.swift; sourceTree = "<group>"; };
 		A2000020 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
@@ -307,6 +315,10 @@
 			isa = PBXGroup;
 			children = (
 				A2000011 /* Ghostty.swift */,
+				A2000C01 /* Ghostty.Config.swift */,
+				A2000C02 /* Ghostty.App.swift */,
+				A2000C03 /* Ghostty.SurfaceConfiguration.swift */,
+				A2000C04 /* Ghostty.SearchState.swift */,
 				5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */,
 				A20000A0 /* FontMapping.swift */,
 				A2000014 /* GhosttyInput.swift */,
@@ -560,6 +572,10 @@
 				A1000001 /* GeisttyApp.swift in Sources */,
 				A1000002 /* ContentView.swift in Sources */,
 				A1000010 /* Ghostty.swift in Sources */,
+				A1000C01 /* Ghostty.Config.swift in Sources */,
+				A1000C02 /* Ghostty.App.swift in Sources */,
+				A1000C03 /* Ghostty.SurfaceConfiguration.swift in Sources */,
+				A1000C04 /* Ghostty.SearchState.swift in Sources */,
 				708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */,
 				A10000A0 /* FontMapping.swift in Sources */,
 				A1000013 /* GhosttyInput.swift in Sources */,
