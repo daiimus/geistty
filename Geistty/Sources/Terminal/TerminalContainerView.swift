@@ -482,55 +482,65 @@ class RawTerminalUIViewController: UIViewController {
     var ghosttyApp: Ghostty.App?
     var viewModel: TerminalViewModel?
     var onSetup: (() -> Void)?
-    private var surfaceView: Ghostty.SurfaceView?
+    var surfaceView: Ghostty.SurfaceView?
     
     // Constraint for top edge - adjusted based on status bar visibility
-    private var surfaceTopConstraint: NSLayoutConstraint?
+    var surfaceTopConstraint: NSLayoutConstraint?
     
     // Constraint for bottom edge - adjusted based on keyboard visibility
-    private var surfaceBottomConstraint: NSLayoutConstraint?
+    var surfaceBottomConstraint: NSLayoutConstraint?
     
     // Settings observation
-    private var settingsObserver: NSObjectProtocol?
+    var settingsObserver: NSObjectProtocol?
     
     // Menu bar notification observers (must be stored for cleanup)
-    private var menuBarObservers: [NSObjectProtocol] = []
+    var menuBarObservers: [NSObjectProtocol] = []
     
     // Keyboard observers
-    private var keyboardWillShowObserver: NSObjectProtocol?
-    private var keyboardWillHideObserver: NSObjectProtocol?
+    var keyboardWillShowObserver: NSObjectProtocol?
+    var keyboardWillHideObserver: NSObjectProtocol?
     
     // Search overlay hosting controller
-    private var searchOverlayHostingController: UIHostingController<Ghostty.SurfaceSearchOverlay>?
+    var searchOverlayHostingController: UIHostingController<Ghostty.SurfaceSearchOverlay>?
     
     // Search state observer
-    private var searchStateObserver: AnyCancellable?
+    var searchStateObserver: AnyCancellable?
+    
+    // Search bar position and constraints (managed by +Search.swift)
+    enum SearchBarCorner {
+        case topLeft, topRight, bottomLeft, bottomRight
+    }
+    var searchBarCorner: SearchBarCorner = .topRight
+    var searchBarTopConstraint: NSLayoutConstraint?
+    var searchBarBottomConstraint: NSLayoutConstraint?
+    var searchBarLeadingConstraint: NSLayoutConstraint?
+    var searchBarTrailingConstraint: NSLayoutConstraint?
     
     // Key table indicator (vim-style modal keys)
     private var keyTableIndicatorHostingController: UIHostingController<KeyTableIndicatorView>?
-    private var keyTableObserver: AnyCancellable?
+    var keyTableObserver: AnyCancellable?
     
     // Multi-pane support
-    private var multiPaneHostingController: UIHostingController<TmuxMultiPaneView>?
-    private var multiPaneTopConstraint: NSLayoutConstraint?
-    private var multiPaneBottomConstraint: NSLayoutConstraint?
-    private var splitTreeObserver: AnyCancellable?
-    private var connectionObserver: AnyCancellable?
-    private var isMultiPaneMode = false
+    var multiPaneHostingController: UIHostingController<TmuxMultiPaneView>?
+    var multiPaneTopConstraint: NSLayoutConstraint?
+    var multiPaneBottomConstraint: NSLayoutConstraint?
+    var splitTreeObserver: AnyCancellable?
+    var connectionObserver: AnyCancellable?
+    var isMultiPaneMode = false
     
     // UIKit divider overlay for drag gestures (sits on top of multi-pane view)
-    private var dividerOverlayView: DividerOverlayView?
-    private var dividerTreeObserver: AnyCancellable?
+    var dividerOverlayView: DividerOverlayView?
+    var dividerTreeObserver: AnyCancellable?
     
     // Window picker support (shown when multiple tmux windows exist)
-    private var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
-    private var windowPickerHeightConstraint: NSLayoutConstraint?
-    private var windowsObserver: AnyCancellable?
-    private var isShowingWindowPicker = false
-    private let windowPickerHeight: CGFloat = 36
+    var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
+    var windowPickerHeightConstraint: NSLayoutConstraint?
+    var windowsObserver: AnyCancellable?
+    var isShowingWindowPicker = false
+    let windowPickerHeight: CGFloat = 36
     
     // Status bar preference (read from UserDefaults)
-    private var showStatusBar: Bool {
+    var showStatusBar: Bool {
         UserDefaults.standard.bool(forKey: "ui.showStatusBar")
     }
     
@@ -580,177 +590,6 @@ class RawTerminalUIViewController: UIViewController {
         setupMenuBarNotifications()
     }
     
-    private func setupKeyboardObservers() {
-        keyboardWillShowObserver = NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillShowNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            self?.handleKeyboardWillShow(notification)
-        }
-        
-        keyboardWillHideObserver = NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillHideNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            self?.handleKeyboardWillHide(notification)
-        }
-    }
-    
-    private func handleKeyboardWillShow(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
-              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int else {
-            return
-        }
-        
-        let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
-        
-        // Convert keyboard frame to view coordinates
-        let keyboardHeight = view.convert(keyboardFrame, from: nil).height
-        
-        // Calculate the new size BEFORE animating
-        let newHeight = view.bounds.height - keyboardHeight
-        let newSize = CGSize(width: view.bounds.width, height: newHeight)
-        
-        // Notify Ghostty of size change BEFORE animation to pre-render
-        // This prevents the white flash during resize
-        if let surface = self.surfaceView, !isMultiPaneMode {
-            surface.sizeDidChange(newSize)
-        }
-        
-        // Disable implicit CALayer animations during resize
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        
-        // Animate the bottom constraint
-        UIView.animate(
-            withDuration: duration,
-            delay: 0,
-            options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
-            animations: {
-                self.surfaceBottomConstraint?.constant = -keyboardHeight
-                self.multiPaneBottomConstraint?.constant = -keyboardHeight
-                self.view.layoutIfNeeded()
-            },
-            completion: { _ in
-                CATransaction.commit()
-            }
-        )
-        
-        logger.debug("⌨️ Keyboard will show, height: \(keyboardHeight)")
-    }
-    
-    private func handleKeyboardWillHide(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
-              let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int else {
-            return
-        }
-        
-        let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
-        
-        // Calculate the new size BEFORE animating (full height)
-        let newSize = CGSize(width: view.bounds.width, height: view.bounds.height)
-        
-        // Notify Ghostty of size change BEFORE animation to pre-render
-        if let surface = self.surfaceView, !isMultiPaneMode {
-            surface.sizeDidChange(newSize)
-        }
-        
-        // Disable implicit CALayer animations during resize
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        
-        // Animate the bottom constraint back to 0
-        UIView.animate(
-            withDuration: duration,
-            delay: 0,
-            options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
-            animations: {
-                self.surfaceBottomConstraint?.constant = 0
-                self.multiPaneBottomConstraint?.constant = 0
-                self.view.layoutIfNeeded()
-            },
-            completion: { _ in
-                CATransaction.commit()
-            }
-        )
-        
-        logger.debug("⌨️ Keyboard will hide")
-    }
-    
-    private func setupMenuBarNotifications() {
-        let nc = NotificationCenter.default
-        
-        // Terminal actions
-        menuBarObservers.append(nc.addObserver(forName: .terminalClearScreen, object: nil, queue: .main) { [weak self] _ in
-            self?.handleClearScreen()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalReset, object: nil, queue: .main) { [weak self] _ in
-            self?.handleResetTerminal()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalIncreaseFontSize, object: nil, queue: .main) { [weak self] _ in
-            self?.handleIncreaseFontSize()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalDecreaseFontSize, object: nil, queue: .main) { [weak self] _ in
-            self?.handleDecreaseFontSize()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalResetFontSize, object: nil, queue: .main) { [weak self] _ in
-            self?.handleResetFontSize()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalSelectAll, object: nil, queue: .main) { [weak self] _ in
-            self?.handleSelectAll()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalToggleStatusBar, object: nil, queue: .main) { [weak self] _ in
-            self?.toggleStatusBar()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .showKeyboardShortcuts, object: nil, queue: .main) { [weak self] _ in
-            self?.showKeyboardShortcutsHelp()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .showSettings, object: nil, queue: .main) { [weak self] _ in
-            self?.handleSettingsButton()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .reloadConfiguration, object: nil, queue: .main) { [weak self] _ in
-            self?.reloadConfiguration()
-        })
-        
-        // Copy/Paste
-        menuBarObservers.append(nc.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
-            self?.viewModel?.copy()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalPaste, object: nil, queue: .main) { [weak self] _ in
-            self?.viewModel?.paste()
-        })
-        
-        // Search/Find
-        menuBarObservers.append(nc.addObserver(forName: .terminalFind, object: nil, queue: .main) { [weak self] _ in
-            self?.handleFind()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalFindNext, object: nil, queue: .main) { [weak self] _ in
-            self?.handleFindNext()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalFindPrevious, object: nil, queue: .main) { [weak self] _ in
-            self?.handleFindPrevious()
-        })
-        menuBarObservers.append(nc.addObserver(forName: .terminalHideFindBar, object: nil, queue: .main) { [weak self] _ in
-            self?.closeSearch()
-        })
-        
-        // Background opacity toggle
-        menuBarObservers.append(nc.addObserver(forName: .toggleBackgroundOpacity, object: nil, queue: .main) { [weak self] _ in
-            self?.toggleBackgroundOpacity()
-        })
-        
-        // Connection management
-        menuBarObservers.append(nc.addObserver(forName: .terminalDisconnect, object: nil, queue: .main) { [weak self] _ in
-            self?.handleBackButton()
-        })
-        // Note: terminalReconnect is handled in ContentView which has access to appState
-    }
-    
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
@@ -760,6 +599,9 @@ class RawTerminalUIViewController: UIViewController {
         // Initial layout update
         updateStatusBarAndLayout()
     }
+    
+    // MARK: - Status Bar & Layout
+    
     private func updateStatusBarAndLayout() {
         // Tell UIKit to re-query prefersStatusBarHidden
         setNeedsStatusBarAppearanceUpdate()
@@ -786,247 +628,60 @@ class RawTerminalUIViewController: UIViewController {
         }
     }
     
-    // MARK: - Menu Action Handlers
-    
-    private func handleSelectAll() {
-        // Select all text in terminal
-        // TODO: Implement via Ghostty API if available
-        viewModel?.surfaceView?.selectAll()
+    func toggleStatusBar() {
+        let newValue = !showStatusBar
+        UserDefaults.standard.set(newValue, forKey: "ui.showStatusBar")
+        updateStatusBarAndLayout()
     }
     
-    /// Toggle between transparent and opaque background
-    /// Saves state to config file and reloads configuration
-    private func toggleBackgroundOpacity() {
-        let currentOpacity = ConfigSyncManager.shared.getBackgroundOpacity()
-        let newOpacity: Double
-        
-        if currentOpacity < 1.0 {
-            // Currently transparent → make opaque
-            newOpacity = 1.0
-        } else {
-            // Currently opaque → use configured transparent value (default 0.95)
-            // Or use the stored transparent value if user had set one
-            let settings = AppSettings.shared
-            newOpacity = settings.backgroundOpacity < 1.0 ? settings.backgroundOpacity : 0.95
-        }
-        
-        ConfigSyncManager.shared.updateBackgroundOpacity(newOpacity)
-        reloadConfiguration()
-        
-        logger.info("🎨 Toggled background opacity: \(currentOpacity) → \(newOpacity)")
-    }
+    // MARK: - Settings
     
-    // MARK: - Search/Find Handlers
-    
-    private func handleFind() {
-        guard let surface = surfaceView else { return }
-        
-        // Send start_search action to Ghostty, which will trigger the START_SEARCH callback
-        // This matches the macOS implementation and ensures proper state management
-        surface.startSearch()
-    }
-    
-    private func handleFindNext() {
-        guard let surface = surfaceView else { return }
-        
-        if surface.searchState != nil {
-            // Search active, go to next result
-            surface.searchNext()
-        } else {
-            // No search active, start one first
-            handleFind()
-        }
-    }
-    
-    private func handleFindPrevious() {
-        guard let surface = surfaceView else { return }
-        
-        if surface.searchState != nil {
-            // Search active, go to previous result
-            surface.searchPrevious()
-        } else {
-            // No search active, start one first
-            handleFind()
-        }
-    }
-    
-    private func closeSearch() {
-        guard let surface = surfaceView else { return }
-        
-        // Directly set searchState to nil - the didSet will send end_search to Ghostty
-        // This matches the macOS implementation
-        surface.searchState = nil
-        
-        // Return focus to terminal
-        _ = surface.becomeFirstResponder()
-    }
-    
-    // MARK: - Search Overlay Management
-    
-    /// Current corner position of search bar
-    private var searchBarCorner: SearchBarCorner = .topRight
-    
-    /// Constraints for search bar positioning (updated during drag)
-    private var searchBarTopConstraint: NSLayoutConstraint?
-    private var searchBarBottomConstraint: NSLayoutConstraint?
-    private var searchBarLeadingConstraint: NSLayoutConstraint?
-    private var searchBarTrailingConstraint: NSLayoutConstraint?
-    
-    enum SearchBarCorner {
-        case topLeft, topRight, bottomLeft, bottomRight
-    }
-    
-    private func updateSearchOverlay() {
-        guard let surface = surfaceView else {
-            removeSearchOverlay()
-            return
-        }
-        
-        if let searchState = surface.searchState {
-            // Show/update search overlay
-            if searchOverlayHostingController == nil {
-                // Create and add the overlay
-                let overlay = Ghostty.SurfaceSearchOverlay(
-                    surfaceView: surface,
-                    searchState: searchState,
-                    onClose: { [weak self] in
-                        self?.closeSearch()
-                    }
-                )
-                
-                let hostingController = UIHostingController(rootView: overlay)
-                hostingController.view.backgroundColor = .clear
-                
-                // KEY FIX: Use Auto Layout to size the hosting view to fit its content
-                // instead of stretching it full-screen. This is the iOS-native way to 
-                // have an overlay that doesn't block touches on the rest of the screen.
-                hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-                
-                // Tell the hosting controller to size itself to fit content
-                hostingController.sizingOptions = .intrinsicContentSize
-                
-                addChild(hostingController)
-                view.addSubview(hostingController.view)
-                
-                // Create constraints for all four corners (we'll activate/deactivate as needed)
-                let padding: CGFloat = 12
-                searchBarTopConstraint = hostingController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: padding)
-                searchBarBottomConstraint = hostingController.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -padding)
-                searchBarLeadingConstraint = hostingController.view.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: padding)
-                searchBarTrailingConstraint = hostingController.view.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -padding)
-                
-                // Activate constraints for current corner
-                updateSearchBarConstraints()
-                
-                // Add pan gesture for dragging
-                let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handleSearchBarPan(_:)))
-                hostingController.view.addGestureRecognizer(panGesture)
-                
-                hostingController.didMove(toParent: self)
-                searchOverlayHostingController = hostingController
+    @objc func handleSettingsButton() {
+        // Present settings as a sheet
+        let settingsView = SettingsView(
+            currentFontSize: Int(viewModel?.currentFontSize ?? 14),
+            onFontSizeChanged: { [weak self] newSize in
+                self?.viewModel?.setFontSize(newSize)
+            },
+            onResetFontSize: { [weak self] in
+                self?.viewModel?.resetFontSize()
+            },
+            onFontFamilyChanged: { [weak self] in
+                self?.viewModel?.updateConfig()
+            },
+            onThemeChanged: { [weak self] in
+                self?.viewModel?.updateConfig()
+                // Update our background color too
+                let themeBg = ThemeManager.shared.selectedTheme.background
+                self?.view.backgroundColor = UIColor(themeBg)
             }
-        } else {
-            removeSearchOverlay()
-        }
-    }
-    
-    private func updateSearchBarConstraints() {
-        // Deactivate all
-        searchBarTopConstraint?.isActive = false
-        searchBarBottomConstraint?.isActive = false
-        searchBarLeadingConstraint?.isActive = false
-        searchBarTrailingConstraint?.isActive = false
+        )
         
-        // Activate based on corner
-        switch searchBarCorner {
-        case .topLeft:
-            searchBarTopConstraint?.isActive = true
-            searchBarLeadingConstraint?.isActive = true
-        case .topRight:
-            searchBarTopConstraint?.isActive = true
-            searchBarTrailingConstraint?.isActive = true
-        case .bottomLeft:
-            searchBarBottomConstraint?.isActive = true
-            searchBarLeadingConstraint?.isActive = true
-        case .bottomRight:
-            searchBarBottomConstraint?.isActive = true
-            searchBarTrailingConstraint?.isActive = true
-        }
-    }
-    
-    @objc private func handleSearchBarPan(_ gesture: UIPanGestureRecognizer) {
-        guard let searchView = searchOverlayHostingController?.view else { return }
+        let hostingController = UIHostingController(rootView: settingsView)
+        hostingController.modalPresentationStyle = .pageSheet
         
-        switch gesture.state {
-        case .changed:
-            // Move the view with the finger
-            let translation = gesture.translation(in: view)
-            searchView.transform = CGAffineTransform(translationX: translation.x, y: translation.y)
-            
-        case .ended, .cancelled:
-            // Get the translation and velocity
-            let translation = gesture.translation(in: view)
-            let velocity = gesture.velocity(in: view)
-            
-            // Calculate where the view visually ended up (center + translation)
-            let visualCenter = CGPoint(
-                x: searchView.center.x + translation.x,
-                y: searchView.center.y + translation.y
-            )
-            
-            let viewBounds = view.bounds
-            let midX = viewBounds.width / 2
-            let midY = viewBounds.height / 2
-            
-            // Flick threshold - if velocity is high enough, use velocity direction
-            let flickThreshold: CGFloat = 500
-            let isFlick = abs(velocity.x) > flickThreshold || abs(velocity.y) > flickThreshold
-            
-            let newCorner: SearchBarCorner
-            if isFlick {
-                // Use velocity direction to determine target corner
-                let goingLeft = velocity.x < 0
-                let goingUp = velocity.y < 0
-                
-                if goingLeft {
-                    newCorner = goingUp ? .topLeft : .bottomLeft
-                } else {
-                    newCorner = goingUp ? .topRight : .bottomRight
-                }
-            } else {
-                // Use final position to snap to nearest corner
-                if visualCenter.x < midX {
-                    newCorner = visualCenter.y < midY ? .topLeft : .bottomLeft
-                } else {
-                    newCorner = visualCenter.y < midY ? .topRight : .bottomRight
-                }
-            }
-            
-            // Reset transform and update corner
-            searchBarCorner = newCorner
-            UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
-                searchView.transform = .identity
-                self.updateSearchBarConstraints()
-                self.view.layoutIfNeeded()
-            }
-            
-        default:
-            break
+        if let sheet = hostingController.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
         }
+        
+        present(hostingController, animated: true)
     }
     
-    private func removeSearchOverlay() {
-        if let hostingController = searchOverlayHostingController {
-            hostingController.willMove(toParent: nil)
-            hostingController.view.removeFromSuperview()
-            hostingController.removeFromParent()
-            searchOverlayHostingController = nil
-        }
+    func reloadConfiguration() {
+        logger.info("🔄 Reloading configuration...")
+        viewModel?.updateConfig()
+        
+        // Update background color in case theme changed
+        let themeBg = ThemeManager.shared.selectedTheme.background
+        view.backgroundColor = UIColor(themeBg)
+        
+        logger.info("✅ Configuration reloaded")
     }
     
     // MARK: - Key Table Indicator
     
-    private func updateKeyTableIndicator(tableName: String?) {
+    func updateKeyTableIndicator(tableName: String?) {
         if let name = tableName {
             // Show or update key table indicator
             if keyTableIndicatorHostingController == nil {
@@ -1065,135 +720,14 @@ class RawTerminalUIViewController: UIViewController {
         }
     }
     
-
-    private func setupSearchStateObserver() {
-        // Observe search state changes on the surface view
-        guard let surface = surfaceView else { return }
-        
-        searchStateObserver = surface.$searchState
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.updateSearchOverlay()
-            }
-        
-        // Observe active key table changes for vim-style modal indicator
-        keyTableObserver = surface.$activeKeyTable
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] tableName in
-                self?.updateKeyTableIndicator(tableName: tableName)
-            }
-    }
-    
-    private func handleIncreaseFontSize() {
-        let currentSize = viewModel?.currentFontSize ?? 14
-        viewModel?.setFontSize(Int(currentSize) + 1)
-    }
-    
-    private func handleDecreaseFontSize() {
-        let currentSize = viewModel?.currentFontSize ?? 14
-        viewModel?.setFontSize(max(8, Int(currentSize) - 1))
-    }
-    
-    private func handleResetFontSize() {
-        viewModel?.resetFontSize()
-    }
-    
-    private func toggleStatusBar() {
-        let newValue = !showStatusBar
-        UserDefaults.standard.set(newValue, forKey: "ui.showStatusBar")
-        updateStatusBarAndLayout()
-    }
-    
-    private func handleClearScreen() {
-        viewModel?.clearScreen()
-    }
-    
-    private func handleResetTerminal() {
-        viewModel?.resetTerminal()
-    }
-    
-    private func showKeyboardShortcutsHelp() {
-        let shortcuts = """
-        Keyboard Shortcuts
-        
-        Cmd+C        Copy
-        Cmd+V        Paste
-        Cmd+K        Clear Screen
-        Cmd+0        Reset Font Size
-        Cmd++        Increase Font Size
-        Cmd+-        Decrease Font Size
-        Cmd+W        Disconnect
-        
-        Ctrl+C       Interrupt (SIGINT)
-        Ctrl+D       EOF / Logout
-        Ctrl+L       Clear Screen
-        Ctrl+Z       Suspend
-        
-        Arrow Keys   Navigate
-        Tab          Complete
-        Esc          Cancel
-        """
-        
-        let alert = UIAlertController(title: nil, message: shortcuts, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
-    }
-    
-    @objc private func handleBackButton() {
-        // Disconnect and go back
-        viewModel?.disconnect()
-        NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
-    }
-    
-    @objc private func handleSettingsButton() {
-        // Present settings as a sheet
-        let settingsView = SettingsView(
-            currentFontSize: Int(viewModel?.currentFontSize ?? 14),
-            onFontSizeChanged: { [weak self] newSize in
-                self?.viewModel?.setFontSize(newSize)
-            },
-            onResetFontSize: { [weak self] in
-                self?.viewModel?.resetFontSize()
-            },
-            onFontFamilyChanged: { [weak self] in
-                self?.viewModel?.updateConfig()
-            },
-            onThemeChanged: { [weak self] in
-                self?.viewModel?.updateConfig()
-                // Update our background color too
-                let themeBg = ThemeManager.shared.selectedTheme.background
-                self?.view.backgroundColor = UIColor(themeBg)
-            }
-        )
-        
-        let hostingController = UIHostingController(rootView: settingsView)
-        hostingController.modalPresentationStyle = .pageSheet
-        
-        if let sheet = hostingController.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
-            sheet.prefersGrabberVisible = true
-        }
-        
-        present(hostingController, animated: true)
-    }
-    
-    private func reloadConfiguration() {
-        logger.info("🔄 Reloading configuration...")
-        viewModel?.updateConfig()
-        
-        // Update background color in case theme changed
-        let themeBg = ThemeManager.shared.selectedTheme.background
-        view.backgroundColor = UIColor(themeBg)
-        
-        logger.info("✅ Configuration reloaded")
-    }
-    
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         
         // Update top constraint based on status bar visibility
         updateTopConstraint()
     }
+    
+    // MARK: - Surface Creation
     
     /// Create surface view - for non-tmux mode, creates directly.
     /// For tmux mode, this sets up the factory and waits for TmuxSessionManager to create.
@@ -1223,64 +757,6 @@ class RawTerminalUIViewController: UIViewController {
             // Non-tmux mode - create surface directly (legacy path)
             createDirectSurface()
         }
-    }
-    
-    /// Configure surface management for TmuxSessionManager
-    /// This provides the factory and handlers for creating surfaces
-    private func configureSurfaceManagement() {
-        guard let ghosttyApp = ghosttyApp,
-              let _ = ghosttyApp.app,
-              let tmuxManager = viewModel?.tmuxManager else {
-            return
-        }
-        
-        // Factory creates Ghostty surfaces
-        let factory: (String) -> Ghostty.SurfaceView? = { [weak ghosttyApp, weak self] paneId in
-            guard let ghosttyApp = ghosttyApp, let app = ghosttyApp.app else {
-                logger.error("Ghostty app deallocated before surface factory called for pane \(paneId)")
-                return nil
-            }
-            
-            logger.info("Creating Ghostty surface for pane \(paneId)")
-            
-            var config = Ghostty.SurfaceConfiguration()
-            config.backendType = .external
-            
-            let surface = Ghostty.SurfaceView(app, baseConfig: config)
-            let themeBg = ThemeManager.shared.selectedTheme.background
-            surface.backgroundColor = UIColor(themeBg)
-            
-            // Wire up shortcut delegate for Ghostty keybindings
-            surface.shortcutDelegate = self
-            
-            return surface
-        }
-        
-        // Input handler wires surface.onWrite through SSHSession
-        // In native Ghostty tmux mode, keystrokes on stdin go directly to the active pane.
-        // onWrite arrives on main thread (C callback dispatches via DispatchQueue.main.async)
-        let inputHandler: (Ghostty.SurfaceView, String) -> Void = { [weak self] surface, paneId in
-            surface.onWrite = { [weak self] data in
-                // Track which pane has focus locally
-                self?.viewModel?.tmuxManager?.setFocusedPane(paneId)
-                // Write directly — Ghostty's tmux viewer routes to the active pane
-                self?.viewModel?.sendInput(data)
-            }
-        }
-        
-        // Resize handler — called synchronously from layoutSubviews on main thread.
-        // No Task deferral: cols/rows must update before connect()/useExistingSession() reads them.
-        let resizeHandler: (Int, Int) -> Void = { [weak self] cols, rows in
-            self?.viewModel?.resize(cols: cols, rows: rows)
-        }
-        
-        tmuxManager.configureSurfaceManagement(
-            factory: factory,
-            inputHandler: inputHandler,
-            resizeHandler: resizeHandler
-        )
-        
-        logger.info("✅ Surface management configured for TmuxSessionManager")
     }
     
     /// Create a surface directly (non-tmux legacy path)
@@ -1320,7 +796,7 @@ class RawTerminalUIViewController: UIViewController {
     }
     
     /// Display a surface in the view hierarchy
-    private func displaySurface(_ surface: Ghostty.SurfaceView) {
+    func displaySurface(_ surface: Ghostty.SurfaceView) {
         self.surfaceView = surface
         
         // Ensure shortcut delegate is wired up (may already be set by factory)
@@ -1347,373 +823,6 @@ class RawTerminalUIViewController: UIViewController {
         
         surface.focusDidChange(true)
         _ = surface.becomeFirstResponder()
-    }
-    
-    /// Set up surface factory for tmux multi-pane support
-    /// This ensures TmuxSessionManager has what it needs to create surfaces
-    private func setupTmuxSurfaceFactory() {
-        // Configure surface management if not already done
-        configureSurfaceManagement()
-        
-        // CRITICAL: Do NOT replace the existing direct surface with a new one.
-        // When tmux activates, the DCS 1000p response has already been fed to
-        // the direct surface created at viewDidLoad. Ghostty created its tmux
-        // viewer INSIDE that surface's C-side state (viewer.zig, control.zig).
-        // Destroying that surface and creating a new one would lose the viewer
-        // and all protocol state — the new surface would be blank.
-        //
-        // Instead, we adopt the existing surface into TmuxSessionManager so it
-        // gets the tmux-aware input handler (pane tracking) while preserving
-        // the Ghostty-side tmux viewer.
-        if let tmuxManager = viewModel?.tmuxManager {
-            if let existingSurface = surfaceView, tmuxManager.primarySurface == nil {
-                // Adopt the existing direct surface as the tmux primary surface.
-                // This preserves Ghostty's internal tmux viewer state.
-                logger.info("🔄 Adopting existing direct surface as tmux primary (preserving viewer state)")
-                tmuxManager.adoptExistingSurface(existingSurface)
-            } else if surfaceView == nil {
-                // No surface exists yet — create one from the factory
-                if let surface = tmuxManager.createPrimarySurface() {
-                    displaySurface(surface)
-                    logger.info("✅ Created and displayed primary surface from TmuxSessionManager")
-                }
-            }
-        }
-        
-        logger.info("✅ tmux surface factory configured")
-    }
-    
-    /// Observe split tree changes to switch between single surface and multi-pane mode
-    private func setupSplitTreeObserver() {
-        guard let tmuxManager = viewModel?.tmuxManager else {
-            logger.debug("No tmux manager available for split tree observation")
-            return
-        }
-        
-        // Cancel any existing observer
-        splitTreeObserver?.cancel()
-        
-        splitTreeObserver = tmuxManager.$currentSplitTree
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] tree in
-                self?.handleSplitTreeChange(tree)
-            }
-        
-        logger.info("✅ Split tree observer configured")
-    }
-    
-    /// Observe windows changes to show/hide the window picker
-    private func setupWindowsObserver() {
-        guard let tmuxManager = viewModel?.tmuxManager else {
-            logger.debug("No tmux manager available for windows observation")
-            return
-        }
-        
-        // Cancel any existing observer
-        windowsObserver?.cancel()
-        
-        windowsObserver = tmuxManager.$windows
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] windows in
-                self?.handleWindowsChange(windowCount: windows.count)
-            }
-        
-        logger.info("✅ Windows observer configured")
-    }
-    
-    /// Handle windows count change - show/hide window picker
-    private func handleWindowsChange(windowCount: Int) {
-        let shouldShowPicker = windowCount > 1
-        
-        if shouldShowPicker && !isShowingWindowPicker {
-            showWindowPicker()
-        } else if !shouldShowPicker && isShowingWindowPicker {
-            hideWindowPicker()
-        }
-    }
-    
-    /// Show the window picker at the top of the view
-    private func showWindowPicker() {
-        guard let tmuxManager = viewModel?.tmuxManager else { return }
-        guard windowPickerHostingController == nil else { return }
-        
-        logger.info("📑 Showing window picker")
-        
-        let pickerView = TmuxWindowPickerView(sessionManager: tmuxManager)
-        let hostingController = UIHostingController(rootView: pickerView)
-        hostingController.view.backgroundColor = .clear
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        
-        addChild(hostingController)
-        view.addSubview(hostingController.view)
-        hostingController.didMove(toParent: self)
-        
-        // Position at the top, below status bar if shown
-        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
-        
-        NSLayoutConstraint.activate([
-            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor, constant: topInset),
-            hostingController.view.heightAnchor.constraint(equalToConstant: windowPickerHeight)
-        ])
-        
-        windowPickerHostingController = hostingController
-        isShowingWindowPicker = true
-        
-        // Adjust terminal view's top constraint to make room for the picker
-        updateTerminalTopConstraint()
-    }
-    
-    /// Hide the window picker
-    private func hideWindowPicker() {
-        guard let hostingController = windowPickerHostingController else { return }
-        
-        logger.info("📑 Hiding window picker")
-        
-        hostingController.willMove(toParent: nil)
-        hostingController.view.removeFromSuperview()
-        hostingController.removeFromParent()
-        
-        windowPickerHostingController = nil
-        isShowingWindowPicker = false
-        
-        // Restore terminal view's top constraint
-        updateTerminalTopConstraint()
-    }
-    
-    /// Update the terminal view's top constraint based on window picker visibility
-    private func updateTerminalTopConstraint() {
-        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
-        let pickerOffset: CGFloat = isShowingWindowPicker ? windowPickerHeight : 0
-        
-        surfaceTopConstraint?.constant = topInset + pickerOffset
-        multiPaneTopConstraint?.constant = topInset + pickerOffset
-        
-        UIView.animate(withDuration: 0.2) {
-            self.view.layoutIfNeeded()
-        }
-    }
-    
-    /// Observe connection state to set up tmux observers when connected
-    /// This is needed because tmux manager doesn't exist until after SSH connects
-    private func setupConnectionObserver() {
-        guard let viewModel = viewModel else { return }
-        
-        connectionObserver = viewModel.$isConnected
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isConnected in
-                if isConnected {
-                    // Connection established - set up tmux support immediately
-                    // No delay - surface factory should be ready as soon as possible
-                    self?.setupTmuxSurfaceFactory()
-                    self?.setupSplitTreeObserver()
-                    self?.setupWindowsObserver()
-                }
-            }
-    }
-    
-    /// Handle split tree changes - switch between single and multi-pane mode
-    private func handleSplitTreeChange(_ tree: TmuxSplitTree) {
-        let hasSplits = tree.isSplit
-        let hasPanes = !tree.paneIds.isEmpty
-        
-        logger.info("🔄 handleSplitTreeChange: panes=\(tree.paneIds), isSplit=\(hasSplits), hasPanes=\(hasPanes), isMultiPaneMode=\(isMultiPaneMode)")
-        
-        // Log the actual tree structure for debugging
-        if let root = tree.root {
-            switch root {
-            case .leaf(let info):
-                logger.info("🔄 Tree root is LEAF: pane=\(info.paneId)")
-            case .split(let split):
-                logger.info("🔄 Tree root is SPLIT: direction=\(split.direction), ratio=\(split.ratio)")
-            }
-        } else {
-            logger.info("🔄 Tree root is NIL")
-        }
-        
-        // Handle empty tree (all panes closed) - just clean up multi-pane mode
-        // The disconnect handler will navigate away when tmux sends %exit
-        if !hasPanes {
-            if isMultiPaneMode {
-                logger.info("🔄 No panes remaining, cleaning up multi-pane mode")
-                cleanupMultiPaneMode()
-            }
-            return
-        }
-        
-        // SIMPLIFIED: Once we enter multi-pane mode, STAY in multi-pane mode
-        // The SwiftUI TmuxMultiPaneView can handle showing 1 pane just fine
-        // This avoids the complex surface re-parenting that was causing blank screens
-        if hasPanes && !isMultiPaneMode {
-            // First time we have panes and splits - enter multi-pane mode
-            if hasSplits {
-                logger.info("🔄 PATH: hasPanes && hasSplits && !isMultiPaneMode -> transitionToMultiPaneMode")
-                transitionToMultiPaneMode()
-            }
-            // If single pane and not in multi-pane mode, stay with single surface
-            // This handles initial connection with no splits
-        } else if !hasPanes && isMultiPaneMode {
-            // No panes left - already handled above
-        }
-        // If we're in multi-pane mode, stay there - TmuxMultiPaneView handles all pane counts
-    }
-    
-    /// Clean up multi-pane mode without requiring a primary surface
-    private func cleanupMultiPaneMode() {
-        // Clean up divider overlay
-        dividerTreeObserver?.cancel()
-        dividerTreeObserver = nil
-        dividerOverlayView?.removeFromSuperview()
-        dividerOverlayView = nil
-        
-        if let hostingController = multiPaneHostingController {
-            hostingController.willMove(toParent: nil)
-            hostingController.view.removeFromSuperview()
-            hostingController.removeFromParent()
-            multiPaneHostingController = nil
-            multiPaneTopConstraint = nil
-            multiPaneBottomConstraint = nil
-        }
-        isMultiPaneMode = false
-        logger.info("🔄 ✅ Cleaned up multi-pane mode")
-    }
-    
-    /// Transition from single surface mode to multi-pane mode
-    private func transitionToMultiPaneMode() {
-        guard let tmuxManager = viewModel?.tmuxManager else { return }
-        
-        // Hide the single surface view
-        surfaceView?.isHidden = true
-        
-        // Create and add the multi-pane hosting controller
-        var multiPaneView = TmuxMultiPaneView(sessionManager: tmuxManager)
-        multiPaneView.shortcutDelegate = self  // Wire up keyboard shortcuts
-        let hostingController = UIHostingController(rootView: multiPaneView)
-        multiPaneHostingController = hostingController
-        
-        // Add as child view controller
-        addChild(hostingController)
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(hostingController.view)
-        
-        // Create constraints that match the surface view constraints
-        let topConstraint = hostingController.view.topAnchor.constraint(equalTo: view.topAnchor, constant: surfaceTopConstraint?.constant ?? 0)
-        let bottomConstraint = hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: surfaceBottomConstraint?.constant ?? 0)
-        
-        multiPaneTopConstraint = topConstraint
-        multiPaneBottomConstraint = bottomConstraint
-        
-        NSLayoutConstraint.activate([
-            topConstraint,
-            bottomConstraint,
-            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-        
-        hostingController.didMove(toParent: self)
-        
-        // Set transparent background to show through to our view background
-        hostingController.view.backgroundColor = .clear
-        
-        // Add UIKit divider overlay ON TOP of the SwiftUI view for drag handling
-        let overlay = DividerOverlayView()
-        overlay.translatesAutoresizingMaskIntoConstraints = false
-        
-        // On drag end: update local layout and commit to tmux
-        // We don't update during drag - the blue indicator provides visual feedback
-        overlay.onDragEnded = { [weak tmuxManager] paneId, ratio in
-            // Update local UI and sync to tmux
-            tmuxManager?.updateSplitRatioAndSync(forPaneId: paneId, ratio: ratio)
-        }
-        view.addSubview(overlay)
-        dividerOverlayView = overlay
-        
-        NSLayoutConstraint.activate([
-            overlay.topAnchor.constraint(equalTo: hostingController.view.topAnchor),
-            overlay.bottomAnchor.constraint(equalTo: hostingController.view.bottomAnchor),
-            overlay.leadingAnchor.constraint(equalTo: hostingController.view.leadingAnchor),
-            overlay.trailingAnchor.constraint(equalTo: hostingController.view.trailingAnchor)
-        ])
-        
-        // Observe split tree changes to update divider positions
-        dividerTreeObserver = tmuxManager.$currentSplitTree
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak overlay] tree in
-                guard let self = self, let overlay = overlay else { return }
-                let size = self.multiPaneHostingController?.view.bounds.size ?? .zero
-                overlay.updateDividers(from: tree, containerSize: size)
-            }
-        
-        isMultiPaneMode = true
-    }
-    
-    /// Transition from multi-pane mode back to single surface mode
-    private func transitionToSingleSurfaceMode() {
-        guard isMultiPaneMode else { 
-            logger.warning("🔄 transitionToSingleSurfaceMode called but NOT in multi-pane mode!")
-            return 
-        }
-        
-        logger.info("🔄 Transitioning to single surface mode")
-        
-        // Get the primary surface from TmuxSessionManager
-        guard let tmuxManager = viewModel?.tmuxManager,
-              let primarySurface = tmuxManager.primarySurface else {
-            logger.warning("🔄 ⚠️ No primary surface available from TmuxSessionManager!")
-            // Still clean up multi-pane mode even without a surface
-            cleanupMultiPaneMode()
-            return
-        }
-        
-        logger.info("🔄 Got primarySurface: \(primarySurface), current superview: \(String(describing: primarySurface.superview))")
-        
-        // Clean up the multi-pane hosting controller FIRST
-        // This destroys the SwiftUI view that contains the surface
-        cleanupMultiPaneMode()
-        
-        // Now the surface should have no superview (SwiftUI container is gone)
-        // If it still has a superview, remove it
-        if primarySurface.superview != nil {
-            logger.info("🔄 Surface still has superview after cleanup, removing")
-            primarySurface.removeFromSuperview()
-        }
-        
-        // Re-add primary surface to our view hierarchy
-        primarySurface.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(primarySurface)
-        view.bringSubviewToFront(primarySurface)  // Ensure it's on top
-        
-        surfaceTopConstraint = primarySurface.topAnchor.constraint(equalTo: view.topAnchor)
-        surfaceBottomConstraint = primarySurface.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        
-        NSLayoutConstraint.activate([
-            surfaceTopConstraint!,
-            surfaceBottomConstraint!,
-            primarySurface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            primarySurface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-        
-        // Update our reference and viewModel
-        self.surfaceView = primarySurface
-        viewModel?.surfaceView = primarySurface
-        
-        // Force layout to establish the frame
-        view.layoutIfNeeded()
-        
-        logger.info("🔄 Surface frame after layout: \(primarySurface.frame)")
-        
-        // CRITICAL: Notify surface of its new size after re-parenting
-        // The surface needs to know its size changed to update its Metal rendering
-        primarySurface.sizeDidChange(primarySurface.frame.size)
-        
-        // Restore focus
-        primarySurface.isHidden = false
-        primarySurface.focusDidChange(true)
-        let becameFirstResponder = primarySurface.becomeFirstResponder()
-        
-        // isMultiPaneMode already set to false by cleanupMultiPaneMode()
-        logger.info("🔄 ✅ Transitioned to single surface mode (becameFirstResponder=\(becameFirstResponder), frame=\(primarySurface.frame))")
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -1788,151 +897,6 @@ class RawTerminalUIViewController: UIViewController {
         TerminalContainerView()
             .environmentObject(AppState())
             .environmentObject(Ghostty.App())
-    }
-}
-
-// MARK: - Ghostty Shortcut Delegate
-
-extension RawTerminalUIViewController: Ghostty.ShortcutDelegate {
-    /// Handle Ghostty-style keyboard shortcuts
-    /// Routes shortcuts to TmuxSessionManager for split/tab/window management
-    func handleShortcut(_ action: Ghostty.ShortcutAction) -> Bool {
-        guard let tmuxManager = viewModel?.tmuxManager else {
-            // Not in tmux mode - shortcuts not applicable
-            logger.debug("⌨️ Shortcut ignored - no tmux manager")
-            return false
-        }
-        
-        logger.info("⌨️ Handling shortcut: \(String(describing: action))")
-        
-        switch action {
-        // MARK: - Split Management
-        case .newSplitRight:
-            tmuxManager.splitHorizontal()
-            return true
-            
-        case .newSplitDown:
-            tmuxManager.splitVertical()
-            return true
-            
-        case .gotoSplitPrevious:
-            tmuxManager.previousPane()
-            return true
-            
-        case .gotoSplitNext:
-            tmuxManager.nextPane()
-            return true
-            
-        case .gotoSplitUp:
-            tmuxManager.navigatePane(.up)
-            return true
-            
-        case .gotoSplitDown:
-            tmuxManager.navigatePane(.down)
-            return true
-            
-        case .gotoSplitLeft:
-            tmuxManager.navigatePane(.left)
-            return true
-            
-        case .gotoSplitRight:
-            tmuxManager.navigatePane(.right)
-            return true
-            
-        case .toggleSplitZoom:
-            tmuxManager.toggleTmuxZoom()
-            return true
-            
-        case .equalizeSplits:
-            tmuxManager.equalizeSplits()
-            return true
-            
-        // MARK: - Tab/Window Management
-        case .newTab:
-            tmuxManager.newWindow()
-            return true
-            
-        case .previousTab:
-            tmuxManager.previousWindow()
-            return true
-            
-        case .nextTab:
-            tmuxManager.nextWindow()
-            return true
-            
-        case .lastTab:
-            tmuxManager.lastWindow()
-            return true
-            
-        case .gotoTab(let index):
-            tmuxManager.selectWindowByIndex(index)
-            return true
-            
-        case .closeTab:
-            tmuxManager.closeWindow()
-            return true
-            
-        case .closeWindow:
-            // On iOS, close window means close the tab (tmux window)
-            tmuxManager.closeWindow()
-            return true
-            
-        case .closeSurface:
-            // Close current pane
-            tmuxManager.closePane()
-            return true
-            
-        case .newWindow:
-            // On iOS, new window means new tmux window (tab)
-            tmuxManager.newWindow()
-            return true
-            
-        // MARK: - Connection Management
-        case .reconnect:
-            // Post notification for reconnect (handled by ContentView)
-            NotificationCenter.default.post(name: .terminalReconnect, object: nil)
-            return true
-            
-        case .disconnect:
-            // Post notification for disconnect
-            NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
-            return true
-            
-        // MARK: - Window Operations
-        case .renameWindow:
-            // Show rename dialog
-            showRenameWindowDialog(tmuxManager: tmuxManager)
-            return true
-        }
-    }
-    
-    /// Show a dialog to rename the current tmux window
-    private func showRenameWindowDialog(tmuxManager: TmuxSessionManager) {
-        let alert = UIAlertController(
-            title: "Rename Window",
-            message: "Enter a new name for the tmux window",
-            preferredStyle: .alert
-        )
-        
-        // Get current window name
-        let currentName = tmuxManager.windows[tmuxManager.focusedWindowId]?.name ?? ""
-        
-        alert.addTextField { textField in
-            textField.text = currentName
-            textField.placeholder = "Window name"
-            textField.autocapitalizationType = .none
-            textField.autocorrectionType = .no
-            textField.clearButtonMode = .whileEditing
-        }
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Rename", style: .default) { [weak tmuxManager] _ in
-            if let newName = alert.textFields?.first?.text, !newName.isEmpty {
-                tmuxManager?.renameWindow(newName)
-            }
-        })
-        
-        present(alert, animated: true)
     }
 }
 
