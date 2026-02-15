@@ -8,8 +8,6 @@
 
 import Foundation
 import os.log
-import Combine
-
 private let logger = Logger(subsystem: "com.geistty", category: "TmuxSession")
 
 // MARK: - Connection State
@@ -43,9 +41,6 @@ class TmuxSessionManager: ObservableObject {
     
     /// All windows in the current session
     @Published private(set) var windows: [String: TmuxWindow] = [:]
-    
-    /// All panes in the current session
-    @Published private(set) var panes: [String: TmuxPane] = [:]
     
     /// Currently focused pane ID (empty until first layout/output event resolves it)
     @Published private(set) var focusedPaneId: String = ""
@@ -110,10 +105,6 @@ class TmuxSessionManager: ObservableObject {
     
     /// Write function to send data to SSH
     private var writeToSSH: ((String) -> Void)?
-    
-    // MARK: - Subscriptions
-    
-    private var cancellables = Set<AnyCancellable>()
     
     // MARK: - Initialization
     
@@ -181,7 +172,6 @@ class TmuxSessionManager: ObservableObject {
         currentSession = nil
         sessions.removeAll()
         windows.removeAll()
-        panes.removeAll()
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
         
@@ -686,7 +676,9 @@ class TmuxSessionManager: ObservableObject {
     func newWindow(name: String? = nil) {
         var cmd = "new-window"
         if let name = name {
-            cmd += " -n '\(name)'"
+            // Escape single quotes in name to prevent command injection
+            let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
+            cmd += " -n '\(safeName)'"
         }
         sendCommandFireAndForget(cmd)
     }
@@ -698,6 +690,7 @@ class TmuxSessionManager: ObservableObject {
     
     /// Close a specific window by ID
     func closeWindow(windowId: String) {
+        // Window IDs are system-generated (@N format) — no user input to escape
         sendCommandFireAndForget("kill-window -t '\(windowId)'")
     }
     
@@ -1097,7 +1090,6 @@ class TmuxSessionManager: ObservableObject {
         
         sessions.removeAll()
         windows.removeAll()
-        panes.removeAll()
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
         currentSession = nil
@@ -1116,20 +1108,9 @@ class TmuxSessionManager: ObservableObject {
 // MARK: - Convenience Extensions
 
 extension TmuxSessionManager {
-    /// Get the focused pane
-    var focusedPane: TmuxPane? {
-        return panes[focusedPaneId]
-    }
-    
     /// Get the focused window
     var focusedWindow: TmuxWindow? {
         return windows[focusedWindowId]
-    }
-    
-    /// Get panes for a window
-    func panes(for windowId: String) -> [TmuxPane] {
-        guard let window = windows[windowId] else { return [] }
-        return window.paneIds.compactMap { panes[$0] }
     }
     
     /// Get windows for current session

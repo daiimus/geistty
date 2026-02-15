@@ -151,7 +151,8 @@ struct TmuxSplitTree: Equatable {
         /// tmux layouts can have N children, but our tree is binary.
         func buildSplit(from children: [TmuxLayout], direction: Direction) -> Node {
             guard !children.isEmpty else {
-                fatalError("Empty children in tmux layout")
+                logger.error("Empty children in tmux layout — returning placeholder pane")
+                return .leaf(paneId: -1, cols: 80, rows: 24)
             }
             
             if children.count == 1 {
