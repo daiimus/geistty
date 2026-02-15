@@ -210,20 +210,183 @@ class TmuxSessionManager: ObservableObject {
     
     // MARK: - Notification Handling
     
+    /// Snapshot of tmux state queried from the C API.
+    /// Decoupled from Ghostty types so the reconciliation logic can be unit tested.
+    struct TmuxStateSnapshot {
+        /// Window info (id, name, layout string) — ordered by window index
+        struct WindowInfo {
+            let id: Int
+            let name: String
+            let layout: String?
+        }
+        let windows: [WindowInfo]
+        /// Active window ID from the tmux server, or -1 if none
+        let activeWindowId: Int
+        /// All pane IDs currently known to the tmux viewer
+        let paneIds: [Int]
+    }
+    
     /// Handle TMUX_STATE_CHANGED from Ghostty's native tmux viewer.
     /// This is the primary state update path in the native Ghostty tmux architecture.
     /// Called from SSHSession's notification observer when Ghostty fires
     /// GHOSTTY_ACTION_TMUX_STATE_CHANGED with window_count and pane_count.
     ///
-    /// Currently this is a minimal stub — window/pane state tracking will be
-    /// enhanced when we add C API functions to expose layout geometry from
-    /// Ghostty's viewer.
+    /// Queries the new window C API to populate the windows dict, parse layouts
+    /// into split trees, set the active window, and reconcile pane surfaces.
     func handleTmuxStateChanged(windowCount: Int, paneCount: Int) {
-        logger.info("Ghostty tmux state changed: \(windowCount) windows, \(paneCount) panes")
+        guard let surface = primarySurface else {
+            logger.warning("handleTmuxStateChanged: no primarySurface, cannot query C API")
+            return
+        }
         
-        // TODO: Use ghostty_surface_tmux_pane_ids() to get actual pane IDs
-        // and reconcile with our local state. For now, just log the counts.
-        // Future work: expose layout geometry via C API and update split trees.
+        logger.info("handleTmuxStateChanged: \(windowCount) windows, \(paneCount) panes")
+        
+        // --- 1. Query window info from C API ---
+        let windowInfos = surface.getAllTmuxWindows()
+        let activeWindowId = surface.tmuxActiveWindowId
+        let paneIds = surface.getTmuxPaneIds()
+        
+        logger.info("  C API: \(windowInfos.count) windows, activeWindowId=\(activeWindowId), paneIds=\(paneIds)")
+        
+        // Build snapshot from C API data
+        let snapshot = TmuxStateSnapshot(
+            windows: windowInfos.enumerated().map { index, info in
+                TmuxStateSnapshot.WindowInfo(
+                    id: info.id,
+                    name: info.name,
+                    layout: surface.getTmuxWindowLayout(at: index)
+                )
+            },
+            activeWindowId: activeWindowId,
+            paneIds: paneIds
+        )
+        
+        // Reconcile state and get the pane ID to activate
+        let activePaneId = reconcileTmuxState(snapshot)
+        
+        // --- Surface reconciliation (requires real Ghostty surface) ---
+        let allActivePaneIds = Set(paneIds.map { "%\($0)" })
+        
+        // Create surfaces for new panes
+        for paneId in allActivePaneIds {
+            if paneSurfaces[paneId] == nil {
+                logger.info("  Creating surface for new pane \(paneId)")
+                _ = getSurfaceOrCreate(for: paneId)
+            }
+        }
+        
+        // Remove surfaces for panes that no longer exist
+        let orphanedPaneIds = Set(paneSurfaces.keys).subtracting(allActivePaneIds)
+        for paneId in orphanedPaneIds {
+            logger.info("  Removing orphaned surface for pane \(paneId)")
+            
+            // Check if primary surface is being removed
+            if paneSurfaces[paneId] === primarySurface {
+                reassignPrimarySurface(excludingPaneId: paneId, fromPaneIds: allActivePaneIds)
+            }
+            
+            removeSurface(for: paneId, paneActuallyClosed: true)
+        }
+        
+        // Set active pane on the Ghostty surface for rendering
+        if let numericPaneId = activePaneId {
+            surface.setActiveTmuxPane(numericPaneId)
+        }
+        
+        logger.info("handleTmuxStateChanged complete: focusedWindow=\(focusedWindowId), focusedPane=\(focusedPaneId), windows=\(windows.count), splitTrees=\(windowSplitTrees.count)")
+    }
+    
+    /// Pure state reconciliation: builds windows dict, parses layouts into split trees,
+    /// determines focused window/pane. Returns the numeric pane ID to activate (or nil).
+    ///
+    /// This method updates `windows`, `windowSplitTrees`, `currentSplitTree`,
+    /// `focusedWindowId`, and `focusedPaneId`. It does NOT touch surfaces.
+    func reconcileTmuxState(_ snapshot: TmuxStateSnapshot) -> Int? {
+        // --- 2. Build windows dict ---
+        var newWindows: [String: TmuxWindow] = [:]
+        for (index, winInfo) in snapshot.windows.enumerated() {
+            let windowId = "@\(winInfo.id)"
+            
+            var window = TmuxWindow(
+                id: windowId,
+                index: index,
+                name: winInfo.name,
+                sessionId: currentSession?.id ?? "$0"
+            )
+            window.layout = winInfo.layout
+            
+            newWindows[windowId] = window
+        }
+        
+        // --- 3. Parse layouts into split trees ---
+        var newSplitTrees: [String: TmuxSplitTree] = [:]
+        for (windowId, window) in newWindows {
+            guard let layoutStr = window.layout, !layoutStr.isEmpty else {
+                logger.debug("  Window \(windowId): no layout string")
+                continue
+            }
+            
+            do {
+                let layout = try TmuxLayout.parseWithChecksum(layoutStr)
+                let tree = TmuxSplitTree.from(layout: layout)
+                newSplitTrees[windowId] = tree
+                
+                // Back-fill pane IDs on the window model
+                let treePaneIds = tree.paneIds.map { "%\($0)" }
+                newWindows[windowId]?.paneIds = treePaneIds
+                
+                logger.info("  Window \(windowId) '\(window.name)': \(tree.paneIds.count) panes, layout parsed OK")
+            } catch {
+                logger.warning("  Window \(windowId): layout parse failed: \(error)")
+                // Keep any existing tree we had for this window
+                if let existingTree = windowSplitTrees[windowId] {
+                    newSplitTrees[windowId] = existingTree
+                }
+            }
+        }
+        
+        // --- 4. Update state atomically ---
+        windows = newWindows
+        windowSplitTrees = newSplitTrees
+        
+        // --- 5. Set focused window ---
+        let previousFocusedWindowId = focusedWindowId
+        if snapshot.activeWindowId >= 0 {
+            let newFocusedWindowId = "@\(snapshot.activeWindowId)"
+            if windows[newFocusedWindowId] != nil {
+                focusedWindowId = newFocusedWindowId
+            } else if focusedWindowId.isEmpty || windows[focusedWindowId] == nil {
+                // Active window not found — pick first window
+                focusedWindowId = snapshot.windows.first.map { "@\($0.id)" } ?? ""
+            }
+        } else if focusedWindowId.isEmpty || windows[focusedWindowId] == nil {
+            // No active window from C API — pick first
+            focusedWindowId = snapshot.windows.first.map { "@\($0.id)" } ?? ""
+        }
+        
+        // --- 6. Update current split tree ---
+        if let tree = windowSplitTrees[focusedWindowId] {
+            currentSplitTree = tree
+        } else if !focusedWindowId.isEmpty {
+            // No tree for focused window — clear (don't show stale layout)
+            currentSplitTree = TmuxSplitTree()
+        }
+        
+        // --- 7. Update focused pane ---
+        // If the focused window changed, update focusedPaneId to the first pane of the new window
+        if focusedWindowId != previousFocusedWindowId || focusedPaneId.isEmpty {
+            if let tree = windowSplitTrees[focusedWindowId],
+               let firstPaneId = tree.paneIds.first {
+                let newFocusedPaneId = "%\(firstPaneId)"
+                if focusedPaneId != newFocusedPaneId {
+                    focusedPaneId = newFocusedPaneId
+                    logger.info("  Focused pane set to \(focusedPaneId) (from window \(focusedWindowId))")
+                }
+            }
+        }
+        
+        // Return the numeric pane ID to activate on the surface
+        return TmuxId.numericPaneId(focusedPaneId)
     }
     
 
@@ -579,6 +742,8 @@ class TmuxSessionManager: ObservableObject {
             // Update focused pane to first pane in this window
             if let firstPaneId = tree.paneIds.first {
                 focusedPaneId = "%\(firstPaneId)"
+                // Swap the Ghostty renderer to show this pane's terminal
+                primarySurface?.setActiveTmuxPane(firstPaneId)
             }
         } else {
             // No split tree yet — in native Ghostty mode, select-window triggers
@@ -655,6 +820,10 @@ class TmuxSessionManager: ObservableObject {
         if focusedPaneId != paneId {
             logger.info("🎯 Focus changed to pane \(paneId)")
             focusedPaneId = paneId
+            // Swap the Ghostty renderer to show this pane's terminal
+            if let numericPaneId = TmuxId.numericPaneId(paneId) {
+                primarySurface?.setActiveTmuxPane(numericPaneId)
+            }
         }
     }
     

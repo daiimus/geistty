@@ -2818,6 +2818,95 @@ extension Ghostty {
             ghostty_surface_tmux_reset_active_pane(surface)
         }
         
+        // MARK: - tmux Window API
+        
+        /// Get the number of tmux windows (0 if not in tmux mode)
+        var tmuxWindowCount: Int {
+            guard let surface = surface else { return 0 }
+            return Int(ghostty_surface_tmux_window_count(surface))
+        }
+        
+        /// Info about a tmux window returned from the C API
+        struct TmuxWindowInfo {
+            let id: Int
+            let width: Int
+            let height: Int
+            let name: String
+        }
+        
+        /// Get info about a tmux window by index.
+        /// Returns nil only if index is out of bounds or not in tmux mode.
+        /// Note: window @0 is valid — we distinguish "no window" by checking
+        /// that ALL fields are zero (which can't happen for a real window since
+        /// width/height are always > 0 in tmux).
+        func getTmuxWindowInfo(at index: Int) -> TmuxWindowInfo? {
+            guard let surface = surface else { return nil }
+            
+            // 256 bytes is plenty for a window name
+            var nameBuf = [UInt8](repeating: 0, count: 256)
+            let info = ghostty_surface_tmux_window_info(
+                surface,
+                index,
+                &nameBuf,
+                nameBuf.count
+            )
+            
+            // Zeroed struct means out of bounds or not in tmux mode.
+            // A real window always has width > 0 and height > 0.
+            guard info.width > 0 || info.height > 0 else {
+                return nil
+            }
+            
+            let copyLen = min(Int(info.name_len), nameBuf.count)
+            let name = String(bytes: nameBuf.prefix(copyLen), encoding: .utf8) ?? ""
+            
+            return TmuxWindowInfo(
+                id: Int(info.id),
+                width: Int(info.width),
+                height: Int(info.height),
+                name: name
+            )
+        }
+        
+        /// Get all tmux window infos
+        func getAllTmuxWindows() -> [TmuxWindowInfo] {
+            let count = tmuxWindowCount
+            guard count > 0 else { return [] }
+            
+            var windows: [TmuxWindowInfo] = []
+            for i in 0..<count {
+                if let info = getTmuxWindowInfo(at: i) {
+                    windows.append(info)
+                }
+            }
+            return windows
+        }
+        
+        /// Get the raw tmux layout string for a window by index
+        func getTmuxWindowLayout(at index: Int) -> String? {
+            guard let surface = surface else { return nil }
+            
+            // Layout strings are typically under 1KB even for complex layouts
+            var buf = [UInt8](repeating: 0, count: 4096)
+            let actualLen = ghostty_surface_tmux_window_layout(
+                surface,
+                index,
+                &buf,
+                buf.count
+            )
+            
+            guard actualLen > 0 else { return nil }
+            
+            let copyLen = min(Int(actualLen), buf.count)
+            return String(bytes: buf.prefix(copyLen), encoding: .utf8)
+        }
+        
+        /// Get the active tmux window ID (-1 if none)
+        var tmuxActiveWindowId: Int {
+            guard let surface = surface else { return -1 }
+            return Int(ghostty_surface_tmux_active_window_id(surface))
+        }
+        
         // MARK: - Search
         
         /// Start a search (opens UI, Ghostty will callback with START_SEARCH action)
