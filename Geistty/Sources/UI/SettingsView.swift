@@ -32,18 +32,6 @@ class AppSettings: ObservableObject {
     
     private init() {}
     
-    // Available color themes (Ghostty themes)
-    static let colorThemes = [
-        "Default",
-        "Dracula",
-        "Solarized Dark",
-        "Solarized Light",
-        "Nord",
-        "Gruvbox Dark",
-        "One Dark",
-        "Tokyo Night"
-    ]
-    
     // Available monospace fonts on iOS
     // Note: Font list now centralized in FontMapping.swift
     static let fontFamilies = FontMapping.allDisplayNames
@@ -260,8 +248,8 @@ struct SettingsView: View {
                 NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
             }
             .onChange(of: themeManager.selectedTheme.id) { _, _ in
-                ConfigSyncManager.shared.updateTheme(themeManager.selectedTheme)
-                // Immediately reload so theme change is visible
+                // ThemeManager.selectTheme() already writes `theme = <name>` to config file
+                // Just reload so Ghostty picks up the change
                 NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
             }
             .onChange(of: settings.backgroundOpacity) { _, newValue in

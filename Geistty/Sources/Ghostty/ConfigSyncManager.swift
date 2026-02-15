@@ -81,24 +81,53 @@ class ConfigSyncManager: ObservableObject {
         }
     }
     
-    /// Update theme colors in config file (removes old colors, adds new ones)
-    /// Theme colors are inline because iOS doesn't have Ghostty's theme directory
-    func updateThemeColors(_ theme: TerminalTheme) {
+    /// Update theme colors in config file
+    /// Writes `theme = <name>` — Ghostty resolves the theme file natively
+    /// via GHOSTTY_RESOURCES_DIR pointing at our bundle. Also removes any old
+    /// inline color entries that were injected by the previous theme system.
+    /// When "Default" is selected, removes the theme line entirely so Ghostty
+    /// uses its built-in defaults.
+    func updateTheme(_ themeName: String) {
         // Read current config
-        var content = (try? String(contentsOf: configFilePath, encoding: .utf8)) ?? ""
+        let content = (try? String(contentsOf: configFilePath, encoding: .utf8)) ?? ""
         
-        // Color keys to remove/replace
-        let colorKeys = Set(["background", "foreground", "cursor-color", "cursor-text", 
-                             "selection-background", "selection-foreground", "palette", "theme"])
+        // Transform config
+        let updated = Self.applyTheme(themeName, to: content)
         
-        // Filter out existing color lines and theme comments
-        let lines = content.components(separatedBy: "\n")
+        // Write back to file
+        do {
+            try updated.write(to: configFilePath, atomically: true, encoding: .utf8)
+            logger.info("Updated theme to: \(themeName)")
+        } catch {
+            logger.error("Failed to update theme: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Pure Transformations (testable)
+    
+    /// Color keys that the old theme system injected inline.
+    /// Used by `applyTheme` to strip them so Ghostty's native theme resolution
+    /// has a clean slate.
+    static let inlineColorKeys = Set([
+        "background", "foreground", "cursor-color", "cursor-text",
+        "selection-background", "selection-foreground", "palette"
+    ])
+    
+    /// Pure function: transform a config string to apply a theme.
+    /// - Strips old inline color entries (`palette`, `background`, etc.)
+    /// - Strips old `# Theme:` comment lines
+    /// - Replaces or appends `theme = <name>` (or removes it for "Default")
+    /// - Preserves all other config lines unchanged
+    static func applyTheme(_ themeName: String, to configString: String) -> String {
+        let isDefault = themeName == "Default"
+        let lines = configString.components(separatedBy: "\n")
         var updatedLines: [String] = []
+        var foundThemeLine = false
         
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             
-            // Skip old theme comment lines
+            // Skip old theme comment lines (e.g., "# Theme: Dracula+")
             if trimmed.hasPrefix("# Theme:") {
                 continue
             }
@@ -109,11 +138,20 @@ class ConfigSyncManager: ObservableObject {
                 continue
             }
             
-            // Check if this is a color key we're replacing
+            // Check if this is an inline color key to remove
             if let equalsIndex = trimmed.firstIndex(of: "=") {
                 let lineKey = trimmed[..<equalsIndex].trimmingCharacters(in: .whitespaces)
-                if colorKeys.contains(lineKey) {
-                    // Skip this line - we'll add new colors at the end
+                if inlineColorKeys.contains(lineKey) {
+                    // Skip old inline color entries
+                    continue
+                }
+                if lineKey == "theme" {
+                    if isDefault {
+                        // Default = no theme line, use Ghostty built-in colors
+                    } else {
+                        updatedLines.append("theme = \(themeName)")
+                    }
+                    foundThemeLine = true
                     continue
                 }
             }
@@ -121,45 +159,12 @@ class ConfigSyncManager: ObservableObject {
             updatedLines.append(line)
         }
         
-        // Remove trailing empty lines before adding theme section
-        while let last = updatedLines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
-            updatedLines.removeLast()
+        // If no theme line existed and not using default, append it
+        if !foundThemeLine && !isDefault {
+            updatedLines.append("theme = \(themeName)")
         }
         
-        // Add theme comment and colors
-        updatedLines.append("")
-        updatedLines.append("# Theme: \(theme.name)")
-        
-        // Add palette
-        for (index, color) in theme.palette.enumerated() {
-            updatedLines.append("palette = \(index)=\(color.hexString)")
-        }
-        
-        // Add main colors
-        updatedLines.append("background = \(theme.background.hexString)")
-        updatedLines.append("foreground = \(theme.foreground.hexString)")
-        
-        if let cursor = theme.cursorColor {
-            updatedLines.append("cursor-color = \(cursor.hexString)")
-        }
-        if let cursorText = theme.cursorText {
-            updatedLines.append("cursor-text = \(cursorText.hexString)")
-        }
-        if let selBg = theme.selectionBackground {
-            updatedLines.append("selection-background = \(selBg.hexString)")
-        }
-        if let selFg = theme.selectionForeground {
-            updatedLines.append("selection-foreground = \(selFg.hexString)")
-        }
-        
-        // Write back to file
-        content = updatedLines.joined(separator: "\n")
-        do {
-            try content.write(to: configFilePath, atomically: true, encoding: .utf8)
-            logger.info("Updated theme to: \(theme.name)")
-        } catch {
-            logger.error("Failed to update theme: \(error.localizedDescription)")
-        }
+        return updatedLines.joined(separator: "\n")
     }
     
     // MARK: - Config File → GUI
@@ -220,26 +225,19 @@ class ConfigSyncManager: ObservableObject {
                 logger.debug("Set font-thicken: \(boolValue)")
                 
             case "theme":
-                // Theme name from config - save to UserDefaults first
+                // Sync theme name to ThemeManager for UI display (theme picker selection)
                 defaults.set(value, forKey: "terminal.colorTheme")
                 defaults.synchronize()
-                logger.debug("Searching for theme: '\\(value)'")
                 
-                // Find matching theme
+                // Update ThemeManager's selected theme for UI preview
                 let availableThemes = ThemeManager.shared.themes
-                logger.debug("Available themes: \\(availableThemes.map { $0.name })")
-                
                 if let theme = availableThemes.first(where: { 
                     $0.name.lowercased() == value.lowercased() ||
                     $0.id.lowercased() == value.lowercased()
                 }) {
-                    logger.info("Found matching theme: \\(theme.name)")
                     DispatchQueue.main.async {
                         ThemeManager.shared.selectedTheme = theme
-                        logger.debug("Set ThemeManager.selectedTheme to: \\(theme.name)")
                     }
-                } else {
-                    logger.warning("⚠️ No matching theme found for: '\\(value)'")
                 }
                 
             default:
@@ -275,9 +273,9 @@ class ConfigSyncManager: ObservableObject {
         updateConfigValue(key: "font-thicken", value: enabled ? "true" : "false")
     }
     
-    /// Update theme in config file (writes inline colors)
-    func updateTheme(_ theme: TerminalTheme) {
-        updateThemeColors(theme)
+    /// Update theme in config file — writes `theme = <name>` and strips old inline colors
+    func updateTheme(named themeName: String) {
+        updateTheme(themeName)
     }
     
     /// Update background opacity in config file

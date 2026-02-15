@@ -181,7 +181,7 @@ class ThemeManager: ObservableObject {
         var loadedThemes: [TerminalTheme] = [.default]
         
         // Get themes from bundle
-        guard let themesURL = Bundle.main.resourceURL?.appendingPathComponent("Themes") else {
+        guard let themesURL = Bundle.main.resourceURL?.appendingPathComponent("themes") else {
             themes = loadedThemes
             return
         }
@@ -207,40 +207,15 @@ class ThemeManager: ObservableObject {
         themes = loadedThemes
     }
     
-    /// Select a theme and save to UserDefaults
+    /// Select a theme and update config file
+    /// Ghostty resolves the theme natively via GHOSTTY_RESOURCES_DIR
     func selectTheme(_ theme: TerminalTheme) {
         selectedTheme = theme
         UserDefaults.standard.set(theme.name, forKey: "terminal.colorTheme")
         UserDefaults.standard.synchronize()
-    }
-    
-    /// Get the Ghostty config string for the selected theme
-    func getThemeConfigString() -> String {
-        var config = ""
         
-        // Add palette entries
-        for (index, color) in selectedTheme.palette.enumerated() {
-            config += "palette = \(index)=\(color.hexString)\n"
-        }
-        
-        // Add main colors
-        config += "background = \(selectedTheme.background.hexString)\n"
-        config += "foreground = \(selectedTheme.foreground.hexString)\n"
-        
-        if let cursor = selectedTheme.cursorColor {
-            config += "cursor-color = \(cursor.hexString)\n"
-        }
-        if let cursorText = selectedTheme.cursorText {
-            config += "cursor-text = \(cursorText.hexString)\n"
-        }
-        if let selBg = selectedTheme.selectionBackground {
-            config += "selection-background = \(selBg.hexString)\n"
-        }
-        if let selFg = selectedTheme.selectionForeground {
-            config += "selection-foreground = \(selFg.hexString)\n"
-        }
-        
-        return config
+        // Write `theme = <name>` to config file and strip old inline colors
+        ConfigSyncManager.shared.updateTheme(named: theme.name)
     }
 }
 
