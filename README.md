@@ -186,7 +186,7 @@ geistty/
 |------------|---------|---------|
 | [Ghostty](https://github.com/ghostty-org/ghostty) | MIT | Terminal emulation engine (Zig, our fork) |
 | [SwiftNIO-SSH](https://github.com/daiimus/swift-nio-ssh) | Apache 2.0 | SSH transport (our fork with RSA support) |
-| [libxev](https://github.com/Cloudef/libxev) | MIT | Event loop for Ghostty (iOS kqueue fork) |
+| [libxev](https://github.com/mitchellh/libxev) | MIT | Event loop (used by Ghostty internally) |
 | [Departure Mono](https://departuremono.com/) | OFL | Default terminal font |
 
 ## Acknowledgments

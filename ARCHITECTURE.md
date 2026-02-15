@@ -558,7 +558,7 @@ Our fork (`daiimus/ghostty`, branch `ios-external-backend`) adds or modifies the
 | 4 | `dca26cf` | Data race fix on tmux viewer and active_pane_id |
 | 5 | `236c89a` | Command swallowing fix |
 | 6 | `b54acee` | Blank screen fix after capture-pane restore |
-| 7 | `1b59b70` | libxev sync to upstream |
+| 7 | `1b59b70` | libxev dependency update |
 | 8 | `aa6c99b` | Resize callback for External backend |
 | 9 | `0a8c369` | tmux resize: data race fix, startup catch-up, pane terminal resize |
 | 10 | `216ff75` | Use-after-free fix in `renderer_state.terminal` after `syncLayouts` |
