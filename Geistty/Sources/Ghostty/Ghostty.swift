@@ -110,13 +110,83 @@ extension Ghostty {
             return documentsPath.appendingPathComponent("ghostty.conf")
         }
         
-        /// Background color from config (default to dark)
+        // MARK: - Config Introspection via ghostty_config_get()
+        // Follows upstream macOS Ghostty pattern: each property calls
+        // ghostty_config_get() with a typed pointer. The Zig side dispatches
+        // on the pointer type to return the correct value.
+        
+        /// Background color from finalized config
         var backgroundColor: UIColor {
-            // TODO: Read from actual config once we parse it
-            return UIColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+            var color: ghostty_config_color_s = .init()
+            let key = "background"
+            if (!ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8)))) {
+                return UIColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+            }
+            return UIColor(
+                red: CGFloat(color.r) / 255,
+                green: CGFloat(color.g) / 255,
+                blue: CGFloat(color.b) / 255,
+                alpha: 1.0
+            )
         }
         
+        /// Foreground color from finalized config
+        var foregroundColor: UIColor {
+            var color: ghostty_config_color_s = .init()
+            let key = "foreground"
+            if (!ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8)))) {
+                return UIColor.white
+            }
+            return UIColor(
+                red: CGFloat(color.r) / 255,
+                green: CGFloat(color.g) / 255,
+                blue: CGFloat(color.b) / 255,
+                alpha: 1.0
+            )
+        }
+        
+        // NOTE: font-family is a RepeatableString in Ghostty's Zig config.
+        // ghostty_config_get() has no handler for this type (c_get.zig returns false).
+        // Font family must be read from the config file directly.
+        // See: Config.zig line 5679 (RepeatableString), c_get.zig line 67-85 (struct dispatch)
+        
+        /// Cursor style from finalized config (block, bar, underline)
+        var cursorStyle: String {
+            var v: UnsafePointer<Int8>? = nil
+            let key = "cursor-style"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return "block" }
+            guard let ptr = v else { return "block" }
+            return String(cString: ptr)
+        }
+        
+        /// Font thicken setting from finalized config
+        var fontThicken: Bool {
+            var v = true
+            let key = "font-thicken"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+        
+        /// Background opacity from finalized config
+        var backgroundOpacity: Double {
+            var v: Double = 1
+            let key = "background-opacity"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+        
+        // NOTE: theme is a ?Theme struct (light/dark pair) in Ghostty's Zig config.
+        // ghostty_config_get() has no handler for Theme (no cval(), not packed).
+        // Theme name must be read from the config file directly.
+        // See: Config.zig line 9373 (Theme struct), c_get.zig line 67-85 (struct dispatch)
+        
         init?() {
+            // Ghostty runtime must be initialized before creating configs
+            guard App.isInitialized else {
+                logger.warning("Config.init skipped: Ghostty runtime not initialized")
+                return nil
+            }
+            
             guard let cfg = ghostty_config_new() else {
                 logger.error("ghostty_config_new returned nil")
                 return nil
@@ -294,7 +364,7 @@ extension Ghostty {
         private(set) var app: ghostty_app_t?
         
         /// Static flag to track if ghostty_init has been called
-        private static var isInitialized = false
+        fileprivate static var isInitialized = false
         
         /// Initialize the Ghostty runtime (must be called before any other Ghostty API)
         private static func initializeRuntime() -> Bool {

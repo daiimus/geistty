@@ -71,6 +71,7 @@
 		D1000020 /* TmuxSessionNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000020 /* TmuxSessionNameResolverTests.swift */; };
 		D1000023 /* ResizeTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000023 /* ResizeTimingTests.swift */; };
 		D1000024 /* ConfigSyncThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000024 /* ConfigSyncThemeTests.swift */; };
+		D1000025 /* ConfigIntrospectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000025 /* ConfigIntrospectionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -180,6 +181,7 @@
 		D2000022 /* TmuxViewerReadyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxViewerReadyTests.swift; sourceTree = "<group>"; };
 		D2000023 /* ResizeTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResizeTimingTests.swift; sourceTree = "<group>"; };
 		D2000024 /* ConfigSyncThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSyncThemeTests.swift; sourceTree = "<group>"; };
+		D2000025 /* ConfigIntrospectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigIntrospectionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -380,6 +382,7 @@
 				D2000022 /* TmuxViewerReadyTests.swift */,
 				D2000023 /* ResizeTimingTests.swift */,
 				D2000024 /* ConfigSyncThemeTests.swift */,
+				D2000025 /* ConfigIntrospectionTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -591,6 +594,7 @@
 				D1000022 /* TmuxViewerReadyTests.swift in Sources */,
 				D1000023 /* ResizeTimingTests.swift in Sources */,
 				D1000024 /* ConfigSyncThemeTests.swift in Sources */,
+				D1000025 /* ConfigIntrospectionTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
