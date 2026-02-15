@@ -19,6 +19,12 @@
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
 		A10000A3 /* TerminalToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A3 /* TerminalToolbar.swift */; };
+		A10000A4 /* RawTerminalUIViewController+Keyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A4 /* RawTerminalUIViewController+Keyboard.swift */; };
+		A10000A5 /* RawTerminalUIViewController+MenuBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A5 /* RawTerminalUIViewController+MenuBar.swift */; };
+		A10000A6 /* RawTerminalUIViewController+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A6 /* RawTerminalUIViewController+Search.swift */; };
+		A10000A7 /* RawTerminalUIViewController+Shortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A7 /* RawTerminalUIViewController+Shortcuts.swift */; };
+		A10000A8 /* RawTerminalUIViewController+Tmux.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A8 /* RawTerminalUIViewController+Tmux.swift */; };
+		A10000A9 /* RawTerminalUIViewController+WindowPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A9 /* RawTerminalUIViewController+WindowPicker.swift */; };
 		A1000004 /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* SSHSession.swift */; };
 		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
 		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* DepartureMono-Regular.otf */; };
@@ -127,6 +133,12 @@
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A2000003 /* TerminalContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalContainerView.swift; sourceTree = "<group>"; };
 		A20000A3 /* TerminalToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalToolbar.swift; sourceTree = "<group>"; };
+		A20000A4 /* RawTerminalUIViewController+Keyboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawTerminalUIViewController+Keyboard.swift"; sourceTree = "<group>"; };
+		A20000A5 /* RawTerminalUIViewController+MenuBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawTerminalUIViewController+MenuBar.swift"; sourceTree = "<group>"; };
+		A20000A6 /* RawTerminalUIViewController+Search.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawTerminalUIViewController+Search.swift"; sourceTree = "<group>"; };
+		A20000A7 /* RawTerminalUIViewController+Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawTerminalUIViewController+Shortcuts.swift"; sourceTree = "<group>"; };
+		A20000A8 /* RawTerminalUIViewController+Tmux.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawTerminalUIViewController+Tmux.swift"; sourceTree = "<group>"; };
+		A20000A9 /* RawTerminalUIViewController+WindowPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RawTerminalUIViewController+WindowPicker.swift"; sourceTree = "<group>"; };
 		A2000004 /* SSHSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSession.swift; sourceTree = "<group>"; };
 		A2000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000007 /* DepartureMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DepartureMono-Regular.otf"; sourceTree = "<group>"; };
@@ -255,6 +267,12 @@
 			children = (
 				A2000003 /* TerminalContainerView.swift */,
 				A20000A3 /* TerminalToolbar.swift */,
+				A20000A4 /* RawTerminalUIViewController+Keyboard.swift */,
+				A20000A5 /* RawTerminalUIViewController+MenuBar.swift */,
+				A20000A6 /* RawTerminalUIViewController+Search.swift */,
+				A20000A7 /* RawTerminalUIViewController+Shortcuts.swift */,
+				A20000A8 /* RawTerminalUIViewController+Tmux.swift */,
+				A20000A9 /* RawTerminalUIViewController+WindowPicker.swift */,
 				A2000060 /* Theme.swift */,
 				A2000087 /* TmuxMultiPaneView.swift */,
 				A2000086 /* TmuxSplitView.swift */,
@@ -548,6 +566,12 @@
 				A1000080 /* SurfaceSearchOverlay.swift in Sources */,
 				A1000003 /* TerminalContainerView.swift in Sources */,
 				A10000A3 /* TerminalToolbar.swift in Sources */,
+				A10000A4 /* RawTerminalUIViewController+Keyboard.swift in Sources */,
+				A10000A5 /* RawTerminalUIViewController+MenuBar.swift in Sources */,
+				A10000A6 /* RawTerminalUIViewController+Search.swift in Sources */,
+				A10000A7 /* RawTerminalUIViewController+Shortcuts.swift in Sources */,
+				A10000A8 /* RawTerminalUIViewController+Tmux.swift in Sources */,
+				A10000A9 /* RawTerminalUIViewController+WindowPicker.swift in Sources */,
 				A1000004 /* SSHSession.swift in Sources */,
 				A1000090 /* NIOSSHConnection.swift in Sources */,
 				A1000084 /* TmuxLayout.swift in Sources */,

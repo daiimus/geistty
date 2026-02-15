@@ -1,0 +1,111 @@
+//
+//  RawTerminalUIViewController+WindowPicker.swift
+//  Geistty
+//
+//  tmux window picker management for the terminal view controller.
+//
+
+import UIKit
+import SwiftUI
+import Combine
+import os.log
+
+private let logger = Logger(subsystem: "com.geistty", category: "Terminal")
+
+// MARK: - Window Picker
+
+extension RawTerminalUIViewController {
+    
+    /// Observe windows changes to show/hide the window picker
+    func setupWindowsObserver() {
+        guard let tmuxManager = viewModel?.tmuxManager else {
+            logger.debug("No tmux manager available for windows observation")
+            return
+        }
+        
+        // Cancel any existing observer
+        windowsObserver?.cancel()
+        
+        windowsObserver = tmuxManager.$windows
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] windows in
+                self?.handleWindowsChange(windowCount: windows.count)
+            }
+        
+        logger.info("✅ Windows observer configured")
+    }
+    
+    /// Handle windows count change - show/hide window picker
+    func handleWindowsChange(windowCount: Int) {
+        let shouldShowPicker = windowCount > 1
+        
+        if shouldShowPicker && !isShowingWindowPicker {
+            showWindowPicker()
+        } else if !shouldShowPicker && isShowingWindowPicker {
+            hideWindowPicker()
+        }
+    }
+    
+    /// Show the window picker at the top of the view
+    func showWindowPicker() {
+        guard let tmuxManager = viewModel?.tmuxManager else { return }
+        guard windowPickerHostingController == nil else { return }
+        
+        logger.info("📑 Showing window picker")
+        
+        let pickerView = TmuxWindowPickerView(sessionManager: tmuxManager)
+        let hostingController = UIHostingController(rootView: pickerView)
+        hostingController.view.backgroundColor = .clear
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        
+        addChild(hostingController)
+        view.addSubview(hostingController.view)
+        hostingController.didMove(toParent: self)
+        
+        // Position at the top, below status bar if shown
+        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
+        
+        NSLayoutConstraint.activate([
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor, constant: topInset),
+            hostingController.view.heightAnchor.constraint(equalToConstant: windowPickerHeight)
+        ])
+        
+        windowPickerHostingController = hostingController
+        isShowingWindowPicker = true
+        
+        // Adjust terminal view's top constraint to make room for the picker
+        updateTerminalTopConstraint()
+    }
+    
+    /// Hide the window picker
+    func hideWindowPicker() {
+        guard let hostingController = windowPickerHostingController else { return }
+        
+        logger.info("📑 Hiding window picker")
+        
+        hostingController.willMove(toParent: nil)
+        hostingController.view.removeFromSuperview()
+        hostingController.removeFromParent()
+        
+        windowPickerHostingController = nil
+        isShowingWindowPicker = false
+        
+        // Restore terminal view's top constraint
+        updateTerminalTopConstraint()
+    }
+    
+    /// Update the terminal view's top constraint based on window picker visibility
+    func updateTerminalTopConstraint() {
+        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
+        let pickerOffset: CGFloat = isShowingWindowPicker ? windowPickerHeight : 0
+        
+        surfaceTopConstraint?.constant = topInset + pickerOffset
+        multiPaneTopConstraint?.constant = topInset + pickerOffset
+        
+        UIView.animate(withDuration: 0.2) {
+            self.view.layoutIfNeeded()
+        }
+    }
+}
