@@ -222,15 +222,15 @@ final class SSHChannelDataHandler: ChannelInboundHandler {
 
 /// Manages an SSH connection using SwiftNIO-SSH with Network.framework
 @MainActor
-public class NIOSSHConnection: ObservableObject {
+public class NIOSSHConnection {
     // Connection parameters
     public let host: String
     public let port: Int
     public let username: String
     
     // State
-    @Published public private(set) var state: NIOSSHState = .disconnected
-    @Published public private(set) var health: ConnectionHealth = .healthy
+    public private(set) var state: NIOSSHState = .disconnected
+    public private(set) var health: ConnectionHealth = .healthy
     
     // Delegate
     public weak var delegate: NIOSSHConnectionDelegate?
