@@ -3,6 +3,7 @@ import XCTest
 
 // MARK: - ConfigSyncManager Theme Tests
 
+@MainActor
 final class ConfigSyncThemeTests: XCTestCase {
     
     // MARK: - applyTheme: Basic theme application

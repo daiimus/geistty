@@ -403,7 +403,7 @@ public class NIOSSHConnection: ObservableObject {
     private func verifyAuthentication(on channel: Channel) async throws {
         logger.info("🔐 Verifying SSH authentication...")
         
-        let sshHandler = try channel.pipeline.handler(type: NIOSSHHandler.self).wait()
+        let sshHandler = try await channel.pipeline.handler(type: NIOSSHHandler.self).get()
         
         // Attempt to create a session channel - this will fail if auth isn't complete
         let channelPromise = channel.eventLoop.makePromise(of: Channel.self)
@@ -432,7 +432,7 @@ public class NIOSSHConnection: ObservableObject {
     private func openShellChannel(on channel: Channel) async throws {
         logger.info("🖥️ Opening shell channel...")
         
-        let sshHandler = try channel.pipeline.handler(type: NIOSSHHandler.self).wait()
+        let sshHandler = try await channel.pipeline.handler(type: NIOSSHHandler.self).get()
         
         // Create child channel for the shell session
         let channelPromise = channel.eventLoop.makePromise(of: Channel.self)

@@ -160,6 +160,7 @@ extension TerminalTheme {
 
 // MARK: - Theme Manager
 
+@MainActor
 class ThemeManager: ObservableObject {
     static let shared = ThemeManager()
     
@@ -212,7 +213,6 @@ class ThemeManager: ObservableObject {
     func selectTheme(_ theme: TerminalTheme) {
         selectedTheme = theme
         UserDefaults.standard.set(theme.name, forKey: "terminal.colorTheme")
-        UserDefaults.standard.synchronize()
         
         // Write `theme = <name>` to config file and strip old inline colors
         ConfigSyncManager.shared.updateTheme(named: theme.name)

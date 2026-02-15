@@ -12,6 +12,7 @@ import os.log
 private let logger = Logger(subsystem: "com.geistty", category: "ConfigSync")
 
 /// Manages the Ghostty config file (source of truth)
+@MainActor
 class ConfigSyncManager: ObservableObject {
     static let shared = ConfigSyncManager()
     
@@ -269,9 +270,7 @@ class ConfigSyncManager: ObservableObject {
                     $0.name.lowercased() == value.lowercased() ||
                     $0.id.lowercased() == value.lowercased()
                 }) {
-                    DispatchQueue.main.async {
-                        ThemeManager.shared.selectedTheme = theme
-                    }
+                    ThemeManager.shared.selectedTheme = theme
                 }
                 
             default:

@@ -65,6 +65,7 @@ struct SSHKeyPair: Identifiable {
 }
 
 /// Manages SSH key generation, storage, and retrieval
+@MainActor
 class SSHKeyManager: ObservableObject {
     
     /// Shared instance
@@ -156,7 +157,7 @@ class SSHKeyManager: ObservableObject {
         
         var error: Unmanaged<CFError>?
         guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw error!.takeRetainedValue() as Error
+            throw (error?.takeRetainedValue() as Error?) ?? SSHKeyError.keyGenerationFailed
         }
         
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
@@ -166,12 +167,12 @@ class SSHKeyManager: ObservableObject {
         // Export private key
         var exportError: Unmanaged<CFError>?
         guard let privateKeyData = SecKeyCopyExternalRepresentation(privateKey, &exportError) as Data? else {
-            throw exportError!.takeRetainedValue() as Error
+            throw (exportError?.takeRetainedValue() as Error?) ?? SSHKeyError.keyGenerationFailed
         }
         
         // Export public key and format as OpenSSH
         guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &exportError) as Data? else {
-            throw exportError!.takeRetainedValue() as Error
+            throw (exportError?.takeRetainedValue() as Error?) ?? SSHKeyError.keyGenerationFailed
         }
         
         let publicKeyString = formatRSAPublicKey(publicKeyData, name: name)

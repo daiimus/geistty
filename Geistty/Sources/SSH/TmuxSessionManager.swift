@@ -83,7 +83,7 @@ class TmuxSessionManager: ObservableObject {
     
     /// Surface creation factory (injected before activation)
     /// This creates Ghostty surfaces with proper configuration
-    private var surfaceFactory: ((String) -> Ghostty.SurfaceView)?
+    private var surfaceFactory: ((String) -> Ghostty.SurfaceView?)?
     
     /// Callback to wire up surface input to SSH
     /// Called after surface is created to connect onWrite
@@ -409,7 +409,10 @@ class TmuxSessionManager: ObservableObject {
             }
         }
         
-        let surface = factory(paneId)
+        guard let surface = factory(paneId) else {
+            logger.warning("Surface factory returned nil for pane \(paneId) — app may be deallocating")
+            return nil
+        }
         
         // Wire up input handler for this surface
         if let inputHandler = surfaceInputHandler {
@@ -495,7 +498,7 @@ class TmuxSessionManager: ObservableObject {
     /// Configure surface management with factory and handlers
     /// Call this before any surfaces are created
     func configureSurfaceManagement(
-        factory: @escaping (String) -> Ghostty.SurfaceView,
+        factory: @escaping (String) -> Ghostty.SurfaceView?,
         inputHandler: @escaping (Ghostty.SurfaceView, String) -> Void,
         resizeHandler: @escaping (Int, Int) -> Void
     ) {
@@ -1080,9 +1083,9 @@ class TmuxSessionManager: ObservableObject {
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
         
-        // Remove all surfaces
+        // Remove all surfaces (paneActuallyClosed: true ensures %0 is also cleaned up)
         for paneId in paneSurfaces.keys {
-            removeSurface(for: paneId)
+            removeSurface(for: paneId, paneActuallyClosed: true)
         }
         
         // Clear output buffers

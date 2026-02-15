@@ -144,6 +144,7 @@ struct ConnectionProfile: Identifiable, Codable, Hashable {
 }
 
 /// Manages saved connection profiles with iCloud sync
+@MainActor
 class ConnectionProfileManager: ObservableObject {
     
     /// Shared instance

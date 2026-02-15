@@ -9,6 +9,7 @@ import XCTest
 // These tests require the Ghostty runtime (ghostty_init) to be available.
 // If the runtime cannot initialize (e.g., missing resources), tests skip gracefully.
 
+@MainActor
 final class ConfigIntrospectionTests: XCTestCase {
     
     // MARK: - ConfigSyncManager tests

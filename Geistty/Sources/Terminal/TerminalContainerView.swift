@@ -652,6 +652,9 @@ class RawTerminalUIViewController: UIViewController {
     // Settings observation
     private var settingsObserver: NSObjectProtocol?
     
+    // Menu bar notification observers (must be stored for cleanup)
+    private var menuBarObservers: [NSObjectProtocol] = []
+    
     // Keyboard observers
     private var keyboardWillShowObserver: NSObjectProtocol?
     private var keyboardWillHideObserver: NSObjectProtocol?
@@ -839,73 +842,71 @@ class RawTerminalUIViewController: UIViewController {
     }
     
     private func setupMenuBarNotifications() {
+        let nc = NotificationCenter.default
+        
         // Terminal actions
-        NotificationCenter.default.addObserver(forName: .terminalClearScreen, object: nil, queue: .main) { [weak self] _ in
+        menuBarObservers.append(nc.addObserver(forName: .terminalClearScreen, object: nil, queue: .main) { [weak self] _ in
             self?.handleClearScreen()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalReset, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalReset, object: nil, queue: .main) { [weak self] _ in
             self?.handleResetTerminal()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalIncreaseFontSize, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalIncreaseFontSize, object: nil, queue: .main) { [weak self] _ in
             self?.handleIncreaseFontSize()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalDecreaseFontSize, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalDecreaseFontSize, object: nil, queue: .main) { [weak self] _ in
             self?.handleDecreaseFontSize()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalResetFontSize, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalResetFontSize, object: nil, queue: .main) { [weak self] _ in
             self?.handleResetFontSize()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalSelectAll, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalSelectAll, object: nil, queue: .main) { [weak self] _ in
             self?.handleSelectAll()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalToggleStatusBar, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalToggleStatusBar, object: nil, queue: .main) { [weak self] _ in
             self?.toggleStatusBar()
-        }
-        NotificationCenter.default.addObserver(forName: .showKeyboardShortcuts, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .showKeyboardShortcuts, object: nil, queue: .main) { [weak self] _ in
             self?.showKeyboardShortcutsHelp()
-        }
-        NotificationCenter.default.addObserver(forName: .showSettings, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .showSettings, object: nil, queue: .main) { [weak self] _ in
             self?.handleSettingsButton()
-        }
-        NotificationCenter.default.addObserver(forName: .reloadConfiguration, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .reloadConfiguration, object: nil, queue: .main) { [weak self] _ in
             self?.reloadConfiguration()
-        }
+        })
         
         // Copy/Paste
-        NotificationCenter.default.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
-                self?.viewModel?.copy()
-            }
-        }
-        NotificationCenter.default.addObserver(forName: .terminalPaste, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
-                self?.viewModel?.paste()
-            }
-        }
+        menuBarObservers.append(nc.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
+            self?.viewModel?.copy()
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalPaste, object: nil, queue: .main) { [weak self] _ in
+            self?.viewModel?.paste()
+        })
         
         // Search/Find
-        NotificationCenter.default.addObserver(forName: .terminalFind, object: nil, queue: .main) { [weak self] _ in
+        menuBarObservers.append(nc.addObserver(forName: .terminalFind, object: nil, queue: .main) { [weak self] _ in
             self?.handleFind()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalFindNext, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalFindNext, object: nil, queue: .main) { [weak self] _ in
             self?.handleFindNext()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalFindPrevious, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalFindPrevious, object: nil, queue: .main) { [weak self] _ in
             self?.handleFindPrevious()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalHideFindBar, object: nil, queue: .main) { [weak self] _ in
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalHideFindBar, object: nil, queue: .main) { [weak self] _ in
             self?.closeSearch()
-        }
+        })
         
         // Background opacity toggle
-        NotificationCenter.default.addObserver(forName: .toggleBackgroundOpacity, object: nil, queue: .main) { [weak self] _ in
+        menuBarObservers.append(nc.addObserver(forName: .toggleBackgroundOpacity, object: nil, queue: .main) { [weak self] _ in
             self?.toggleBackgroundOpacity()
-        }
+        })
         
         // Connection management
-        NotificationCenter.default.addObserver(forName: .terminalDisconnect, object: nil, queue: .main) { [weak self] _ in
+        menuBarObservers.append(nc.addObserver(forName: .terminalDisconnect, object: nil, queue: .main) { [weak self] _ in
             self?.handleBackButton()
-        }
+        })
         // Note: terminalReconnect is handled in ContentView which has access to appState
     }
     
@@ -1393,9 +1394,10 @@ class RawTerminalUIViewController: UIViewController {
         }
         
         // Factory creates Ghostty surfaces
-        let factory: (String) -> Ghostty.SurfaceView = { [weak ghosttyApp, weak self] paneId in
+        let factory: (String) -> Ghostty.SurfaceView? = { [weak ghosttyApp, weak self] paneId in
             guard let ghosttyApp = ghosttyApp, let app = ghosttyApp.app else {
-                fatalError("Ghostty app deallocated before surface factory called")
+                logger.error("Ghostty app deallocated before surface factory called for pane \(paneId)")
+                return nil
             }
             
             logger.info("Creating Ghostty surface for pane \(paneId)")
@@ -1892,6 +1894,12 @@ class RawTerminalUIViewController: UIViewController {
             keyboardWillHideObserver = nil
         }
         
+        // Remove menu bar observers
+        for observer in menuBarObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        menuBarObservers.removeAll()
+        
         // Cancel search observer and remove overlay
         searchStateObserver?.cancel()
         searchStateObserver = nil
@@ -1923,6 +1931,10 @@ class RawTerminalUIViewController: UIViewController {
         if let observer = keyboardWillHideObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        for observer in menuBarObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        menuBarObservers.removeAll()
         searchStateObserver?.cancel()
         splitTreeObserver?.cancel()
         connectionObserver?.cancel()
