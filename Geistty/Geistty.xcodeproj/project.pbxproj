@@ -18,6 +18,7 @@
 		A1000001 /* GeisttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* GeisttyApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
+		A10000A3 /* TerminalToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A3 /* TerminalToolbar.swift */; };
 		A1000004 /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* SSHSession.swift */; };
 		A1000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* Assets.xcassets */; };
 		A1000007 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A2000007 /* DepartureMono-Regular.otf */; };
@@ -125,6 +126,7 @@
 		A2000001 /* GeisttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyApp.swift; sourceTree = "<group>"; };
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A2000003 /* TerminalContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalContainerView.swift; sourceTree = "<group>"; };
+		A20000A3 /* TerminalToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalToolbar.swift; sourceTree = "<group>"; };
 		A2000004 /* SSHSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSession.swift; sourceTree = "<group>"; };
 		A2000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000007 /* DepartureMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DepartureMono-Regular.otf"; sourceTree = "<group>"; };
@@ -252,6 +254,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000003 /* TerminalContainerView.swift */,
+				A20000A3 /* TerminalToolbar.swift */,
 				A2000060 /* Theme.swift */,
 				A2000087 /* TmuxMultiPaneView.swift */,
 				A2000086 /* TmuxSplitView.swift */,
@@ -544,6 +547,7 @@
 				A1000013 /* GhosttyInput.swift in Sources */,
 				A1000080 /* SurfaceSearchOverlay.swift in Sources */,
 				A1000003 /* TerminalContainerView.swift in Sources */,
+				A10000A3 /* TerminalToolbar.swift in Sources */,
 				A1000004 /* SSHSession.swift in Sources */,
 				A1000090 /* NIOSSHConnection.swift in Sources */,
 				A1000084 /* TmuxLayout.swift in Sources */,
