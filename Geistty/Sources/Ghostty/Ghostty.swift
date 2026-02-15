@@ -67,7 +67,7 @@ enum Ghostty {
     }
 }
 
-// MARK: - Simple Logger (since os.Logger requires iOS 14+)
+// MARK: - Simple Logger wrapper around os.Logger
 
 import os
 
@@ -1342,40 +1342,6 @@ extension Ghostty {
             }
         }
         
-        // MARK: - Byte sending helpers
-        
-        /// Send raw bytes directly to SSH (bypasses terminal emulator)
-        private func sendBytes(_ bytes: [UInt8]) {
-            guard !bytes.isEmpty else { return }
-            let data = Data(bytes)
-            onWrite?(data)
-        }
-        
-        /// Convert character to control sequence (Ctrl+A = 0x01, etc.)
-        private func applyControlToCharacter(_ scalar: UnicodeScalar) -> [UInt8] {
-            let value = scalar.value
-            
-            // Ctrl+A through Ctrl+Z -> 0x01-0x1A
-            if value >= 0x61 && value <= 0x7A {  // a-z
-                return [UInt8(value - 0x60)]
-            }
-            if value >= 0x41 && value <= 0x5A {  // A-Z
-                return [UInt8(value - 0x40)]
-            }
-            
-            // Special control characters
-            switch scalar {
-            case "[":  return [0x1B]  // ESC
-            case "\\":  return [0x1C]  // FS
-            case "]":  return [0x1D]  // GS
-            case "^":  return [0x1E]  // RS
-            case "_":  return [0x1F]  // US
-            case "@":  return [0x00]  // NUL
-            case " ":  return [0x00]  // Ctrl+Space = NUL
-            default:   return []
-            }
-        }
-        
         /// Convenience accessor for the Metal layer
         var metalLayer: CAMetalLayer {
             return layer as! CAMetalLayer
@@ -1583,22 +1549,6 @@ extension Ghostty {
             
             // Enable VoiceOver to read terminal output
             accessibilityViewIsModal = true
-        }
-        
-        /// Update accessibility value with current terminal state
-        func updateAccessibilityValue() {
-            var value = ""
-            if let currentPwd = pwd {
-                value += "Current directory: \(currentPwd). "
-            }
-            if !title.isEmpty && title != "Terminal" {
-                value += "Title: \(title). "
-            }
-            if let scrollState = scrollbar, scrollState.total > scrollState.len {
-                let scrollPercent = Int(Double(scrollState.offset) / Double(scrollState.total - scrollState.len) * 100)
-                value += "Scrolled \(scrollPercent) percent. "
-            }
-            accessibilityValue = value.isEmpty ? nil : value
         }
         
         // MARK: - Dark Mode Support
@@ -2699,21 +2649,6 @@ extension Ghostty {
             }
         }
         
-        /// Send text input to the terminal (user typing -> SSH)
-        /// This uses ghostty_surface_text which sends input TO the subprocess/external source
-        func sendInput(_ text: String) {
-            guard let surface = surface else { return }
-            
-            let len = text.utf8CString.count
-            guard len > 0 else { return }
-            
-            text.withCString { ptr in
-                // len includes null terminator, so use len - 1
-                // This sends user input TO the terminal (which should go to SSH)
-                ghostty_surface_text(surface, ptr, UInt(len - 1))
-            }
-        }
-        
         /// Virtual key codes for toolbar buttons (macOS-style keycodes)
         enum VirtualKey: UInt32 {
             case escape = 0x35
@@ -2769,15 +2704,6 @@ extension Ghostty {
                 mods: Input.Mods(cMods: mods)
             )
             releaseEvent.withCValue { cEvent in
-                _ = ghostty_surface_key(surface, cEvent)
-            }
-        }
-        
-        /// Send a key event to the terminal using the new Input types
-        func sendKeyEvent(_ event: Input.KeyEvent) {
-            guard let surface = surface else { return }
-            
-            event.withCValue { cEvent in
                 _ = ghostty_surface_key(surface, cEvent)
             }
         }
@@ -2882,20 +2808,6 @@ extension Ghostty {
         
         // MARK: - Search
         
-        /// Start a search in the terminal
-        func startSearch(_ query: String = "") {
-            guard let surface = surface else { return }
-            let action = query.isEmpty ? "start_search" : "search:\(query)"
-            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
-        }
-        
-        /// Update the search query
-        func updateSearch(_ query: String) {
-            guard let surface = surface else { return }
-            let action = "search:\(query)"
-            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
-        }
-        
         /// Start a search (opens UI, Ghostty will callback with START_SEARCH action)
         func startSearch() {
             guard let surface = surface else { return }
@@ -2935,13 +2847,6 @@ extension Ghostty {
                     }
                 }
             }
-        }
-        
-        /// End the current search
-        func endSearch() {
-            guard let surface = surface else { return }
-            let action = "end_search"
-            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
         }
         
         // MARK: - Font Size / Zoom

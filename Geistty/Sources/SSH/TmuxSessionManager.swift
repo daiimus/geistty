@@ -238,85 +238,6 @@ class TmuxSessionManager: ObservableObject {
         primaryCellSize = .zero
     }
     
-    // MARK: - State Queries
-    
-    /// Refresh state from tmux server.
-    /// In native Ghostty tmux mode, Ghostty's viewer tracks state internally.
-    /// We fire refresh-client to trigger Ghostty to re-evaluate state.
-    func refreshState() {
-        guard writeToSSH != nil else {
-            logger.warning("Cannot refresh state: no write callback available")
-            return
-        }
-        
-        logger.info("Refreshing tmux state (native Ghostty mode)")
-        
-        // Trigger a refresh-client which causes tmux to re-send state notifications.
-        // Ghostty's viewer will process these and fire TMUX_STATE_CHANGED.
-        sendCommandFireAndForget("refresh-client")
-    }
-    
-    /// Query windows for a specific session (fire-and-forget)
-    func queryWindows(for sessionId: String) {
-        // In native Ghostty mode, we can't capture responses.
-        // State comes via TMUX_STATE_CHANGED notifications.
-        logger.debug("queryWindows called for \(sessionId) - relying on Ghostty state tracking")
-    }
-    
-    /// Query panes for a specific window (fire-and-forget)
-    func queryPanes(for windowId: String) {
-        // In native Ghostty mode, we can't capture responses.
-        // State comes via TMUX_STATE_CHANGED notifications.
-        logger.debug("queryPanes called for \(windowId) - relying on Ghostty state tracking")
-    }
-    
-    // MARK: - Response Parsing
-    
-    /// Parse list-sessions response
-    private func parseSessionsResponse(_ response: String) {
-        let lines = response.split(separator: "\n", omittingEmptySubsequences: true)
-        logger.info("Parsing \(lines.count) sessions")
-        
-        for line in lines {
-            if let session = TmuxSession.parse(String(line)) {
-                sessions[session.id] = session
-                logger.debug("Parsed session: \(session.id) '\(session.name)'")
-            }
-        }
-    }
-    
-    /// Parse list-windows response
-    private func parseWindowsResponse(_ response: String) {
-        let lines = response.split(separator: "\n", omittingEmptySubsequences: true)
-        logger.info("Parsing \(lines.count) windows")
-        
-        for line in lines {
-            if let window = TmuxWindow.parse(String(line)) {
-                windows[window.id] = window
-                logger.debug("Parsed window: \(window.id) '\(window.name)'")
-                
-                // Update split tree from layout if available
-                if let layout = window.layout,
-                   let parsedLayout = try? TmuxLayout.parseWithChecksum(layout) {
-                    updateSplitTree(from: parsedLayout, for: window.id)
-                }
-            }
-        }
-    }
-    
-    /// Parse list-panes response
-    private func parsePanesResponse(_ response: String) {
-        let lines = response.split(separator: "\n", omittingEmptySubsequences: true)
-        logger.info("Parsing \(lines.count) panes")
-        
-        for line in lines {
-            if let pane = TmuxPane.parse(String(line)) {
-                panes[pane.id] = pane
-                logger.debug("Parsed pane: \(pane.id) \(pane.width)x\(pane.height)")
-            }
-        }
-    }
-    
     // MARK: - Notification Handling
     
     /// Handle TMUX_STATE_CHANGED from Ghostty's native tmux viewer.
@@ -357,9 +278,6 @@ class TmuxSessionManager: ObservableObject {
         
         sessions[sessionId] = session
         currentSession = session
-        
-        // Query windows for this session
-        queryWindows(for: sessionId)
         
         // In native Ghostty tmux mode, session restore (capture-pane) is handled
         // by Ghostty's tmux viewer during its startup sequence. No action needed here.
@@ -443,28 +361,6 @@ class TmuxSessionManager: ObservableObject {
                     focusedWindowId = ""
                 }
             }
-        }
-    }
-    
-    /// Reassign primary surface to any available surface
-    private func reassignPrimarySurface() {
-        // Find any available surface to be the new primary
-        if let (paneId, surface) = paneSurfaces.first {
-            logger.info("🔄 Reassigning primarySurface to \(paneId)")
-            primarySurface = surface
-            surface.onCellSizeChanged = { [weak self] cellSize in
-                self?.primaryCellSize = cellSize
-                logger.info("📐 Primary cell size updated: \(Int(cellSize.width))x\(Int(cellSize.height))")
-            }
-            // Manually trigger if cell size is already valid
-            if surface.cellSize.width > 0 && surface.cellSize.height > 0 {
-                primaryCellSize = surface.cellSize
-                logger.info("📐 Primary cell size initialized from reassignment: \(Int(surface.cellSize.width))x\(Int(surface.cellSize.height))")
-            }
-        } else {
-            logger.warning("🔄 No surfaces available to reassign as primary")
-            primarySurface = nil
-            primaryCellSize = .zero
         }
     }
     
@@ -685,13 +581,6 @@ class TmuxSessionManager: ObservableObject {
         }
         
         focusedPaneId = paneId
-    }
-    
-    /// Handle pane mode changed notification
-    func handlePaneModeChanged(paneId: String) {
-        logger.debug("Pane mode changed: \(paneId)")
-        // In native Ghostty mode, we can't query pane mode via command/response.
-        // Ghostty's viewer handles mode changes internally.
     }
     
     /// Handle sessions changed notification
@@ -1363,18 +1252,6 @@ class TmuxSessionManager: ObservableObject {
         sendCommandFireAndForget("refresh-client -C \(cols),\(rows)")
     }
     
-    // MARK: - Session Actions
-    
-    /// Create a new session
-    func newSession(name: String) {
-        sendCommandFireAndForget("new-session -d -s '\(name)'")
-    }
-    
-    /// Switch to a session
-    func switchSession(_ sessionId: String) {
-        sendCommandFireAndForget("switch-client -t '\(sessionId)'")
-    }
-    
     /// Detach from current session
     func detach() {
         sendCommandFireAndForget("detach-client")
@@ -1429,33 +1306,6 @@ class TmuxSessionManager: ObservableObject {
         case .horizontal(let children), .vertical(let children):
             return children.flatMap { extractPanePositions(from: $0) }
         }
-    }
-    
-    // MARK: - Query Response Handling
-    
-    /// Handle list-sessions response
-    func handleSessionsResponse(_ content: String) {
-        let lines = content.split(separator: "\n").map(String.init)
-        
-        var newSessions: [String: TmuxSession] = [:]
-        for line in lines {
-            if let session = TmuxSession.parse(line) {
-                newSessions[session.id] = session
-            }
-        }
-        
-        sessions = newSessions
-        logger.info("Updated sessions: \(sessions.count) sessions")
-    }
-    
-    /// Handle list-windows response (legacy - delegates to parseWindowsResponse)
-    func handleWindowsResponse(_ content: String, sessionId: String) {
-        parseWindowsResponse(content)
-    }
-    
-    /// Handle list-panes response (legacy - delegates to parsePanesResponse)
-    func handlePanesResponse(_ content: String, windowId: String) {
-        parsePanesResponse(content)
     }
     
     // MARK: - Pending Input Visual Feedback

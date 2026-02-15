@@ -45,16 +45,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 | Task | Effort | Notes |
 |------|--------|-------|
-| Consolidate `controlModeActive`/`controlModeDataRouting` → `ControlModeState` enum | Low | Two booleans tracking same concept |
+| Dead code removal across 4 big files | Medium | ~30 dead methods/properties/enum cases identified across Ghostty.swift, TerminalContainerView.swift, SSHSession.swift, TmuxSessionManager.swift. See [details](#dead-code-audit-feb-2026). |
 
 ### Medium Priority
 
 | Task | Effort | Notes |
 |------|--------|-------|
-| Split `TerminalContainerView.swift` (~1700 lines) | High | Extract search UI into separate view |
-| Split `TmuxSessionManager.swift` (~1800 lines) | High | Deferred from Dec 2025 |
-| Extract common connection logic in SSHSession | Medium | 3 similar connect methods |
-| Migrate callback bridges to async/await in TmuxSessionManager | Medium | Tech debt from TmuxGateway migration |
+| Split `TerminalContainerView.swift` (~2330 lines) | High | Extract toolbar (541-697), ViewModel (89-538), search overlay, tmux transitions, shortcuts into separate files |
+| Split `TmuxSessionManager.swift` (~1550 lines) | High | Extract user actions/commands, surface management, split resize helpers. Deferred from Dec 2025 |
+| Migrate callback bridges to async/await in TmuxSessionManager | Medium | 6 closure-based callbacks from pre-Ghostty architecture. Working but tech debt |
 
 ### Low Priority
 
@@ -63,6 +62,50 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 | Extract magic numbers to constants | Low | Timeouts, marker strings |
 | Review and standardize naming conventions | Low | |
 | Add missing documentation comments | Low | |
+
+### Dead Code Audit (Feb 2026)
+
+Comprehensive audit of the 4 largest files. Items to archive/remove:
+
+**Ghostty.swift (3405 lines):**
+- `sendBytes(_:)` — never called, superseded by Ghostty key API
+- `applyControlToCharacter(_:)` — never called, superseded by Ghostty key API
+- `sendInput(_:)` — duplicates `sendText(_:)`, never called externally
+- `startSearch(_ query:)` / `updateSearch(_:)` — use invalid binding action strings
+- `endSearch()` — superseded by `searchState = nil` didSet observer
+- `sendKeyEvent(_:)` — never called externally
+- `updateAccessibilityValue()` — never called
+- `ShortcutAction.newWindow`, `.closeSurface`, `.closeTab`, `.disconnect` — never dispatched
+- Stale Logger comment about iOS 14+
+
+**TerminalContainerView.swift (2329 lines):**
+- `PassThroughView` class — never instantiated anywhere
+- `searchOverlayContainer` — declared with "unused now" comment, never read/written
+- `hoverUrl` / `hoverUrlCancellable` — @State props never read or set
+- `keyboardHeight` — @State prop never read, keyboard handled in UIKit
+- `terminalTitle` — @State prop never read or displayed
+- `updateSinglePaneSurface()` — never called, superseded by `transitionToSingleSurfaceMode()`
+- `connectionDuration` / `formattedDuration` — published but no subscriber
+- `toggleSecureKeyboardEntry()` — toggles bool with no effect on iOS
+- `disconnect()` — defined but never called
+
+**SSHSession.swift (1380 lines):**
+- `stripMPIntPadding(_:)` instance method — dead, local function used instead
+- `connect(host:...:password:...)` — never called externally, superseded by profile/credential API
+- `connectWithKey(host:...:privateKeyPath:...)` — never called externally, same
+- `write(_ string: String)` — never called externally
+- `performWrite(_ command: String, originalData:)` — never called
+- `SSHSessionError.notInTmux` / `.tmuxExited` — never thrown
+- `injectEnvironmentVariables()` — only reachable via unused connect methods
+
+**TmuxSessionManager.swift (1549 lines):**
+- `reassignPrimarySurface()` no-arg overload — never called
+- `queryWindows(for:)` / `queryPanes(for:)` — stubs that only log
+- `refreshState()` — near-stub, never called externally
+- `parseSessionsResponse(_:)` — private, never called (public wrapper does inline parsing)
+- `handleSessionsResponse/WindowsResponse/PanesResponse` — public wrappers never called
+- `handlePaneModeChanged(paneId:)` — stub, only logs
+- `newSession(name:)` / `switchSession(_:)` — unreachable from UI
 
 ---
 
@@ -90,6 +133,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 | Refactor | Theme system simplification — native Ghostty theme resolution | Feb 2026 |
 | Refactor | Config introspection via ghostty_config_get() with hybrid fallback | Feb 2026 |
 | Cleanup | Font mapping consolidation (FontMapping.swift), SF Mono default fix | Feb 2026 |
+| Refactor | ControlModeState enum (replaced controlModeActive/controlModeDataRouting booleans) | Feb 2026 |
 
 ---
 
