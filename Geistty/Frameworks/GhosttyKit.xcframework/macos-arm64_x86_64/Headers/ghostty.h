@@ -1187,6 +1187,32 @@ bool ghostty_surface_tmux_set_active_pane(ghostty_surface_t, size_t pane_id);
 
 // Reset to render the main terminal (not a tmux pane).
 void ghostty_surface_tmux_reset_active_pane(ghostty_surface_t);
+
+// Info about a tmux window.
+typedef struct {
+  size_t id;          // tmux window ID (e.g., 0 for @0)
+  size_t width;       // columns
+  size_t height;      // rows
+  size_t name_len;    // actual name length (may exceed buffer if truncated)
+} ghostty_tmux_window_info_s;
+
+// Get number of tmux windows (returns 0 if not in tmux mode)
+size_t ghostty_surface_tmux_window_count(ghostty_surface_t);
+
+// Get info about a tmux window by index.
+// Copies window name into out_name (up to name_buf_len bytes).
+// Returns zeroed struct if index out of bounds or not in tmux mode.
+ghostty_tmux_window_info_s ghostty_surface_tmux_window_info(
+    ghostty_surface_t, size_t index, char* out_name, size_t name_buf_len);
+
+// Get raw tmux layout string for a window by index.
+// Copies into out_buf (up to buf_len bytes). Returns actual length.
+// Returns 0 if index out of bounds or not in tmux mode.
+size_t ghostty_surface_tmux_window_layout(
+    ghostty_surface_t, size_t index, char* out_buf, size_t buf_len);
+
+// Get the active tmux window ID. Returns -1 if not in tmux mode or none set.
+ssize_t ghostty_surface_tmux_active_window_id(ghostty_surface_t);
 #endif
 
 ghostty_inspector_t ghostty_surface_inspector(ghostty_surface_t);
