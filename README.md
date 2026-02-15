@@ -1,266 +1,202 @@
 # Geistty
 
-> A native iOS/iPadOS SSH terminal powered by [Ghostty](https://github.com/ghostty-org/ghostty)'s terminal engine
+> A native iOS/iPadOS SSH terminal powered by [Ghostty](https://ghostty.org)'s terminal engine
 
 <p align="center">
+  <img src="https://img.shields.io/badge/v0.1--stable-February_2026-green.svg" alt="v0.1-stable"/>
   <img src="https://img.shields.io/badge/iOS-17+-blue.svg" alt="iOS 17+"/>
   <img src="https://img.shields.io/badge/Swift-5.9+-orange.svg" alt="Swift 5.9+"/>
-  <img src="https://img.shields.io/badge/Xcode-15+-purple.svg" alt="Xcode 15+"/>
+  <img src="https://img.shields.io/badge/Zig-0.14+-yellow.svg" alt="Zig 0.14+"/>
 </p>
 
-## Overview
+## What is this?
 
-Geistty brings **libghostty**—the core terminal emulation library from [Ghostty](https://github.com/ghostty-org/ghostty)—to iPadOS/iOS as a fully-functional SSH terminal client. The terminal rendering, VT parsing, cursor handling, colors, and scrolling are all powered by Ghostty's real engine, compiled from the original Zig source code.
+iOS can't spawn local shells -- no `fork`, no `exec`, no PTY. Geistty works around this by using Ghostty's **External termio backend**, which accepts terminal data from an external source (SSH) instead of a local process. The result: real Ghostty terminal emulation -- Metal GPU rendering, full VT parsing, proper Unicode -- running on iPad and iPhone, connected over SSH.
 
-### Why Ghostty on iOS?
+tmux control mode (`tmux -CC`) is handled natively by Ghostty's Zig code. Multi-pane layouts, session persistence across app suspensions, and transparent reconnection all work.
 
-iOS/iPadOS doesn't support local PTY (pseudo-terminal) functionality—apps cannot spawn local shell processes. However, Ghostty's **External termio backend** was designed exactly for this use case: feeding terminal data from an external source (like SSH) into the terminal emulator.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the deep dive on how everything fits together.
 
-The result is a native iOS app with:
-- **Metal GPU-accelerated rendering** - Smooth 120fps terminal display
-- **Full terminal emulation** - xterm-256color/truecolor via Ghostty's VT parser
-- **Proper Unicode support** - Including wide characters and emoji
-- **Selection and clipboard** - Native iOS text selection with Ghostty's selection engine
+## Current State
 
-## Features
+**Tag: `v0.1-stable`** -- deployed and confirmed working on iPad Pro (Icarus).
+
+Everything below is implemented and functional:
 
 ### Terminal
-- ✅ Full Ghostty terminal rendering (Metal GPU-accelerated)
-- ✅ Complete xterm-256color/truecolor support
-- ✅ Text selection via long-press + drag
-- ✅ Copy/paste with system clipboard integration
-- ✅ Scrollback buffer with search (Cmd+F)
-- ✅ Mouse tracking for terminal apps (vim, tmux, etc.)
-- ✅ Two-finger scroll and trackpad support
+- Full Ghostty terminal rendering (Metal GPU-accelerated, 120fps)
+- Complete xterm-256color/truecolor support
+- Text selection via long-press + drag
+- Copy/paste with system clipboard
+- Scrollback buffer with search (Cmd+F)
+- Mouse tracking for terminal apps (vim, htop, etc.)
+- Two-finger scroll and trackpad support
 
 ### tmux Integration
-- ✅ Native tmux Control Mode (-CC) support
-- ✅ Multi-pane layouts with real-time sync
-- ✅ Per-pane output routing and input
-- ✅ Window tabs with switching (Cmd+1-9)
-- ✅ Ghostty-style keyboard shortcuts:
+- Native tmux Control Mode (`tmux -CC`) via Ghostty's viewer.zig
+- Multi-pane layouts with per-pane output routing
+- Window tabs with switching (Cmd+1-9)
+- Ghostty-style keyboard shortcuts:
   - Split: Cmd+D (right), Cmd+Shift+D (down)
   - Navigate: Cmd+[ / ], Cmd+Option+Arrows
   - Zoom: Cmd+Shift+Enter
   - Equalize: Cmd+Ctrl+=
-- ✅ Window rename (Cmd+Shift+R, double-tap, context menu)
+- Window rename (Cmd+Shift+R, double-tap, context menu)
+- Session persistence across app suspensions
 
 ### Keyboard
-- ✅ Full hardware keyboard support (iPad Magic Keyboard, external keyboards)
-- ✅ Arrow keys, function keys (F1-F12), Home/End/PageUp/PageDown
-- ✅ Modifier keys (Ctrl+C, Ctrl+D, Ctrl+Z, etc.)
-- ✅ On-screen keyboard with accessory bar (Esc, Ctrl toggle, arrows, Tab)
-- ✅ Keyboard resize handling with animated terminal resize
+- Full hardware keyboard support (Magic Keyboard, external keyboards)
+- Arrow keys, function keys (F1-F12), Home/End/PageUp/PageDown
+- Modifier keys (Ctrl+C, Ctrl+D, Ctrl+Z, etc.)
+- On-screen keyboard with accessory bar (Esc, Ctrl toggle, arrows, Tab)
+- Keyboard resize with animated terminal reflow
 
 ### Connections
-- ✅ SSH password authentication
-- ✅ SSH key authentication (Ed25519, RSA)
-- ✅ In-app SSH key generation
-- ✅ Saved connection profiles
-- ✅ Quick Connect
-- ✅ Favorites and recent connections
-- ✅ Secure credential storage (iOS Keychain)
-- ✅ Auto-reconnect on app resume (credentials stored in memory only)
-- ✅ Disconnect detection with overlay and reconnect option (Cmd+R)
+- SSH password and key authentication (Ed25519, RSA)
+- In-app SSH key generation
+- Saved connection profiles with favorites
+- Quick Connect
+- Secure credential storage (iOS Keychain)
+- Auto-reconnect on app resume (up to 3 retries, 2s delay)
+- Disconnect detection with reconnect overlay (Cmd+R)
 
 ### Settings
-- ✅ Font size adjustment (Cmd+0/+/-)
-- ✅ Theme/color scheme selection (18 bundled themes)
-- ✅ Font family selection (Departure Mono, SF Mono, Menlo, Courier)
-- ✅ Config file support (ghostty.conf)
-- ✅ Auto-hiding chrome (header/toolbar)
-- ✅ Haptic feedback toggle
+- Font size adjustment (Cmd+0/+/-)
+- Theme selection (18 bundled themes)
+- Font family (Departure Mono, SF Mono, Menlo, Courier)
+- Config file (`ghostty.conf`) is source of truth
+- Auto-hiding chrome (header/toolbar)
+- Haptic feedback toggle
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     SwiftUI App Layer                           │
-│  ┌──────────────────┐          ┌─────────────────────────────┐  │
-│  │  Connection UI   │          │   TerminalContainerView     │  │
-│  │  (profiles,      │          │   (SwiftUI ↔ UIKit bridge)  │  │
-│  │   credentials)   │          └───────────┬─────────────────┘  │
-│  └────────┬─────────┘                      │                    │
-│           │                                ▼                    │
-│  ┌──────────────────┐          ┌─────────────────────────────┐  │
-│  │   SSHSession     │◄────────►│   Ghostty.SurfaceView       │  │
-│  │  (SwiftNIO-SSH)  │  Data    │   (UIView + Metal + Input)  │  │
-│  └──────────────────┘  Flow    └─────────────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│                    GhosttyKit.xcframework                       │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    libghostty (Zig)                       │   │
-│  │   • VT Parser (escape sequences, xterm emulation)        │   │
-│  │   • Metal Renderer (GPU-accelerated text rendering)      │   │
-│  │   • Terminal Grid (scrollback, selection, cursor)        │   │
-│  │   • External Termio Backend (SSH data pipe)              │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+SwiftUI (navigation, connection profiles, settings)
+    |
+UIKit Bridge (SurfaceView: Metal rendering + keyboard input)
+    |
+State & Transport (SSHSession, TerminalViewModel, TmuxSessionManager)
+    |
+GhosttyKit (Zig: VT parser, terminal grid, Metal renderer, External backend, tmux viewer)
+    |
+SwiftNIO-SSH (Network.framework transport)
+    |
+SSH Server (tmux -CC control mode)
 ```
 
-### Data Flow
+Data flow is simple:
+1. **Output**: SSH bytes -> `ghostty_surface_write_output()` -> VT parse -> Metal render
+2. **Input**: Keyboard -> `ghostty_surface_key()` -> `queueWrite()` -> write callback -> SSH send
+3. **tmux**: Same paths, but Ghostty's viewer.zig intercepts -- wraps input in `send-keys -H`, parses `%output` for display
 
-1. **SSH → Terminal**: `SSHSession` reads data from remote server → `ghostty_surface_write_output()` feeds it to Ghostty for parsing and rendering
-2. **Terminal → SSH**: User types → Ghostty's write callback fires → `SSHSession.write()` sends to server
+Full architecture documentation with Mermaid diagrams: **[ARCHITECTURE.md](ARCHITECTURE.md)**
+
+## Repositories
+
+| Repo | Branch | Purpose |
+|------|--------|---------|
+| [daiimus/geistty](https://github.com/daiimus/geistty) | `main` | iOS app (Swift, SwiftUI, UIKit) |
+| [daiimus/ghostty](https://github.com/daiimus/ghostty) | `ios-external-backend` | Ghostty fork (External backend, tmux viewer, iOS C API) |
+| [daiimus/swift-nio-ssh](https://github.com/daiimus/swift-nio-ssh) | `add-rsa-support` | SwiftNIO-SSH fork (RSA key support) |
 
 ## Building
 
 ### Prerequisites
 
 - macOS with Xcode 15+
-- iOS 17+ Simulator or device
-- The `GhosttyKit.xcframework` (pre-built from Ghostty's Zig source)
+- Zig 0.14+ (for building GhosttyKit)
+- iOS 17+ device or simulator
+- 1Password SSH agent (for SSH key auth on dev machine)
 
-### Build Steps
+### Build GhosttyKit from Ghostty fork
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/geistty.git
-cd geistty
+cd path/to/ghostty
+zig build -Demit-xcframework=true -Dxcframework-target=universal
 
-# Open in Xcode
-open Geistty/Geistty.xcodeproj
+# Copy framework to Geistty
+rm -rf path/to/geistty/Geistty/Frameworks/GhosttyKit.xcframework
+cp -R macos/GhosttyKit.xcframework path/to/geistty/Geistty/Frameworks/
 
-# Build and run on simulator (Cmd+R) or use CLI:
-xcodebuild -project Geistty/Geistty.xcodeproj \
-  -scheme Geistty \
-  -sdk iphonesimulator \
-  -destination "platform=iOS Simulator,name=iPad Pro 13-inch (M5)" \
-  build
+# Rename module maps to avoid conflicts with CSSH
+for dir in path/to/geistty/Geistty/Frameworks/GhosttyKit.xcframework/*/Headers/; do
+    [ -f "${dir}module.modulemap" ] && mv "${dir}module.modulemap" "${dir}GhosttyKit.modulemap"
+done
 ```
 
-### Building GhosttyKit.xcframework
-
-If you need to rebuild the framework from Ghostty source:
+### Build and deploy to device
 
 ```bash
-# Clone Ghostty
-git clone https://github.com/ghostty-org/ghostty.git
-cd ghostty
+cd path/to/geistty/Geistty
 
-# Build xcframework (requires Zig 0.14+)
-zig build -Demit-xcframework
+# CI build + tests (simulator, no signing)
+./ci.sh all
 
-# Copy to Geistty project
-cp -r macos/GhosttyKit.xcframework ../geistty/Geistty/Frameworks/
+# Build for device
+xcodebuild -project Geistty.xcodeproj -scheme Geistty \
+  -destination "platform=iOS,name=YourDevice" \
+  -allowProvisioningUpdates build
+
+# Install
+xcrun devicectl device install app --device <device-uuid> path/to/Geistty.app
+
+# Launch with console logging
+xcrun devicectl device process launch --device <device-uuid> \
+  --terminate-existing --console com.geistty.app
+```
+
+### Run tests
+
+```bash
+# Swift tests (58 tests)
+cd path/to/geistty/Geistty && ./ci.sh test
+
+# Zig tests (External backend + tmux viewer)
+cd path/to/ghostty && zig build test
+cd path/to/ghostty && zig build test -Dtest-filter="tmux"
 ```
 
 ## Project Structure
 
 ```
 geistty/
-├── README.md
+├── ARCHITECTURE.md          # Deep architecture docs (you are here-adjacent)
+├── AGENTS.md                # Agent development guide
 ├── Geistty/
 │   ├── Geistty.xcodeproj
-│   ├── Info.plist
-│   ├── Assets.xcassets/
 │   ├── Frameworks/
-│   │   └── GhosttyKit.xcframework/   # Pre-built Ghostty library
+│   │   └── GhosttyKit.xcframework/
 │   ├── Resources/
-│   │   └── Fonts/                    # Bundled terminal fonts
+│   │   └── Fonts/           # Departure Mono
 │   └── Sources/
-│       ├── App/
-│       │   ├── GeisttyApp.swift        # @main entry point
-│       │   └── ContentView.swift     # Root navigation
-│       ├── Auth/
-│       │   ├── ConnectionProfile.swift
-│       │   ├── CredentialProvider.swift
-│       │   ├── KeychainManager.swift
-│       │   └── SSHKeyManager.swift
-       │   ├── Ghostty/
-       │   │   ├── Ghostty.swift         # Swift wrapper for libghostty
-       │   ├── FontMapping.swift     # Centralized font name mapping
-       │   └── GhosttyTerminalView.swift
-       ├── SFTP/
-       │   ├── SFTPChannel.swift     # SFTP protocol (for future File Provider)
-       │   └── SFTPClient.swift
-       ├── SSH/
-       │   ├── NIOSSHConnection.swift # SwiftNIO-SSH wrapper
-       │   └── SSHSession.swift       # High-level session manager
-       ├── Terminal/
-       │   ├── TerminalContainerView.swift
-       │   └── KeyTableIndicatorView.swift
-│       └── UI/
-│           ├── ConnectionEditorView.swift
-│           ├── ConnectionListView.swift
-│           └── SettingsView.swift
+│       ├── App/             # GeisttyApp, ContentView
+│       ├── Auth/            # ConnectionProfile, Keychain, SSH keys
+│       ├── Ghostty/         # C API bridge, SurfaceView, config, search
+│       ├── SFTP/            # SFTP client (archived/dormant)
+│       ├── SSH/             # NIOSSHConnection, SSHSession, TmuxSessionManager
+│       ├── Terminal/        # TerminalContainerView, multi-pane views, themes
+│       └── UI/              # Connection list, editor, settings
+└── Tests/
+    └── GeisttyTests/        # 58 unit tests
 ```
-
-## Implementation Notes
-
-### Ghostty External Backend
-
-The app uses Ghostty's `GHOSTTY_BACKEND_EXTERNAL` mode, designed for scenarios where terminal I/O comes from an external source rather than a local PTY:
-
-```swift
-// Configure surface for external backend
-var config = Ghostty.SurfaceConfiguration()
-config.backendType = .external
-
-// Feed SSH output to Ghostty for rendering
-surfaceView.feedData(sshData)
-
-// Handle user input (sent to SSH)
-surfaceView.onWrite = { data in
-    sshSession.write(data)
-}
-```
-
-### iOS-Specific Adaptations
-
-1. **IOSurfaceLayer Sizing**: On iOS, Ghostty adds its Metal layer as a sublayer (vs. replacing the layer on macOS). We manually resize sublayers in `layoutSubviews()`.
-
-2. **UIKeyInput Protocol**: Captures software keyboard input via `insertText(_:)` and `deleteBackward()`, forwarding to `ghostty_surface_text()`.
-
-3. **Hardware Keyboard**: Uses `pressesBegan/pressesEnded` to capture UIKey events and map them to Ghostty keycodes.
-
-4. **addSublayer Workaround**: Ghostty's Zig code calls `objc.sel("addSublayer")` (without colon). We register a runtime method to handle this ObjC convention mismatch.
-
-## Roadmap
-
-### Recently Completed
-- ✅ tmux Control Mode with multi-pane layouts
-- ✅ Ghostty-style keyboard shortcuts
-- ✅ Auto-reconnect on app resume
-- ✅ Disconnect detection and reconnect UI
-- ✅ Window rename support
-- ✅ Search in scrollback (Cmd+F)
-- ✅ Theme and font customization
-
-### Planned Features
-- [ ] iPadOS Scene integration (each pane as native window)
-- [ ] SFTP file browser with Files.app integration
-- [ ] iCloud sync for connection profiles
-- [ ] Multiple SSH connections in unified tab bar
-- [ ] Mosh protocol support
-- [ ] Port forwarding
-- [ ] Snippet library (saved commands)
-- [ ] Split View / Stage Manager optimization
-
-### Known Issues
-- Secure Enclave key storage is stubbed but not fully implemented
 
 ## Dependencies
 
 | Dependency | License | Purpose |
-|------------|---------|--------|
-| [Ghostty](https://github.com/ghostty-org/ghostty) | MIT | Terminal emulation engine (Zig) |
-| [SwiftNIO-SSH](https://github.com/daiimus/swift-nio-ssh) | Apache 2.0 | Pure Swift SSH (fork with RSA support) |
-| [libxev](https://github.com/Cloudef/libxev) | MIT | Event loop for Ghostty (iOS fork) |
-| [Departure Mono](https://departuremono.com/) | OFL | Beautiful monospace font |
+|------------|---------|---------|
+| [Ghostty](https://github.com/ghostty-org/ghostty) | MIT | Terminal emulation engine (Zig, our fork) |
+| [SwiftNIO-SSH](https://github.com/daiimus/swift-nio-ssh) | Apache 2.0 | SSH transport (our fork with RSA support) |
+| [libxev](https://github.com/Cloudef/libxev) | MIT | Event loop for Ghostty (iOS kqueue fork) |
+| [Departure Mono](https://departuremono.com/) | OFL | Default terminal font |
 
-### Acknowledgments
+## Acknowledgments
 
-- [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza - Pure Swift terminal emulator, referenced for iOS terminal patterns
-- [SwiftTermApp](https://github.com/migueldeicaza/SwiftTermApp) - Sample SSH terminal app, referenced for SSH integration approach
-- [SwiftNIO-SSH](https://github.com/apple/swift-nio-ssh) by Apple - Pure Swift SSH implementation (we maintain a [fork with RSA support](https://github.com/daiimus/swift-nio-ssh))
+- [Ghostty](https://ghostty.org) by Mitchell Hashimoto -- the terminal engine that makes this possible
+- [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza -- referenced for iOS terminal patterns
+- [SwiftNIO-SSH](https://github.com/apple/swift-nio-ssh) by Apple -- the SSH foundation we forked
 
 ## License
 
 Geistty is a hobby.
 
-Third-party dependencies are used under their respective licenses - see [LICENSES.md](LICENSES.md) for details.
-
----
-
-*Built with [Ghostty](https://ghostty.org) 👻*
+Third-party dependencies are used under their respective licenses -- see [LICENSES.md](LICENSES.md).
