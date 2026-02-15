@@ -1,5 +1,12 @@
 # Terminal Alternate Screen Architecture & tmux Search Analysis
 
+> **Note (Feb 2026):** The `capture-pane` approach described in Part 6 was never fully implemented.
+> Geistty now uses Ghostty's native sync search API (`ghostty_surface_search_start/next/prev/end`)
+> which works on the visible terminal content. The `captureTmuxPane()` stub in TerminalContainerView
+> always returns failure and is dead code slated for removal. This document remains valuable as
+> educational reference for the alternate screen architecture and why tmux search is fundamentally
+> different from terminal search.
+
 ## Executive Summary
 
 The "alternate screen" is a **terminal feature**, not a tmux feature. It exists because full-screen applications (vim, less, tmux, htop) need a way to display their UI without destroying the user's command history and scrollback.

@@ -8,7 +8,7 @@
 |---------|-----|---------|
 | **Ghostty** | https://github.com/ghostty-org/ghostty | Source for libghostty terminal emulation library |
 | **SwiftTerm** | https://github.com/migueldeicaza/SwiftTerm | Reference Swift terminal emulator |
-| **SwiftTermApp** | https://github.com/migueldeicaza/SwiftTermApp | Complete iOS SSH client (blueprint for our SSH layer) |
+| **SwiftTermApp** | https://github.com/migueldeicaza/SwiftTermApp | Reference iOS SSH client (used SwiftTerm + libssh2) |
 
 ### Supporting Projects
 
@@ -17,7 +17,7 @@
 | **Nerd Fonts** | https://github.com/ryanoasis/nerd-fonts | Patched fonts with icons |
 | **SwiftNIO-SSH** | https://github.com/apple/swift-nio-ssh | Pure Swift SSH implementation |
 | **SwiftNIO-SSH (fork)** | https://github.com/daiimus/swift-nio-ssh | Fork with RSA key support |
-| **libxev** | https://github.com/Cloudef/libxev | Event loop (iOS fork required) |
+| **libxev** | https://github.com/Cloudef/libxev | Event loop (Geistty uses [daiimus/libxev-ios](https://github.com/daiimus/libxev-ios) fork for iOS kqueue support) |
 
 > **Note:** libssh2 was replaced with SwiftNIO-SSH in Dec 2024 for pure Swift async/await support.
 
@@ -63,7 +63,8 @@ ghostty-org/ghostty/
 ├── src/
 │   ├── apprt/embedded.zig               # Embedded app runtime
 │   ├── termio/Termio.zig                # Terminal I/O abstraction
-│   └── pty.zig                          # PTY (NullPty for iOS)
+│   ├── termio/External.zig              # External backend (used by iOS)
+│   └── viewer.zig                       # tmux control mode viewer
 └── macos/Sources/
     ├── Ghostty/
     │   └── SurfaceView_UIKit.swift      # UIKit surface view
@@ -111,14 +112,19 @@ migueldeicaza/SwiftTerm/
 
 ## Fonts
 
-### Downloads
+### Bundled
+
+| Font | Source |
+|------|--------|
+| Departure Mono | https://departuremono.com/ |
+
+### Nerd Fonts (Future — Not Currently Bundled)
 
 | Font | Download |
 |------|----------|
 | JetBrains Mono | https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz |
 | Fira Code | https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz |
 | Hack | https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.tar.xz |
-| Source Code Pro | https://github.com/ryanoasis/nerd-fonts/releases/latest/download/SourceCodePro.tar.xz |
 | All Fonts | https://www.nerdfonts.com/font-downloads |
 
 ### Resources
