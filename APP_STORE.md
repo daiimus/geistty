@@ -15,7 +15,7 @@ This document contains the metadata and assets needed for App Store submission.
 ### Version Info
 - **Version**: 0.2.0
 - **Build**: 2
-- **Copyright**: © 2024 Geistty
+- **Copyright**: © 2024-2026 Geistty
 
 ## App Description
 
@@ -43,7 +43,7 @@ PROFESSIONAL SSH CLIENT
 
 CUSTOMIZABLE EXPERIENCE
 • Multiple color themes (Dracula, Solarized, Nord, Tokyo Night, and more)
-• Choice of monospace fonts (JetBrains Mono, Fira Code, SF Mono, and more)
+• Choice of monospace fonts (Departure Mono, Menlo, Courier New)
 • Adjustable font sizes
 • Edit configuration directly in-app
 

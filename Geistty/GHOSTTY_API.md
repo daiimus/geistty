@@ -119,6 +119,22 @@ This document tracks the implementation status of Ghostty C APIs in Geistty.
 | `ghostty_surface_request_close` | 🟡 | `SurfaceView.requestClose()` |
 | `ghostty_surface_ime_point` | 🟡 | `SurfaceView.imePoint()` |
 
+### Surface APIs - tmux (iOS fork)
+| C API | Status | Swift Wrapper |
+|-------|--------|---------------|
+| `ghostty_surface_tmux_pane_count` | ✅ | `Surface.tmuxPaneCount()` |
+| `ghostty_surface_tmux_pane_ids` | ✅ | `Surface.tmuxPaneIds()` |
+| `ghostty_surface_tmux_set_active_pane` | ✅ | `Surface.tmuxSetActivePane(_:)` |
+| `ghostty_surface_tmux_reset_active_pane` | ✅ | `Surface.tmuxResetActivePane()` |
+
+### Surface APIs - Search
+| C API | Status | Swift Wrapper |
+|-------|--------|---------------|
+| `ghostty_surface_search_start` | ✅ | Search overlay |
+| `ghostty_surface_search_next` | ✅ | Search overlay |
+| `ghostty_surface_search_prev` | ✅ | Search overlay |
+| `ghostty_surface_search_end` | ✅ | Search overlay |
+
 ### Surface APIs - Split Panes (Future)
 | C API | Status | Swift Wrapper |
 |-------|--------|---------------|
@@ -172,6 +188,8 @@ All action callbacks are handled in `App.action(_:target:action:)`:
 | `GHOSTTY_ACTION_END_SEARCH` | ✅ | End search mode |
 | `GHOSTTY_ACTION_SEARCH_TOTAL` | ✅ | Search result count |
 | `GHOSTTY_ACTION_SEARCH_SELECTED` | ✅ | Selected result index |
+| `GHOSTTY_ACTION_TMUX_STATE_CHANGED` | ✅ | tmux window/pane count changed |
+| `GHOSTTY_ACTION_TMUX_EXIT` | ✅ | tmux control mode exited |
 
 ## Helper Types
 

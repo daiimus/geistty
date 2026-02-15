@@ -1,6 +1,6 @@
 # Privacy Policy for Geistty
 
-**Last Updated: December 2024**
+**Last Updated: February 2026**
 
 ## Overview
 
@@ -50,7 +50,7 @@ Geistty does not integrate with any third-party analytics, advertising, or track
 ## Encryption
 
 Geistty uses encryption for:
-- SSH protocol communication (handled by libssh2)
+- SSH protocol communication (handled by SwiftNIO-SSH)
 - Credential storage (iOS Keychain)
 
 This encryption is used solely for secure SSH connections, not for transmitting data to external services.
