@@ -168,9 +168,10 @@ extension Ghostty {
                     searchNeedleCancellable = nil
                     currentSearchTask?.cancel()
                     currentSearchTask = nil
-                    // End search (clears highlights)
+                    // End search (clears highlights) — route through searchQueue
+                    // to serialize with any in-flight search operations
                     if let surface = self.surface {
-                        Task.detached(priority: .userInitiated) {
+                        searchQueue.async {
                             ghostty_surface_search_end(surface)
                         }
                     }
@@ -1955,12 +1956,12 @@ extension Ghostty {
             guard let surface = surface else { return }
             guard searchState != nil else { return }
             
-            // Use new sync API on background thread - handles autoscroll internally
-            Task.detached(priority: .userInitiated) {
+            // Route through searchQueue to serialize with performSyncSearch and searchEnd
+            searchQueue.async { [weak self] in
                 let result = ghostty_surface_search_next(surface)
                 
                 if result.success {
-                    await MainActor.run { [weak self] in
+                    DispatchQueue.main.async {
                         self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
                     }
                 }
@@ -1972,12 +1973,12 @@ extension Ghostty {
             guard let surface = surface else { return }
             guard searchState != nil else { return }
             
-            // Use new sync API on background thread - handles autoscroll internally
-            Task.detached(priority: .userInitiated) {
+            // Route through searchQueue to serialize with performSyncSearch and searchEnd
+            searchQueue.async { [weak self] in
                 let result = ghostty_surface_search_prev(surface)
                 
                 if result.success {
-                    await MainActor.run { [weak self] in
+                    DispatchQueue.main.async {
                         self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
                     }
                 }

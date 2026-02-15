@@ -162,8 +162,10 @@ extension RawTerminalUIViewController {
     }
     
     @objc func handleBackButton() {
-        // Disconnect and go back
+        // Disconnect SSH session. Navigation back to the connection list is handled
+        // by ContentView's .terminalDisconnect observer setting appState.connectionStatus.
+        // Do NOT post .terminalDisconnect here — this method IS the handler for that
+        // notification (line 79), so re-posting would cause an infinite loop.
         viewModel?.disconnect()
-        NotificationCenter.default.post(name: .terminalDisconnect, object: nil)
     }
 }

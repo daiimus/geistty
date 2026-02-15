@@ -830,6 +830,12 @@ class RawTerminalUIViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         
+        // Only perform full teardown when the VC is actually being removed from
+        // the navigation stack or dismissed, NOT when a sheet (Settings, etc.) is
+        // presented over it — presenting a pageSheet triggers viewWillDisappear
+        // on the presenting VC.
+        guard isMovingFromParent || isBeingDismissed else { return }
+        
         // Remove settings observer
         if let observer = settingsObserver {
             NotificationCenter.default.removeObserver(observer)

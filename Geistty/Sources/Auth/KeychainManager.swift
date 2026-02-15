@@ -4,9 +4,10 @@
 //
 //  Secure storage for SSH keys and credentials using iOS Keychain.
 //  
-//  Both the main app and File Provider extension have the same keychain-access-groups
-//  entitlement, which automatically allows them to share keychain items.
-//  We don't need to specify kSecAttrAccessGroup - iOS handles sharing automatically.
+//  Both the main app and File Provider extension share the same keychain-access-groups
+//  entitlement (TEAMID.com.geistty.shared). iOS automatically uses the first entitled
+//  group for new items and searches all entitled groups on queries, so we don't need
+//  to specify kSecAttrAccessGroup explicitly.
 //
 
 import Foundation
@@ -45,8 +46,10 @@ enum KeychainError: LocalizedError {
 /// Manages secure storage of credentials and SSH keys in the iOS Keychain.
 ///
 /// Both the main app and File Provider extension share the same keychain-access-groups
-/// entitlement. We explicitly specify the access group to ensure items are accessible
-/// across app extensions.
+/// entitlement (com.geistty.shared). We do NOT specify kSecAttrAccessGroup in queries —
+/// iOS automatically uses the first group from the entitlements for new items, and searches
+/// all entitled groups for existing items. Explicitly specifying the group would require
+/// the full "TEAMID.com.geistty.shared" value which is build-environment-specific.
 class KeychainManager {
     
     /// Shared instance - use this everywhere (main app and extensions)
@@ -57,11 +60,6 @@ class KeychainManager {
     
     /// Service identifier for our app's keychain items
     private let service = "com.geistty"
-    
-    /// Access group for sharing between main app and extensions
-    /// This must match the keychain-access-groups in entitlements
-    /// The actual value at runtime will be "TEAMID.com.geistty.shared"
-    private let accessGroup = "com.geistty.shared"
     
     private init() {}
     

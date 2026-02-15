@@ -202,6 +202,16 @@ class SSHSession: ObservableObject, Identifiable {
     
     init() {}
     
+    deinit {
+        // NotificationCenter.removeObserver is thread-safe, so this is safe
+        // even though @MainActor deinit may run on an arbitrary thread.
+        // Prevents observer leaks if disconnect() was never called.
+        let observers = tmuxNotificationObservers
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+    
     /// The TERM type to use - xterm-256color is universally supported
     /// Note: xterm-ghostty would be ideal but most servers don't have the terminfo
     private static let termType = "xterm-256color"
@@ -833,8 +843,10 @@ class SSHSession: ObservableObject, Identifiable {
         }
     }
     
-    /// Attempt to reconnect to the SSH server
-    private func attemptReconnect() async {
+    /// Attempt to reconnect to the SSH server.
+    /// Called from appDidBecomeActive() for auto-reconnect, and can be called
+    /// externally (e.g., from a Reconnect button in ContentView).
+    func attemptReconnect() async {
         guard !isReconnecting else { return }
         guard reconnectAttempts < maxReconnectAttempts else {
             logger.error("🔄 Max reconnect attempts (\(maxReconnectAttempts)) reached")

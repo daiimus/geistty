@@ -92,7 +92,8 @@ public enum SSHAuthMethod: Sendable {
 final class SSHClientConfiguration: NIOSSHClientUserAuthenticationDelegate, @unchecked Sendable {
     private let username: String
     private let authMethod: SSHAuthMethod
-    private var authAttempted = false
+    private let _lock = NSLock()
+    private var _authAttempted = false
     
     init(username: String, authMethod: SSHAuthMethod) {
         self.username = username
@@ -103,13 +104,18 @@ final class SSHClientConfiguration: NIOSSHClientUserAuthenticationDelegate, @unc
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
-        // Only try once to avoid infinite loops
-        guard !authAttempted else {
-            logger.error("🔐 Authentication already attempted, failing")
+        // Only try once to avoid infinite loops.
+        // Thread-safe: nextAuthenticationType is called from NIO event loop threads.
+        let alreadyAttempted: Bool = _lock.withLock {
+            let was = _authAttempted
+            _authAttempted = true
+            return was
+        }
+        guard !alreadyAttempted else {
+            logger.error("Authentication already attempted, failing")
             nextChallengePromise.succeed(nil)
             return
         }
-        authAttempted = true
         
         switch authMethod {
         case .password(let password):
@@ -508,19 +514,21 @@ public class NIOSSHConnection {
     
     // MARK: - Write
     
+    // Active write task — tracked so disconnect() can cancel in-flight writes
+    private var activeWriteTask: Task<Void, Never>?
+    
     /// Write data to the channel (fire-and-forget for backwards compatibility)
     public func write(_ data: Data) {
-        Task {
+        activeWriteTask = Task {
             do {
                 try await writeAsync(data)
             } catch {
-                logger.warning("⚠️ Write failed: \(error.localizedDescription)")
-                // Mark connection as dead on write failure
-                await MainActor.run {
-                    if self.health.isHealthy || self.health != .dead(reason: error.localizedDescription) {
-                        self.health = .dead(reason: error.localizedDescription)
-                        self.delegate?.connection(self, healthDidChange: self.health)
-                    }
+                logger.warning("Write failed: \(error.localizedDescription)")
+                // Mark connection as dead on write failure.
+                // No MainActor.run needed — this class is already @MainActor.
+                if self.health.isHealthy || self.health != .dead(reason: error.localizedDescription) {
+                    self.health = .dead(reason: error.localizedDescription)
+                    self.delegate?.connection(self, healthDidChange: self.health)
                 }
             }
         }
@@ -604,7 +612,11 @@ public class NIOSSHConnection {
     
     /// Disconnect from the server
     public func disconnect() {
-        logger.info("🔌 Disconnecting...")
+        logger.info("Disconnecting...")
+        
+        // Cancel any in-flight write task
+        activeWriteTask?.cancel()
+        activeWriteTask = nil
         
         // Close channels
         sshChannel?.close(promise: nil)

@@ -149,12 +149,13 @@ struct ContentView: View {
             appState.connectionStatus = .disconnected
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalReconnect)) { _ in
-            // Reconnect using saved connection params
-            if appState.currentHost != nil {
-                // Briefly disconnect then reconnect
-                appState.connectionStatus = .disconnected
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    appState.connectionStatus = .connected
+            // Reconnect using stored credentials via SSHSession
+            if let session = appState.sshSession, session.canReconnect {
+                Task {
+                    await session.attemptReconnect()
+                    if session.state != .disconnected {
+                        appState.connectionStatus = .connected
+                    }
                 }
             }
         }
@@ -297,10 +298,18 @@ struct ErrorView: View {
                 .padding(.horizontal)
             
             VStack(spacing: 12) {
-                // Reconnect button (uses last connection if available)
-                if appState.currentHost != nil {
+                // Reconnect button (uses stored SSH credentials)
+                if let session = appState.sshSession, session.canReconnect {
                     Button {
-                        appState.connectionStatus = .connected
+                        Task {
+                            appState.connectionStatus = .connecting
+                            await session.attemptReconnect()
+                            if session.state != .disconnected {
+                                appState.connectionStatus = .connected
+                            } else {
+                                appState.connectionStatus = .error("Reconnect failed")
+                            }
+                        }
                     } label: {
                         Label("Reconnect", systemImage: "arrow.clockwise")
                             .frame(maxWidth: 200)
