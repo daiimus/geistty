@@ -448,3 +448,412 @@ func handlePaneModeChanged(paneId: String) {
     // In native Ghostty mode, we can't query pane mode via command/response.
     // Ghostty's viewer handles mode changes internally.
 }
+
+// ============================================================================
+// BATCH 2: Dead TmuxGateway Legacy Code (~500 lines)
+// Removed: Feb 2026
+// These are remnants from old architecture where Swift parsed tmux control mode
+// protocol. Now Ghostty's viewer.zig handles all of this.
+// ============================================================================
+
+// ============================================================================
+// FROM: TmuxSessionManager.swift — 8 dead handler methods (B1)
+// REASON: Zero callers anywhere. These were called by the old TmuxGateway
+// which routed %session-changed, %window-add, etc. to these handlers.
+// Ghostty's viewer.zig now handles all protocol parsing internally.
+// ============================================================================
+
+/// Handle session changed notification
+func handleSessionChanged(sessionId: String, sessionName: String) {
+    logger.info("Session changed: \(sessionId) (\(sessionName))")
+    
+    // Determine if this session was newly created or resumed
+    // %sessions-changed arriving before %session-changed means a session was created
+    if sawSessionsChanged {
+        sessionResumeStatus = .created(name: sessionName)
+        logger.info("Session '\(sessionName)' was newly created")
+    } else {
+        sessionResumeStatus = .resumed(name: sessionName)
+        logger.info("Session '\(sessionName)' was resumed (attached to existing)")
+    }
+    sawSessionsChanged = false
+    
+    // Update or create session
+    var session = sessions[sessionId] ?? TmuxSession(id: sessionId, name: sessionName)
+    session.name = sessionName
+    session.isAttached = true
+    
+    sessions[sessionId] = session
+    currentSession = session
+    
+    // In native Ghostty tmux mode, session restore (capture-pane) is handled
+    // by Ghostty's tmux viewer during its startup sequence. No action needed here.
+}
+
+
+/// Handle window added notification
+func handleWindowAdd(windowId: String) {
+    logger.info("📑 Window added: \(windowId)")
+    
+    guard let sessionId = currentSession?.id else { return }
+    
+    // Create placeholder window, will be filled in by query
+    let window = TmuxWindow(id: windowId, index: windows.count, name: "new", sessionId: sessionId)
+    windows[windowId] = window
+    
+    // Add to current session's window list
+    if var session = currentSession {
+        if !session.windowIds.contains(windowId) {
+            session.windowIds.append(windowId)
+            sessions[session.id] = session
+            currentSession = session
+        }
+    }
+    
+    // In native Ghostty mode, window details will arrive via %layout-change
+    // which Ghostty's viewer processes, triggering TMUX_STATE_CHANGED.
+    // No need to query — state comes from notifications.
+    logger.info("📑 Window \(windowId) added, waiting for layout notification from Ghostty")
+}
+
+/// Handle window closed notification
+func handleWindowClose(windowId: String) {
+    logger.info("🗑️ Window closed: \(windowId)")
+    
+    // Clean up associated panes and their surfaces
+    if let window = windows[windowId] {
+        for paneId in window.paneIds {
+            panes.removeValue(forKey: paneId)
+            
+            // Check if this pane has the primary surface and clear it
+            if paneSurfaces[paneId] === primarySurface {
+                logger.info("🗑️ Clearing primarySurface (was in closed window)")
+                primarySurface = nil
+                primaryCellSize = .zero
+            }
+            
+            // Remove surface with paneActuallyClosed=true so %0 can be removed
+            removeSurface(for: paneId, paneActuallyClosed: true)
+            
+            // Clean up output buffer for this pane
+            pendingOutput.removeValue(forKey: paneId)
+        }
+    }
+    
+    // Remove window and its split tree
+    windows.removeValue(forKey: windowId)
+    windowSplitTrees.removeValue(forKey: windowId)
+    lastProcessedLayouts.removeValue(forKey: windowId)
+    
+    // Update session's window list
+    if var session = currentSession {
+        session.windowIds.removeAll { $0 == windowId }
+        sessions[session.id] = session
+        currentSession = session
+        
+        // If this was the focused window, switch to another window
+        if focusedWindowId == windowId {
+            if let nextWindowId = session.windowIds.first {
+                logger.info("🗑️ Focused window closed, switching to \(nextWindowId)")
+                
+                // Use selectWindow which properly handles querying layout,
+                // creating surfaces, and assigning primarySurface for the new window
+                selectWindow(nextWindowId)
+            } else {
+                // No windows left - this shouldn't normally happen,
+                // tmux should send %exit when last window closes
+                logger.warning("🗑️ All windows closed but no %exit received")
+                currentSplitTree = TmuxSplitTree()
+                focusedPaneId = ""
+                focusedWindowId = ""
+            }
+        }
+    }
+}
+
+/// Handle window renamed notification
+func handleWindowRenamed(windowId: String, name: String) {
+    logger.info("Window renamed: \(windowId) -> \(name)")
+    
+    if var window = windows[windowId] {
+        window.name = name
+        windows[windowId] = window
+    }
+}
+
+/// Handle session window changed notification (window focus changed on server)
+func handleSessionWindowChanged(sessionId: String, windowId: String) {
+    logger.info("📑 Session window changed: \(sessionId) -> \(windowId)")
+    
+    // Update focused window if it's our current session
+    if currentSession?.id == sessionId {
+        focusedWindowId = windowId
+        
+        // Switch to the split tree for the new window
+        if let tree = windowSplitTrees[windowId] {
+            currentSplitTree = tree
+            logger.info("📑 Switched to split tree for window \(windowId): \(tree.paneIds.count) panes")
+            
+            // Update focused pane to first pane in this window (or active pane if known)
+            if let window = windows[windowId], let activePaneId = window.activePaneId {
+                focusedPaneId = activePaneId
+            } else if let firstPaneId = tree.paneIds.first {
+                focusedPaneId = "%\(firstPaneId)"
+            }
+        } else {
+            // No split tree yet — layout will come via %layout-change from Ghostty
+            logger.info("📑 No split tree for window \(windowId), waiting for layout notification from Ghostty")
+        }
+    }
+}
+
+/// Handle window pane changed notification
+func handleWindowPaneChanged(windowId: String, paneId: String) {
+    logger.info("Window pane changed: \(windowId) -> \(paneId)")
+    
+    if var window = windows[windowId] {
+        window.activePaneId = paneId
+        windows[windowId] = window
+    }
+    
+    // Update pane active states
+    for (id, var pane) in panes where pane.windowId == windowId {
+        pane.isActive = (id == paneId)
+        panes[id] = pane
+    }
+    
+    focusedPaneId = paneId
+}
+
+/// Handle sessions changed notification
+/// This fires when a session is created or destroyed on the server.
+/// If it arrives before %session-changed, it means our connection created a new session.
+func handleSessionsChanged() {
+    logger.info("Sessions changed - a session was created or destroyed")
+    
+    // Mark that a session creation/destruction happened before we saw %session-changed
+    // This distinguishes "new session created" from "attached to existing"
+    sawSessionsChanged = true
+    
+    // In native Ghostty mode, we can't query sessions via command/response.
+    // Ghostty's viewer tracks session state internally and notifies via
+    // TMUX_STATE_CHANGED. The sawSessionsChanged flag is what matters here.
+    logger.debug("Sessions changed — relying on Ghostty state tracking")
+}
+
+// ============================================================================
+// FROM: TmuxSessionManager.swift — SessionResumeStatus + sawSessionsChanged (B6)
+// REASON: handleSessionChanged (the only setter) is dead. The toast in
+// TerminalContainerView observes sessionResumeStatus but it never fires.
+// The entire chain is broken: enum -> property -> observer -> toast view.
+// ============================================================================
+
+/// Whether a tmux session was newly created or resumed from an existing one
+enum SessionResumeStatus: Equatable {
+    /// A new session was created on the server
+    case created(name: String)
+    
+    /// An existing session was resumed (attached to)
+    case resumed(name: String)
+}
+
+// @Published private(set) var sessionResumeStatus: SessionResumeStatus?
+// private var sawSessionsChanged: Bool = false
+// (Set in handleSessionChanged, handleSessionsChanged — both dead)
+// (Read by TerminalContainerView.setupSessionResumeObserver — never triggers)
+
+// ============================================================================
+// FROM: TerminalContainerView.swift — Session resume toast infrastructure (B6)
+// REASON: Observer subscribes to sessionResumeStatus which is never set
+// (setter is in dead handleSessionChanged). Toast never appears.
+// ============================================================================
+
+// private var sessionResumeToastHostingController: UIHostingController<SessionResumeToastView>?
+// private var sessionResumeObserver: AnyCancellable?
+// private var sessionResumeToastDismissTask: Task<Void, Never>?
+
+private func setupSessionResumeObserver() {
+    guard let manager = viewModel?.tmuxManager else { return }
+    
+    sessionResumeObserver = manager.$sessionResumeStatus
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] status in
+            guard let status = status else { return }
+            self?.showSessionResumeToast(status: status)
+        }
+}
+
+private func showSessionResumeToast(status: SessionResumeStatus) {
+    // Remove any existing toast
+    removeSessionResumeToast()
+    sessionResumeToastDismissTask?.cancel()
+    
+    let toast = SessionResumeToastView(status: status)
+    let hostingController = UIHostingController(rootView: toast)
+    hostingController.view.backgroundColor = .clear
+    hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+    hostingController.view.alpha = 0
+    
+    addChild(hostingController)
+    view.addSubview(hostingController.view)
+    
+    // Position at top-center
+    NSLayoutConstraint.activate([
+        hostingController.view.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+        hostingController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12)
+    ])
+    
+    hostingController.didMove(toParent: self)
+    sessionResumeToastHostingController = hostingController
+    
+    // Fade in
+    UIView.animate(withDuration: 0.3) {
+        hostingController.view.alpha = 1
+    }
+    
+    // Auto-dismiss after 3 seconds
+    sessionResumeToastDismissTask = Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        guard !Task.isCancelled else { return }
+        self?.dismissSessionResumeToast()
+    }
+}
+
+private func dismissSessionResumeToast() {
+    guard let hostingController = sessionResumeToastHostingController else { return }
+    UIView.animate(withDuration: 0.3, animations: {
+        hostingController.view.alpha = 0
+    }) { [weak self] _ in
+        self?.removeSessionResumeToast()
+    }
+}
+
+private func removeSessionResumeToast() {
+    if let hostingController = sessionResumeToastHostingController {
+        hostingController.willMove(toParent: nil)
+        hostingController.view.removeFromSuperview()
+        hostingController.removeFromParent()
+        sessionResumeToastHostingController = nil
+    }
+}
+
+// ============================================================================
+// FROM: SessionResumeToastView.swift (entire file archived, then deleted)
+// REASON: Only consumer of SessionResumeStatus enum. Dead chain.
+// ============================================================================
+
+// struct SessionResumeToastView: View {
+//     let status: SessionResumeStatus
+//     ... (see full file in git history at commit before this removal)
+// }
+
+// ============================================================================
+// FROM: TmuxModels.swift — Dead model parsing (B2)
+// REASON: Zero callers in production code. Only called from tests that
+// were also removed. Legacy from TmuxGateway command/response parsing.
+// ============================================================================
+
+/// Format strings for tmux queries
+enum TmuxQueryFormat {
+    /// list-sessions format
+    static let sessions = "#{session_id} #{q:session_name} #{session_windows} #{session_attached}"
+    
+    /// list-windows format (includes session_id for self-contained parsing)
+    static let windows = "#{session_id} #{window_id} #{window_index} #{q:window_name} #{window_active} #{window_flags} #{window_layout}"
+    
+    /// list-panes format (includes window_id for self-contained parsing)
+    static let panes = "#{window_id} #{pane_id} #{pane_width} #{pane_height} #{pane_active} #{cursor_x} #{cursor_y} #{pane_in_mode} #{alternate_on}"
+}
+
+extension TmuxSession {
+    /// Parse from list-sessions -F response line
+    /// Format: "$0 session_name 3 1"
+    static func parse(_ line: String) -> TmuxSession? {
+        let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: false)
+        guard parts.count >= 4 else { return nil }
+        
+        let id = String(parts[0])
+        let name = String(parts[1]).replacingOccurrences(of: "\"", with: "")
+        let attached = parts[3] == "1"
+        
+        var session = TmuxSession(id: id, name: name)
+        session.isAttached = attached
+        return session
+    }
+}
+
+extension TmuxWindow {
+    /// Parse from list-windows -F response line
+    /// Format: "$session_id @window_id index window_name active flags layout"
+    static func parse(_ line: String) -> TmuxWindow? {
+        // Use regex-like parsing for quoted names
+        let parts = line.split(separator: " ", maxSplits: 6, omittingEmptySubsequences: false)
+        guard parts.count >= 7 else { return nil }
+        
+        let sessionId = String(parts[0])
+        let id = String(parts[1])
+        guard let index = Int(parts[2]) else { return nil }
+        let name = String(parts[3]).replacingOccurrences(of: "\"", with: "")
+        let isActive = parts[4] == "1"
+        let flags = String(parts[5])
+        let layout = String(parts[6])
+        
+        var window = TmuxWindow(id: id, index: index, name: name, sessionId: sessionId)
+        window.flags = flags
+        window.layout = layout
+        if isActive {
+            // Mark in parent session
+        }
+        return window
+    }
+}
+
+extension TmuxPane {
+    /// Parse from list-panes -F response line  
+    /// Format: "@window_id %pane_id width height active cursor_x cursor_y in_mode alternate_on"
+    static func parse(_ line: String) -> TmuxPane? {
+        let parts = line.split(separator: " ")
+        guard parts.count >= 9 else { return nil }
+        
+        let windowId = String(parts[0])
+        let id = String(parts[1])
+        guard let width = Int(parts[2]),
+              let height = Int(parts[3]) else { return nil }
+        
+        let isActive = parts[4] == "1"
+        let cursorX = Int(parts[5]) ?? 0
+        let cursorY = Int(parts[6]) ?? 0
+        let inMode = parts[7] != "0"
+        let alternateOn = parts[8] == "1"
+        
+        var pane = TmuxPane(id: id, windowId: windowId, width: width, height: height)
+        pane.isActive = isActive
+        pane.cursorX = cursorX
+        pane.cursorY = cursorY
+        pane.isAlternateScreen = alternateOn
+        if inMode {
+            pane.mode = .copy // Simplified - could be other modes
+        }
+        return pane
+    }
+}
+
+// ============================================================================
+// FROM: TmuxModels.swift — Dead TmuxPane properties (B3)
+// REASON: Only set in TmuxPane.parse() (dead) and tested in dead tests.
+// Never read by any live production code.
+// ============================================================================
+
+// On TmuxPane struct:
+//     var cursorX: Int = 0
+//     var cursorY: Int = 0
+//     var title: String = ""
+//     var currentCommand: String?
+//     var isAlternateScreen: Bool = false
+//     var mode: PaneMode = .normal
+//     enum PaneMode: Equatable {
+//         case normal
+//         case copy
+//         case choose
+//         case view
+//     }
