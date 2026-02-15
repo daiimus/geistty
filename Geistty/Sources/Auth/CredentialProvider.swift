@@ -68,6 +68,7 @@ class KeychainCredentialProvider: CredentialProvider {
 // MARK: - SSH Key Provider
 
 /// Provides credentials from saved SSH keys
+@MainActor
 class SSHKeyCredentialProvider: CredentialProvider {
     
     private let keyManager = SSHKeyManager.shared
@@ -95,6 +96,7 @@ class SSHKeyCredentialProvider: CredentialProvider {
 // MARK: - Credential Manager
 
 /// Manages credential providers and handles credential retrieval for SSH connections
+@MainActor
 class CredentialManager: ObservableObject {
     
     static let shared = CredentialManager()

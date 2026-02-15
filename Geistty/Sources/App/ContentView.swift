@@ -318,10 +318,16 @@ struct ErrorView: View {
 // MARK: - Connection Sheet
 
 struct ConnectionInfo {
+    #if DEBUG
     var host: String = "test.rebex.net"  // Default test server
-    var port: Int = 22
     var username: String = "demo"
     var password: String = "password"
+    #else
+    var host: String = ""
+    var username: String = ""
+    var password: String = ""
+    #endif
+    var port: Int = 22
     var useKeyAuth: Bool = false
     var privateKeyPath: String = ""
 }

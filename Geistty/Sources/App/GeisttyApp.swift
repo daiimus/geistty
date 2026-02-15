@@ -257,7 +257,8 @@ class AppState: ObservableObject {
     @Published var currentHost: String?
     @Published var currentPort: Int?
     @Published var currentUsername: String?
-    @Published var currentPassword: String?
+    // Not @Published — password should not be observable or persisted in Combine buffers
+    var currentPassword: String?
     
     enum ConnectionStatus: Equatable {
         case disconnected

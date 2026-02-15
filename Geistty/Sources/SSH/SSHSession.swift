@@ -294,13 +294,13 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Parse a private key from PEM data
     private func parsePrivateKey(_ data: Data, passphrase: String?) throws -> NIOSSHPrivateKey {
-        logger.error("🔑 parsePrivateKey called with \(data.count) bytes")
+        logger.debug("[KeyParse] parsePrivateKey called with \(data.count) bytes")
         
         guard let pemString = String(data: data, encoding: .utf8) else {
             throw SSHSessionError.invalidKey("[v2] Unable to read key as UTF-8")
         }
         
-        logger.error("🔑 PEM header check: contains OPENSSH=\(pemString.contains("OPENSSH PRIVATE KEY"))")
+        logger.debug("[KeyParse] PEM header check: contains OPENSSH=\(pemString.contains("OPENSSH PRIVATE KEY"))")
         
         // Encrypted keys require passphrase handling
         if pemString.contains("ENCRYPTED") && passphrase == nil {
@@ -309,7 +309,7 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Try OpenSSH format first (most common modern format from ssh-keygen)
         if pemString.contains("OPENSSH PRIVATE KEY") {
-            logger.error("🔑 Detected OpenSSH format, calling parseOpenSSHPrivateKey")
+            logger.debug("[KeyParse] Detected OpenSSH format, calling parseOpenSSHPrivateKey")
             return try parseOpenSSHPrivateKey(pemString, passphrase: passphrase)
         }
         
@@ -350,7 +350,7 @@ class SSHSession: ObservableObject, Identifiable {
 
 
     private func parseOpenSSHPrivateKey(_ pemString: String, passphrase: String?) throws -> NIOSSHPrivateKey {
-        logger.error("🔑 parseOpenSSHPrivateKey: Starting")
+        logger.debug("[KeyParse] parseOpenSSHPrivateKey: Starting")
         
         // Extract base64 content between PEM headers
         let lines = pemString.components(separatedBy: .newlines)
@@ -370,14 +370,13 @@ class SSHSession: ObservableObject, Identifiable {
             }
         }
         
-        logger.error("🔑 Base64 content length: \(base64Content.count)")
+        logger.debug("[KeyParse] Base64 content length: \(base64Content.count)")
         
         guard let keyData = Data(base64Encoded: base64Content) else {
             throw SSHSessionError.invalidKey("Invalid base64 in OpenSSH key")
         }
         
-        logger.error("🔑 Decoded key data: \(keyData.count) bytes")
-        logger.error("🔑 First 50 bytes hex: \(keyData.prefix(50).map { String(format: "%02x", $0) }.joined(separator: " "))")
+        logger.debug("[KeyParse] Decoded key data: \(keyData.count) bytes")
         
         // Parse OpenSSH key format
         // See: https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.key
@@ -395,7 +394,7 @@ class SSHSession: ObservableObject, Identifiable {
             throw SSHSessionError.invalidKey("Invalid OpenSSH key magic")
         }
         offset = magicBytes.count
-        logger.error("🔑 Magic verified, offset now: \(offset)")
+        logger.debug("[KeyParse] Magic verified, offset now: \(offset)")
         
         // Helper to read a uint32
         func readUInt32() throws -> UInt32 {
@@ -412,7 +411,7 @@ class SSHSession: ObservableObject, Identifiable {
         // Helper to read a string (length-prefixed)
         func readString() throws -> Data {
             let length = try Int(readUInt32())
-            logger.error("🔑 readString: length=\(length) at offset \(offset - 4)")
+            logger.debug("[KeyParse] readString: length=\(length) at offset \(offset - 4)")
             guard length >= 0 && offset + length <= keyData.count else {
                 throw SSHSessionError.invalidKey("Invalid string length \(length) at offset \(offset)")
             }
@@ -424,33 +423,32 @@ class SSHSession: ObservableObject, Identifiable {
         // Cipher name
         let cipherData = try readString()
         let cipherName = String(data: cipherData, encoding: .utf8) ?? ""
-        logger.error("🔑 Cipher: '\(cipherName)'")
+        logger.debug("[KeyParse] Cipher: '\(cipherName)'")
         
         // KDF name
         let kdfData = try readString()
         let kdfName = String(data: kdfData, encoding: .utf8) ?? ""
-        logger.error("🔑 KDF: '\(kdfName)'")
+        logger.debug("[KeyParse] KDF: '\(kdfName)'")
         
         // KDF options
         let kdfOptions = try readString()
-        logger.error("🔑 KDF options: \(kdfOptions.count) bytes")
+        logger.debug("[KeyParse] KDF options: \(kdfOptions.count) bytes")
         
         // Number of keys (usually 1)
         let numKeys = try readUInt32()
-        logger.error("🔑 Number of keys: \(numKeys)")
+        logger.debug("[KeyParse] Number of keys: \(numKeys)")
         guard numKeys == 1 else {
             throw SSHSessionError.invalidKey("Multiple keys in file not supported")
         }
         
         // Public key (we skip this, will extract from private section)
         let publicKeyBlob = try readString()
-        logger.error("🔑 Public key blob: \(publicKeyBlob.count) bytes")
+        logger.debug("[KeyParse] Public key blob: \(publicKeyBlob.count) bytes")
         
         // Private key section (may be encrypted)
         // IMPORTANT: Create a new Data to reset indices to 0
         let privateData = Data(try readString())
-        logger.error("🔑 Private data: \(privateData.count) bytes")
-        logger.error("🔑 Private data first 50 bytes: \(privateData.prefix(50).map { String(format: "%02x", $0) }.joined(separator: " "))")
+        logger.debug("[KeyParse] Private data: \(privateData.count) bytes")
         
         // Check if encrypted
         if cipherName != "none" {
@@ -494,12 +492,11 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Key type
         let keyTypeData = try readPrivString()
-        logger.error("🔑 Key type data: \(keyTypeData.count) bytes, hex: \(keyTypeData.map { String(format: "%02x", $0) }.joined())")
         guard let keyType = String(data: keyTypeData, encoding: .utf8) else {
-            throw SSHSessionError.invalidKey("Invalid key type encoding, raw: \(keyTypeData.prefix(20).map { String(format: "%02x", $0) }.joined())")
+            throw SSHSessionError.invalidKey("Invalid key type encoding")
         }
         
-        logger.error("🔑 Parsed key type: '\(keyType)'")
+        logger.debug("[KeyParse] Parsed key type: '\(keyType)'")
         
         switch keyType {
         case "ssh-ed25519":
@@ -871,7 +868,9 @@ class SSHSession: ObservableObject, Identifiable {
     private func sendTmuxAttachCommand(sessionName: String) {
         // Use control mode (-CC) for proper scrollback access
         // exec replaces the shell with tmux
-        let command = "exec tmux -CC new-session -A -s \(sessionName)\n"
+        // Shell-escape the session name to prevent command injection
+        let escapedName = sessionName.replacingOccurrences(of: "'", with: "'\\''")
+        let command = "exec tmux -CC new-session -A -s '\(escapedName)'\n"
         logger.info("Attaching to tmux in control mode: \(sessionName)")
         // Write directly to connection — don't go through self.write() which would queue it!
         if let data = command.data(using: .utf8) {
@@ -1197,13 +1196,9 @@ class SSHSession: ObservableObject, Identifiable {
     
     // Internal method to handle received data, called from connection delegate
     fileprivate func handleReceivedData(_ data: Data) {
-        // Hex-level diagnostic logging for tmux control mode debugging
-        let hexDump = data.prefix(256).map { String(format: "%02x", $0) }.joined(separator: " ")
-        logger.info("📥 recv: \(data.count)B state=\(self.controlModeState) tmux=\(String(describing: self.tmuxMode))")
-        logger.info("📥 HEX[\(data.count)]: \(hexDump)")
-        if let str = String(data: data, encoding: .utf8) {
-            logger.info("📥 TXT: \(str.prefix(300))")
-        }
+        #if DEBUG
+        logger.debug("[recv] \(data.count)B state=\(self.controlModeState) tmux=\(String(describing: self.tmuxMode))")
+        #endif
         
         // Session discovery: intercept tmux list-sessions response before control mode starts.
         // This runs as a raw shell command before `exec tmux -CC`, so the output arrives
