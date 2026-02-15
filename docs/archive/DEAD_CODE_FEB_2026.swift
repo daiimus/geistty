@@ -680,7 +680,35 @@ private func setupSessionResumeObserver() {
         .sink { [weak self] status in
             guard let status = status else { return }
             self?.showSessionResumeToast(status: status)
-        }
+    }
+}
+
+// ============================================================================
+// FROM: SSHKeyManager.swift — Session 27 Phase A (C3)
+// ============================================================================
+
+// MARK: - getPrivateKeyPath (dead code — no callers, temp file leak)
+
+/// Get a temporary file path containing the private key (for libssh2)
+/// REASON: No callers found. Was intended for libssh2 path-based API, but we
+/// use in-memory Data via getPrivateKey() instead. Also leaked temp files —
+/// no cleanup after use.
+func getPrivateKeyPath(name: String) throws -> String {
+    let keyData = try getPrivateKey(name: name)
+    
+    // Write to temporary file
+    let tempDir = FileManager.default.temporaryDirectory
+    let keyFile = tempDir.appendingPathComponent("ghostty_key_\(name)")
+    
+    try keyData.write(to: keyFile)
+    
+    // Set restrictive permissions
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o600],
+        ofItemAtPath: keyFile.path
+    )
+    
+    return keyFile.path
 }
 
 private func showSessionResumeToast(status: SessionResumeStatus) {

@@ -116,33 +116,101 @@ class SSHKeyManager: ObservableObject {
         return keyPair
     }
     
-    /// Generate Ed25519 key pair using CryptoKit
+    /// Generate Ed25519 key pair using CryptoKit.
+    /// Returns (privateKeyPEM, publicKeyString) where privateKeyPEM is in openssh-key-v1
+    /// format that SSHKeyParser can parse, and publicKeyString is in authorized_keys format.
     private func generateEd25519Key(name: String) throws -> (Data, String) {
         let privateKey = Curve25519.Signing.PrivateKey()
         let publicKeyData = privateKey.publicKey.rawRepresentation
+        let privateKeyData = privateKey.rawRepresentation  // 32-byte seed
         
-        // Format public key in OpenSSH format
-        // ssh-ed25519 <base64-encoded-key> <comment>
-        var keyBlob = Data()
+        // Format public key string in OpenSSH authorized_keys format:
+        // ssh-ed25519 <base64(keyblob)> <comment>
+        var pubBlob = Data()
+        appendSSHString(&pubBlob, "ssh-ed25519")
+        appendSSHBytes(&pubBlob, publicKeyData)
+        let publicKeyString = "ssh-ed25519 \(pubBlob.base64EncodedString()) \(name)@ghostty-ssh"
         
-        // Key type string
-        let keyType = "ssh-ed25519"
-        var typeLength = UInt32(keyType.count).bigEndian
-        keyBlob.append(Data(bytes: &typeLength, count: 4))
-        keyBlob.append(keyType.data(using: .utf8)!)
+        // Serialize private key in openssh-key-v1 PEM format so SSHKeyParser can parse it.
+        // Format: https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.key
+        let pemData = serializeOpenSSHEd25519(seed: privateKeyData, publicKey: publicKeyData, comment: "\(name)@ghostty-ssh")
         
-        // Public key data
-        var keyLength = UInt32(publicKeyData.count).bigEndian
-        keyBlob.append(Data(bytes: &keyLength, count: 4))
-        keyBlob.append(publicKeyData)
+        return (pemData, publicKeyString)
+    }
+    
+    /// Serialize an Ed25519 key pair in openssh-key-v1 format (unencrypted).
+    /// This produces the same binary format as `ssh-keygen -t ed25519` with no passphrase.
+    private func serializeOpenSSHEd25519(seed: Data, publicKey: Data, comment: String) -> Data {
+        // Build the public key blob: string "ssh-ed25519" + string pubkey
+        var pubBlob = Data()
+        appendSSHString(&pubBlob, "ssh-ed25519")
+        appendSSHBytes(&pubBlob, publicKey)
         
-        let publicKeyString = "ssh-ed25519 \(keyBlob.base64EncodedString()) \(name)@ghostty-ssh"
+        // Build the private section (unencrypted):
+        // uint32 checkint1 (random, must match checkint2)
+        // uint32 checkint2
+        // string keytype ("ssh-ed25519")
+        // string pubkey (32 bytes)
+        // string privkey (64 bytes: seed || pubkey, per OpenSSH convention)
+        // string comment
+        // padding (1, 2, 3, ... to align to block size 8)
+        let checkInt = UInt32.random(in: 0...UInt32.max)
+        var privSection = Data()
+        appendUInt32(&privSection, checkInt)
+        appendUInt32(&privSection, checkInt)
+        appendSSHString(&privSection, "ssh-ed25519")
+        appendSSHBytes(&privSection, publicKey)
+        // OpenSSH stores the 64-byte "expanded" private key: 32-byte seed + 32-byte public key
+        var fullPrivKey = Data(seed)
+        fullPrivKey.append(publicKey)
+        appendSSHBytes(&privSection, fullPrivKey)
+        appendSSHString(&privSection, comment)
         
-        // For the private key, we'll store it in OpenSSH format
-        // This is a simplified version - full OpenSSH format is more complex
-        let privateKeyData = privateKey.rawRepresentation
+        // Padding to block size (8 for unencrypted)
+        let blockSize = 8
+        let paddingNeeded = blockSize - (privSection.count % blockSize)
+        if paddingNeeded < blockSize {
+            for i in 1...paddingNeeded {
+                privSection.append(UInt8(i))
+            }
+        }
         
-        return (privateKeyData, publicKeyString)
+        // Build the full openssh-key-v1 binary:
+        // AUTH_MAGIC: "openssh-key-v1\0"
+        // string ciphername: "none"
+        // string kdfname: "none"
+        // string kdfoptions: "" (empty)
+        // uint32 number-of-keys: 1
+        // string public-key-blob
+        // string private-key-blob (the privSection above)
+        var keyData = Data()
+        let magic = "openssh-key-v1\0"
+        keyData.append(contentsOf: Array(magic.utf8))
+        appendSSHString(&keyData, "none")       // ciphername
+        appendSSHString(&keyData, "none")       // kdfname
+        appendSSHString(&keyData, "")           // kdfoptions (empty string)
+        appendUInt32(&keyData, 1)               // number of keys
+        appendSSHBytes(&keyData, pubBlob)       // public key blob
+        appendSSHBytes(&keyData, privSection)   // private key section
+        
+        // Wrap in PEM armor
+        let base64 = keyData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n\(base64)\n-----END OPENSSH PRIVATE KEY-----\n"
+        
+        return pem.data(using: .utf8)!
+    }
+    
+    /// Append a uint32 in big-endian format.
+    private func appendUInt32(_ data: inout Data, _ value: UInt32) {
+        var be = value.bigEndian
+        data.append(Data(bytes: &be, count: 4))
+    }
+    
+    /// Append SSH wire-format bytes (uint32 length + raw bytes).
+    private func appendSSHBytes(_ data: inout Data, _ bytes: Data) {
+        var length = UInt32(bytes.count).bigEndian
+        data.append(Data(bytes: &length, count: 4))
+        data.append(bytes)
     }
     
     /// Generate RSA key pair using Security framework
@@ -180,22 +248,124 @@ class SSHKeyManager: ObservableObject {
         return (privateKeyData, publicKeyString)
     }
     
-    /// Format RSA public key in OpenSSH format
-    private func formatRSAPublicKey(_ data: Data, name: String) -> String {
-        // RSA public key in OpenSSH format
-        // This is simplified - real implementation needs proper ASN.1 parsing
+    /// Format RSA public key in OpenSSH format.
+    /// SecKeyCopyExternalRepresentation returns PKCS#1 DER: SEQUENCE { INTEGER n, INTEGER e }
+    /// SSH wire format needs: string "ssh-rsa" + mpint e + mpint n
+    private func formatRSAPublicKey(_ pkcs1Data: Data, name: String) -> String {
+        // Parse PKCS#1 DER to extract n and e
+        guard let (modulus, exponent) = parseRSAPublicKeyDER(pkcs1Data) else {
+            logger.error("Failed to parse RSA public key DER, falling back to raw encoding")
+            // Fallback: return a clearly-marked invalid key rather than a silently broken one
+            return "# ERROR: Failed to parse RSA key for \(name)"
+        }
+        
         var keyBlob = Data()
         
+        // Key type string: uint32 length + "ssh-rsa"
         let keyType = "ssh-rsa"
-        var typeLength = UInt32(keyType.count).bigEndian
-        keyBlob.append(Data(bytes: &typeLength, count: 4))
-        keyBlob.append(keyType.data(using: .utf8)!)
+        appendSSHString(&keyBlob, keyType)
         
-        // For now, just base64 encode the raw data
-        // A proper implementation would parse the ASN.1 structure
-        keyBlob.append(data)
+        // SSH wire format: mpint e, then mpint n (e before n!)
+        appendSSHMPInt(&keyBlob, exponent)
+        appendSSHMPInt(&keyBlob, modulus)
         
         return "ssh-rsa \(keyBlob.base64EncodedString()) \(name)@ghostty-ssh"
+    }
+    
+    /// Parse PKCS#1 DER-encoded RSA public key to extract modulus (n) and exponent (e).
+    /// PKCS#1 RSAPublicKey: SEQUENCE { INTEGER n, INTEGER e }
+    private func parseRSAPublicKeyDER(_ data: Data) -> (modulus: Data, exponent: Data)? {
+        var offset = 0
+        let bytes = [UInt8](data)
+        
+        // SEQUENCE tag (0x30)
+        guard offset < bytes.count, bytes[offset] == 0x30 else { return nil }
+        offset += 1
+        
+        // Skip SEQUENCE length
+        guard let _ = readDERLength(bytes, offset: &offset) else { return nil }
+        
+        // First INTEGER: modulus (n)
+        guard offset < bytes.count, bytes[offset] == 0x02 else { return nil }
+        offset += 1
+        guard let modulusLength = readDERLength(bytes, offset: &offset) else { return nil }
+        guard offset + modulusLength <= bytes.count else { return nil }
+        var modulus = Data(bytes[offset..<offset + modulusLength])
+        offset += modulusLength
+        
+        // Strip leading zero byte if present (DER uses it for positive sign)
+        if modulus.first == 0x00 && modulus.count > 1 {
+            modulus = modulus.dropFirst()
+        }
+        
+        // Second INTEGER: exponent (e)
+        guard offset < bytes.count, bytes[offset] == 0x02 else { return nil }
+        offset += 1
+        guard let exponentLength = readDERLength(bytes, offset: &offset) else { return nil }
+        guard offset + exponentLength <= bytes.count else { return nil }
+        var exponent = Data(bytes[offset..<offset + exponentLength])
+        
+        // Strip leading zero byte if present
+        if exponent.first == 0x00 && exponent.count > 1 {
+            exponent = exponent.dropFirst()
+        }
+        
+        return (modulus, exponent)
+    }
+    
+    /// Read a DER length field (handles short and long form).
+    /// Advances offset past the length bytes. Returns the decoded length.
+    private func readDERLength(_ bytes: [UInt8], offset: inout Int) -> Int? {
+        guard offset < bytes.count else { return nil }
+        let first = bytes[offset]
+        offset += 1
+        
+        if first < 0x80 {
+            // Short form: length is the byte itself
+            return Int(first)
+        }
+        
+        // Long form: first byte = 0x80 | numLengthBytes
+        let numLengthBytes = Int(first & 0x7F)
+        guard numLengthBytes > 0, numLengthBytes <= 4 else { return nil }
+        guard offset + numLengthBytes <= bytes.count else { return nil }
+        
+        var length = 0
+        for i in 0..<numLengthBytes {
+            length = (length << 8) | Int(bytes[offset + i])
+        }
+        offset += numLengthBytes
+        return length
+    }
+    
+    /// Append an SSH wire-format string (uint32 length + bytes).
+    private func appendSSHString(_ data: inout Data, _ string: String) {
+        let bytes = Array(string.utf8)
+        var length = UInt32(bytes.count).bigEndian
+        data.append(Data(bytes: &length, count: 4))
+        data.append(contentsOf: bytes)
+    }
+    
+    /// Append an SSH wire-format mpint (uint32 length + big-endian bytes with leading
+    /// zero if high bit is set, per RFC 4251 section 5).
+    private func appendSSHMPInt(_ data: inout Data, _ value: Data) {
+        var bytes = [UInt8](value)
+        
+        // Strip leading zeros (but keep at least one byte)
+        while bytes.count > 1 && bytes.first == 0x00 {
+            bytes.removeFirst()
+        }
+        
+        // If high bit is set, prepend a zero byte (positive sign)
+        let needsPadding = (bytes.first ?? 0) & 0x80 != 0
+        let totalLength = bytes.count + (needsPadding ? 1 : 0)
+        
+        var length = UInt32(totalLength).bigEndian
+        data.append(Data(bytes: &length, count: 4))
+        if needsPadding {
+            data.append(0x00)
+        }
+        data.append(contentsOf: bytes)
     }
     
     // MARK: - Key Import
@@ -365,25 +535,6 @@ class SSHKeyManager: ObservableObject {
     /// Get the private key data for use with SSH
     func getPrivateKey(name: String) throws -> Data {
         return try keychain.getSSHKey(name: name)
-    }
-    
-    /// Get a temporary file path containing the private key (for libssh2)
-    func getPrivateKeyPath(name: String) throws -> String {
-        let keyData = try getPrivateKey(name: name)
-        
-        // Write to temporary file
-        let tempDir = FileManager.default.temporaryDirectory
-        let keyFile = tempDir.appendingPathComponent("ghostty_key_\(name)")
-        
-        try keyData.write(to: keyFile)
-        
-        // Set restrictive permissions
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: keyFile.path
-        )
-        
-        return keyFile.path
     }
     
     /// Delete a key
