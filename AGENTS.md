@@ -66,7 +66,6 @@ Geistty/
 │   ├── App/              # App entry point, main views
 │   ├── Auth/             # SSH authentication, credentials, keychain
 │   ├── Ghostty/          # Ghostty integration, terminal surface
-│   ├── SFTP/             # SFTP file browser
 │   ├── SSH/              # SSH connection management, tmux control mode
 │   ├── Terminal/         # Terminal session, view models
 │   └── UI/               # Settings, reusable UI components
@@ -89,8 +88,6 @@ Geistty/
 - `Sources/SSH/TmuxLayout.swift` - tmux layout string parser for split pane geometry
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
 - `Sources/UI/SettingsView.swift` - App settings UI
-- `Sources/SFTP/SFTPChannel.swift` - Low-level SFTP protocol implementation
-- `Sources/SFTP/SFTPClient.swift` - High-level async SFTP API (for future File Provider)
 
 ## Ghostty C API Usage
 
@@ -346,7 +343,7 @@ logger.error("Error: \(error.localizedDescription)")
 logger.debug("Debug details: \(someValue)")
 ```
 
-Existing categories: `Ghostty`, `Terminal`, `NIOSSHConnection`, `SSHSession`, `SFTP`, `SSHKey`, `Credentials`, `Keychain`
+Existing categories: `Ghostty`, `Terminal`, `NIOSSHConnection`, `SSHSession`, `SSHKey`, `Credentials`, `Keychain`
 
 ### SwiftNIO-SSH Debugging
 
