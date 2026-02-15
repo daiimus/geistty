@@ -713,7 +713,7 @@ class SSHSession: ObservableObject, Identifiable {
         let displayText = pendingInputQueue
             .compactMap { String(data: $0, encoding: .utf8) }
             .joined()
-            .filter { !$0.isASCII || $0.asciiValue! >= 32 || $0 == "\n" || $0 == "\t" }
+            .filter { !$0.isASCII || ($0.asciiValue ?? 0) >= 32 || $0 == "\n" || $0 == "\t" }
         
         logger.info("📝 updatePendingInputDisplay: '\(displayText)' tmuxSessionManager=\(tmuxSessionManager != nil)")
         tmuxSessionManager?.displayPendingInput(displayText)

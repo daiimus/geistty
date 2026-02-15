@@ -342,15 +342,5 @@ class ConfigSyncManager: ObservableObject {
     /// Called when config file is edited externally - reload GUI
     func onConfigFileChanged() {
         loadConfigToGUI()
-        // Notify UI to refresh
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: .configFileUpdated, object: nil)
-        }
     }
-}
-
-// MARK: - Notification Names
-
-extension Notification.Name {
-    static let configFileUpdated = Notification.Name("configFileUpdated")
 }

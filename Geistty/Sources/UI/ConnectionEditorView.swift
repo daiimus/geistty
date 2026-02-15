@@ -228,6 +228,7 @@ struct ConnectionEditorView: View {
             // Auto-select the imported key
             selectedKeyName = keyName
         } catch {
+            logger.error("Failed to import SSH key from \(url.lastPathComponent): \(error.localizedDescription)")
             importError = error.localizedDescription
             showingImportError = true
         }
@@ -446,6 +447,7 @@ struct SSHKeyGeneratorView: View {
                     generatedKey = key
                 }
             } catch {
+                logger.error("Failed to generate SSH key '\(keyName)': \(error.localizedDescription)")
                 await MainActor.run {
                     isGenerating = false
                     errorMessage = error.localizedDescription
@@ -614,6 +616,7 @@ struct SSHKeyListView: View {
                         do {
                             _ = try keyManager.importKey(name: importKeyName, pemData: data)
                         } catch {
+                            logger.error("Failed to import SSH key '\(importKeyName)': \(error.localizedDescription)")
                             importError = error.localizedDescription
                             showingImportError = true
                         }
@@ -663,6 +666,7 @@ struct SSHKeyListView: View {
             importKeyName = url.deletingPathExtension().lastPathComponent
             showingImportAlert = true
         } catch {
+            logger.error("Failed to read key file \(url.lastPathComponent): \(error.localizedDescription)")
             importError = error.localizedDescription
             showingImportError = true
         }

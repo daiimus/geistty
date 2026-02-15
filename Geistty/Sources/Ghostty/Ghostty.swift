@@ -705,9 +705,7 @@ extension Ghostty {
                 
                 if let bodyPtr = notification.body {
                     let body = String(cString: bodyPtr)
-                    let title = notification.title != nil
-                        ? String(cString: notification.title!)
-                        : "Terminal"
+                    let title = notification.title.map { String(cString: $0) } ?? "Terminal"
                     
                     logger.info("🔔 Notification: \(title) - \(body)")
                     
@@ -2215,8 +2213,9 @@ extension Ghostty {
         private func showCopyMenu(at point: CGPoint) {
             // Create edit menu interaction if needed
             if editMenuInteraction == nil {
-                editMenuInteraction = UIEditMenuInteraction(delegate: nil)
-                addInteraction(editMenuInteraction!)
+                let interaction = UIEditMenuInteraction(delegate: nil)
+                editMenuInteraction = interaction
+                addInteraction(interaction)
             }
             
             let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
@@ -2382,10 +2381,6 @@ extension Ghostty {
                     else if char == "r" && hasShift && !hasOption {
                         // Cmd+Shift+R - Rename tmux window
                         action = .renameWindow
-                    } else if char == "," && !hasShift && !hasOption {
-                        // Cmd+, - Also rename window (common convention)
-                        // Note: This might conflict with system preferences
-                        // action = .renameWindow
                     }
                     
                     // If we have an action, try to handle it
@@ -2508,10 +2503,6 @@ extension Ghostty {
             keyRepeatTimer?.invalidate()
             keyRepeatTimer = nil
             heldKeyEvent = nil
-        }
-        
-        override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            super.pressesChanged(presses, with: event)
         }
         
         override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -3194,8 +3185,8 @@ extension Ghostty {
                     } else {
                         // Try to cast through AnyObject to id and use ObjC runtime
                         let obj = sublayer as AnyObject
-                        if obj.isKind(of: CALayer.self) {
-                            view.layer.addSublayer(obj as! CALayer)
+                        if let caLayer = obj as? CALayer {
+                            view.layer.addSublayer(caLayer)
                         }
                     }
                 }

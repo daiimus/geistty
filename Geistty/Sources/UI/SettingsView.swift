@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+import os
+
+private let logger = Logger(subsystem: "com.geistty", category: "Settings")
 
 /// User preferences stored in UserDefaults
 class AppSettings: ObservableObject {
@@ -590,8 +593,9 @@ struct ConfigEditorView: View {
                 }
             }
         } catch {
+            logger.error("Failed to save config: \(error.localizedDescription)")
             withAnimation {
-                saveResult = .failure("Save failed")
+                saveResult = .failure("Save failed: \(error.localizedDescription)")
             }
         }
     }

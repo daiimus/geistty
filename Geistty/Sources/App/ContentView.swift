@@ -46,6 +46,7 @@ struct ContentView: View {
     @State private var showConnectionSheet = false
     @State private var showConnectionList = false
     @State private var showSettings = false
+    @State private var showSSHKeyManager = false
     @State private var connectionInfo = ConnectionInfo()
     @State private var connectedSession: SSHSession?
     
@@ -159,6 +160,14 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
             showSettings = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showSSHKeyManager)) { _ in
+            showSSHKeyManager = true
+        }
+        .sheet(isPresented: $showSSHKeyManager) {
+            NavigationStack {
+                SSHKeyListView()
+            }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(
