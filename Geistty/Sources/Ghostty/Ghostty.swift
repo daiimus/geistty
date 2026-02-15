@@ -510,7 +510,19 @@ extension Ghostty {
             
             switch action.tag {
             case GHOSTTY_ACTION_SET_TITLE:
-                // Handle title change
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                let titleData = action.action.set_title
+                guard let titlePtr = titleData.title else { return false }
+                let title = String(cString: titlePtr)
+                if let userdata = ghostty_surface_userdata(surface) {
+                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    DispatchQueue.main.async {
+                        surfaceView.title = title
+                    }
+                }
                 return true
                 
             case GHOSTTY_ACTION_RING_BELL:

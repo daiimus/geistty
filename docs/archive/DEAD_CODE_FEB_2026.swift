@@ -857,3 +857,124 @@ extension TmuxPane {
 //         case choose
 //         case view
 //     }
+
+// ============================================================================
+// BATCH 1 (Session 10) — Redundancy removals: Swift duplicating Ghostty
+// Archived: Feb 14, 2026
+// ============================================================================
+
+// --- A1: TerminalViewModel.paste() — bypassed bracketed paste mode ---
+// File: Sources/Terminal/TerminalContainerView.swift
+// Replaced with: surfaceView?.paste(nil) delegation to Ghostty SurfaceView
+//
+//     func paste() {
+//         if let text = UIPasteboard.general.string {
+//             send(text: text)
+//         }
+//     }
+
+// --- A2: TerminalViewModel.copy() — duplicated SurfaceView.copy ---
+// File: Sources/Terminal/TerminalContainerView.swift
+// Replaced with: surfaceView?.copy(nil) delegation to Ghostty SurfaceView
+//
+//     func copy() {
+//         guard let surface = surfaceView?.surface else {
+//             logger.warning("📋 Copy: no surface available")
+//             return
+//         }
+//
+//         // Check if there's a selection
+//         guard ghostty_surface_has_selection(surface) else {
+//             logger.info("📋 Copy: no selection")
+//             return
+//         }
+//
+//         // Read the selection
+//         var textStruct = ghostty_text_s()
+//         if ghostty_surface_read_selection(surface, &textStruct) {
+//             if let textPtr = textStruct.text, textStruct.text_len > 0 {
+//                 let selectedText = String(cString: textPtr)
+//                 UIPasteboard.general.string = selectedText
+//                 logger.info("📋 Copied \(textStruct.text_len) characters to clipboard")
+//             }
+//             // Free the text
+//             ghostty_surface_free_text(surface, &textStruct)
+//         }
+//
+//         // Clear selection state after copying
+//         isSelectingText = false
+//     }
+
+// --- A8: isSelectingText property and selectionDidChange() — dead, zero readers ---
+// File: Sources/Terminal/TerminalContainerView.swift
+//
+//     @Published var isSelectingText: Bool = false
+//
+//     /// Called when selection state changes (from SurfaceView)
+//     func selectionDidChange(_ hasSelection: Bool) {
+//         isSelectingText = hasSelection
+//     }
+
+// --- A3: clearScreen() — sent raw Ctrl+L, missing Ghostty's scrollback clear ---
+// File: Sources/Terminal/TerminalContainerView.swift
+// Replaced with: ghostty_surface_binding_action("clear_screen")
+//
+//     /// Clear the terminal screen (Ctrl+L)
+//     func clearScreen() {
+//         // Send Ctrl+L (form feed / clear screen)
+//         send(text: "\u{0c}")
+//     }
+//
+// Also: handleClearScreen() duplicated logic instead of calling clearScreen()
+//     private func handleClearScreen() {
+//         // Send clear screen escape sequence (Ctrl+L equivalent)
+//         viewModel?.send(text: "\u{0C}")  // Form feed / Ctrl+L
+//     }
+
+// --- A4: handleResetTerminal() — duplicated resetTerminal() logic ---
+// File: Sources/Terminal/TerminalContainerView.swift
+// Fixed to call viewModel?.resetTerminal() instead of duplicating
+//
+//     private func handleResetTerminal() {
+//         // Send reset terminal escape sequence
+//         viewModel?.send(text: "\u{1B}c")  // ESC c - Full reset
+//     }
+
+// --- A5: Redundant config parser cases (overwrite API results) ---
+// File: Sources/Ghostty/ConfigSyncManager.swift, parseConfigFileForGUI()
+// These 3 cases were redundant with syncFromConfig() API path:
+//
+//             case "cursor-style":
+//                 if ["block", "bar", "underline"].contains(value) {
+//                     defaults.set(value, forKey: "terminal.cursorStyle")
+//                     logger.debug("File parser: cursor-style = \(value)")
+//                 }
+//
+//             case "font-thicken":
+//                 defaults.set(value == "true", forKey: "terminal.fontThicken")
+//                 logger.debug("File parser: font-thicken = \(value)")
+//
+//             case "background-opacity":
+//                 if let opacity = Double(value) {
+//                     defaults.set(opacity, forKey: "terminal.backgroundOpacity")
+//                     logger.debug("File parser: background-opacity = \(opacity)")
+//                 }
+
+// --- A7: SET_TITLE action handler was a no-op ---
+// File: Sources/Ghostty/Ghostty.swift
+// Was: returned true but discarded the title
+// Fixed to: extract title and set surfaceView.title (following macOS pattern)
+//
+//             case GHOSTTY_ACTION_SET_TITLE:
+//                 // Handle title change
+//                 return true
+
+// --- A9: fontThickenStrength — dead @AppStorage, zero readers ---
+// File: Sources/UI/SettingsView.swift
+//
+//     @AppStorage("terminal.fontThickenStrength") var fontThickenStrength: Int = 255
+
+// --- A10: colorTheme — dead @AppStorage on AppSettings, accessed via UserDefaults.standard elsewhere ---
+// File: Sources/UI/SettingsView.swift
+//
+//     @AppStorage("terminal.colorTheme") var colorTheme: String = "Default"
