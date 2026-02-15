@@ -309,13 +309,6 @@ extension Ghostty {
             """
         }
         
-        /// Map user-friendly font names to Ghostty-compatible names
-        /// Ghostty uses CoreText font family names (not PostScript names)
-        /// NOTE: Implementation now in FontMapping.swift
-        static func mapFontFamily(_ fontFamily: String) -> String {
-            FontMapping.toGhostty(fontFamily)
-        }
-        
         /// Create a new config with the current user preferences
         /// Returns nil if config creation fails
         static func createConfigWithCurrentSettings() -> ghostty_config_t? {

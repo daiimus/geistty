@@ -299,7 +299,7 @@ class ConfigSyncManager: ObservableObject {
     
     /// Update font family in config file
     func updateFontFamily(_ fontFamily: String) {
-        let ghosttyFont = Ghostty.Config.mapFontFamily(fontFamily)
+        let ghosttyFont = FontMapping.toGhostty(fontFamily)
         updateConfigValue(key: "font-family", value: ghosttyFont)
     }
     

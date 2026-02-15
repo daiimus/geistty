@@ -45,14 +45,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 | Task | Effort | Notes |
 |------|--------|-------|
-| Remove dead tmux search mode code | Medium | `captureTmuxPane()` stub always fails → entire tmux search codepath is dead. See [details](#dead-tmux-search-mode-code). |
 | Consolidate `controlModeActive`/`controlModeDataRouting` → `ControlModeState` enum | Low | Two booleans tracking same concept |
 
 ### Medium Priority
 
 | Task | Effort | Notes |
 |------|--------|-------|
-| Consolidate font mapping (3 places) | Low | `Ghostty.swift` mapFontFamily/reverseMapFontFamily + `SettingsView.swift` fontFamilies |
 | Split `TerminalContainerView.swift` (~1700 lines) | High | Extract search UI into separate view |
 | Split `TmuxSessionManager.swift` (~1800 lines) | High | Deferred from Dec 2025 |
 | Extract common connection logic in SSHSession | Medium | 3 similar connect methods |
@@ -65,17 +63,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 | Extract magic numbers to constants | Low | Timeouts, marker strings |
 | Review and standardize naming conventions | Low | |
 | Add missing documentation comments | Low | |
-
-### Dead tmux Search Mode Code
-
-The `captureTmuxPane()` stub in `TerminalContainerView.swift` always returns failure, making the entire tmux search mode codepath dead. Ghostty's native sync search works correctly as fallback.
-
-**Files affected:**
-- `TerminalContainerView.swift`: `captureTmuxPane()` stub (491-503), `tmuxGotoLine()` (507-529), callback wiring (1182-1195, 1204-1205)
-- `SurfaceSearchOverlay.swift`: extensive tmux search mode branches (lines 110, 122-124, 133, 136, 153-155, 163-188, 191-211, etc.)
-- `Ghostty.swift`: `SearchMode.tmux` enum case, `tmuxContent`, `tmuxMatchLines`, `isCapturing`, `captureError` on `SearchState` (3307-3341)
-
-Removing this would significantly simplify `SurfaceSearchOverlay`.
 
 ---
 
@@ -98,6 +85,11 @@ Removing this would significantly simplify `SurfaceSearchOverlay`.
 | Cleanup | Dead code removal (GhosttyAPI.swift, SurfaceManager.swift, etc.) | Dec 2025 |
 | Cleanup | Debug code cleanup (print → Logger) | Dec 2025 |
 | Docs | ARCHITECTURE.md and README.md rewrite for v0.1-stable | Feb 2026 |
+| Cleanup | Docs cleanup, SFTP archive, dead tmux search mode removal | Feb 2026 |
+| Infra | Rebase Ghostty fork on upstream, rebuild GhosttyKit | Feb 2026 |
+| Refactor | Theme system simplification — native Ghostty theme resolution | Feb 2026 |
+| Refactor | Config introspection via ghostty_config_get() with hybrid fallback | Feb 2026 |
+| Cleanup | Font mapping consolidation (FontMapping.swift), SF Mono default fix | Feb 2026 |
 
 ---
 
@@ -178,6 +170,10 @@ Remaining:
 - Reload config from file (Cmd+Shift+,)
 - Theme/font/cursor changes write to config
 - In-app config editor
+- Native theme resolution via `GHOSTTY_RESOURCES_DIR` (theme = name)
+- Config introspection via `ghostty_config_get()` for supported types
+- Hybrid sync: C API for simple types, file parser for RepeatableString/Theme
+- Font mapping consolidated in `FontMapping.swift`
 
 ### Remaining
 

@@ -15,7 +15,7 @@ class AppSettings: ObservableObject {
     
     @AppStorage("terminal.colorTheme") var colorTheme: String = "Default"
     @AppStorage("terminal.cursorStyle") var cursorStyle: String = "block"
-    @AppStorage("terminal.fontFamily") var fontFamily: String = "SF Mono"
+    @AppStorage("terminal.fontFamily") var fontFamily: String = "Menlo"
     
     // MARK: - Font Rendering Settings
     
