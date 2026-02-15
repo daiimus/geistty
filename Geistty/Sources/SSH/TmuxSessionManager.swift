@@ -29,15 +29,6 @@ enum TmuxConnectionState: Equatable {
     case connectionLost(reason: String?)
 }
 
-/// Whether a tmux session was newly created or resumed from an existing one
-enum SessionResumeStatus: Equatable {
-    /// A new session was created on the server
-    case created(name: String)
-    
-    /// An existing session was resumed (attached to)
-    case resumed(name: String)
-}
-
 /// Manages the mapping between tmux server state and Geistty UI
 @MainActor
 class TmuxSessionManager: ObservableObject {
@@ -68,10 +59,6 @@ class TmuxSessionManager: ObservableObject {
     /// Detailed connection state
     @Published private(set) var connectionState: TmuxConnectionState = .disconnected
     
-    /// Whether the current session was newly created or resumed
-    /// Set after activation when we can distinguish the two cases
-    @Published private(set) var sessionResumeStatus: SessionResumeStatus?
-    
     /// Current split tree for the focused window (for UI rendering)
     @Published private(set) var currentSplitTree: TmuxSplitTree = TmuxSplitTree()
     
@@ -99,10 +86,6 @@ class TmuxSessionManager: ObservableObject {
     /// we buffer here and flush when the surface is created.
     private(set) var pendingOutput: [String: [Data]] = [:]
     
-    /// Tracks whether %sessions-changed was received before %session-changed
-    /// If true, the session was newly created; if false, it was resumed (attached)
-    private var sawSessionsChanged: Bool = false
-
     /// Surface creation factory (injected before activation)
     /// This creates Ghostty surfaces with proper configuration
     private var surfaceFactory: ((String) -> Ghostty.SurfaceView)?
@@ -121,14 +104,7 @@ class TmuxSessionManager: ObservableObject {
     private var lastResizeCols: Int = 0
     private var lastResizeRows: Int = 0
     
-    /// Cache of last processed layout strings per window (to avoid redundant updates)
-    private var lastProcessedLayouts: [String: String] = [:]
-    
-    /// Pending layout changes for debouncing (windowId -> (layout, timestamp))
-    private var pendingLayoutChanges: [String: (layout: String, windowIndex: Int)] = [:]
-    
-    /// Debounce task for layout changes to prevent UI thrashing
-    private var layoutDebounceTask: Task<Void, Never>?
+
     
     // MARK: - Direct Write Connection
     
@@ -208,19 +184,13 @@ class TmuxSessionManager: ObservableObject {
         panes.removeAll()
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
-        lastProcessedLayouts.removeAll()
         
         // Clear output buffers
         pendingOutput.removeAll()
-        sawSessionsChanged = false
-        sessionResumeStatus = nil
         
         // Cancel debounce tasks to prevent crashes after cleanup
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
-        layoutDebounceTask?.cancel()
-        layoutDebounceTask = nil
-        pendingLayoutChanges.removeAll()
         lastResizeCols = 0
         lastResizeRows = 0
         lastRefreshSize = nil
@@ -256,348 +226,7 @@ class TmuxSessionManager: ObservableObject {
         // Future work: expose layout geometry via C API and update split trees.
     }
     
-    /// Handle session changed notification
-    func handleSessionChanged(sessionId: String, sessionName: String) {
-        logger.info("Session changed: \(sessionId) (\(sessionName))")
-        
-        // Determine if this session was newly created or resumed
-        // %sessions-changed arriving before %session-changed means a session was created
-        if sawSessionsChanged {
-            sessionResumeStatus = .created(name: sessionName)
-            logger.info("Session '\(sessionName)' was newly created")
-        } else {
-            sessionResumeStatus = .resumed(name: sessionName)
-            logger.info("Session '\(sessionName)' was resumed (attached to existing)")
-        }
-        sawSessionsChanged = false
-        
-        // Update or create session
-        var session = sessions[sessionId] ?? TmuxSession(id: sessionId, name: sessionName)
-        session.name = sessionName
-        session.isAttached = true
-        
-        sessions[sessionId] = session
-        currentSession = session
-        
-        // In native Ghostty tmux mode, session restore (capture-pane) is handled
-        // by Ghostty's tmux viewer during its startup sequence. No action needed here.
-    }
-    
-    
-    /// Handle window added notification
-    func handleWindowAdd(windowId: String) {
-        logger.info("📑 Window added: \(windowId)")
-        
-        guard let sessionId = currentSession?.id else { return }
-        
-        // Create placeholder window, will be filled in by query
-        let window = TmuxWindow(id: windowId, index: windows.count, name: "new", sessionId: sessionId)
-        windows[windowId] = window
-        
-        // Add to current session's window list
-        if var session = currentSession {
-            if !session.windowIds.contains(windowId) {
-                session.windowIds.append(windowId)
-                sessions[session.id] = session
-                currentSession = session
-            }
-        }
-        
-        // In native Ghostty mode, window details will arrive via %layout-change
-        // which Ghostty's viewer processes, triggering TMUX_STATE_CHANGED.
-        // No need to query — state comes from notifications.
-        logger.info("📑 Window \(windowId) added, waiting for layout notification from Ghostty")
-    }
-    
-    /// Handle window closed notification
-    func handleWindowClose(windowId: String) {
-        logger.info("🗑️ Window closed: \(windowId)")
-        
-        // Clean up associated panes and their surfaces
-        if let window = windows[windowId] {
-            for paneId in window.paneIds {
-                panes.removeValue(forKey: paneId)
-                
-                // Check if this pane has the primary surface and clear it
-                if paneSurfaces[paneId] === primarySurface {
-                    logger.info("🗑️ Clearing primarySurface (was in closed window)")
-                    primarySurface = nil
-                    primaryCellSize = .zero
-                }
-                
-                // Remove surface with paneActuallyClosed=true so %0 can be removed
-                removeSurface(for: paneId, paneActuallyClosed: true)
-                
-                // Clean up output buffer for this pane
-                pendingOutput.removeValue(forKey: paneId)
-            }
-        }
-        
-        // Remove window and its split tree
-        windows.removeValue(forKey: windowId)
-        windowSplitTrees.removeValue(forKey: windowId)
-        lastProcessedLayouts.removeValue(forKey: windowId)
-        
-        // Update session's window list
-        if var session = currentSession {
-            session.windowIds.removeAll { $0 == windowId }
-            sessions[session.id] = session
-            currentSession = session
-            
-            // If this was the focused window, switch to another window
-            if focusedWindowId == windowId {
-                if let nextWindowId = session.windowIds.first {
-                    logger.info("🗑️ Focused window closed, switching to \(nextWindowId)")
-                    
-                    // Use selectWindow which properly handles querying layout,
-                    // creating surfaces, and assigning primarySurface for the new window
-                    selectWindow(nextWindowId)
-                } else {
-                    // No windows left - this shouldn't normally happen,
-                    // tmux should send %exit when last window closes
-                    logger.warning("🗑️ All windows closed but no %exit received")
-                    currentSplitTree = TmuxSplitTree()
-                    focusedPaneId = ""
-                    focusedWindowId = ""
-                }
-            }
-        }
-    }
-    
-    /// Handle window renamed notification
-    func handleWindowRenamed(windowId: String, name: String) {
-        logger.info("Window renamed: \(windowId) -> \(name)")
-        
-        if var window = windows[windowId] {
-            window.name = name
-            windows[windowId] = window
-        }
-    }
-    
-    /// Handle session window changed notification (window focus changed on server)
-    func handleSessionWindowChanged(sessionId: String, windowId: String) {
-        logger.info("📑 Session window changed: \(sessionId) -> \(windowId)")
-        
-        // Update focused window if it's our current session
-        if currentSession?.id == sessionId {
-            focusedWindowId = windowId
-            
-            // Switch to the split tree for the new window
-            if let tree = windowSplitTrees[windowId] {
-                currentSplitTree = tree
-                logger.info("📑 Switched to split tree for window \(windowId): \(tree.paneIds.count) panes")
-                
-                // Update focused pane to first pane in this window (or active pane if known)
-                if let window = windows[windowId], let activePaneId = window.activePaneId {
-                    focusedPaneId = activePaneId
-                } else if let firstPaneId = tree.paneIds.first {
-                    focusedPaneId = "%\(firstPaneId)"
-                }
-            } else {
-                // No split tree yet — layout will come via %layout-change from Ghostty
-                logger.info("📑 No split tree for window \(windowId), waiting for layout notification from Ghostty")
-            }
-        }
-    }
-    
-    /// Handle layout changed notification with debouncing
-    /// Rapid layout changes are coalesced to prevent UI thrashing
-    func handleLayoutChanged(windowId: String, windowIndex: Int, layout: String) {
-        // Strip trailing markers like " *" (active window) or " -" (last window)
-        var cleanLayout = layout
-        if cleanLayout.hasSuffix(" *") || cleanLayout.hasSuffix(" -") {
-            cleanLayout = String(cleanLayout.dropLast(2))
-        }
-        
-        // Skip if this layout is identical to the last one we processed for this window
-        // This prevents redundant UI updates during rapid layout changes
-        if lastProcessedLayouts[windowId] == cleanLayout {
-            logger.debug("📐 Skipping duplicate layout for \(windowId)")
-            return
-        }
-        
-        // Store pending layout change for this window
-        pendingLayoutChanges[windowId] = (cleanLayout, windowIndex)
-        
-        // Cancel existing debounce task
-        layoutDebounceTask?.cancel()
-        
-        // Debounce: wait 30ms for rapid changes to settle before updating UI
-        layoutDebounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 30_000_000)  // 30ms
-            guard !Task.isCancelled, let self = self else { return }
-            
-            await MainActor.run {
-                // Process all pending layout changes
-                let changes = self.pendingLayoutChanges
-                self.pendingLayoutChanges.removeAll()
-                
-                for (windowId, change) in changes {
-                    self.processLayoutChange(windowId: windowId, windowIndex: change.windowIndex, layout: change.layout)
-                }
-            }
-        }
-    }
-    
-    /// Process a layout change (called after debounce)
-    private func processLayoutChange(windowId: String, windowIndex: Int, layout: String) {
-        lastProcessedLayouts[windowId] = layout
-        
-        logger.info("📐 Layout changed: \(windowId) [\(windowIndex)] layout=\(layout.prefix(80))...")
-        
-        // Update window info if we have it
-        if var window = windows[windowId] {
-            window.layout = layout
-            window.index = windowIndex
-            windows[windowId] = window
-        } else {
-            // Create window entry if it doesn't exist yet
-            var window = TmuxWindow(id: windowId, index: windowIndex, name: "window-\(windowIndex)", sessionId: currentSession?.id ?? "$0")
-            window.layout = layout
-            windows[windowId] = window
-            logger.info("📐 Created window entry for \(windowId)")
-        }
-        
-        // Parse layout and update split tree
-        if let parsedLayout = try? TmuxLayout.parseWithChecksum(layout) {
-            logger.info("📐 Parsed layout: \(parsedLayout.width)x\(parsedLayout.height) content=\(parsedLayout.content)")
-            updatePanePositions(from: parsedLayout, in: windowId)
-            updateSplitTree(from: parsedLayout, for: windowId)
-        } else if let parsedLayout = try? TmuxLayout.parse(String(layout.dropFirst(5))) {
-            // Try parsing without checksum (skip "XXXX," prefix)
-            logger.info("📐 Parsed layout (no checksum): \(parsedLayout.width)x\(parsedLayout.height) content=\(parsedLayout.content)")
-            updatePanePositions(from: parsedLayout, in: windowId)
-            updateSplitTree(from: parsedLayout, for: windowId)
-        } else {
-            logger.error("📐 Failed to parse layout: \(layout)")
-        }
-    }
-    
-    /// Update the split tree for a window from a parsed layout
-    private func updateSplitTree(from layout: TmuxLayout, for windowId: String) {
-        let newTree = TmuxSplitTree.from(layout: layout)
-        let oldTree = windowSplitTrees[windowId]
-        windowSplitTrees[windowId] = newTree
-        
-        // Detect removed panes and clean up their surfaces
-        if let oldTree = oldTree {
-            let oldPaneIds = Set(oldTree.paneIds.map { "%\($0)" })
-            let newPaneIds = Set(newTree.paneIds.map { "%\($0)" })
-            let removedPaneIds = oldPaneIds.subtracting(newPaneIds)
-            
-            for paneId in removedPaneIds {
-                logger.info("📐 🗑️ Pane \(paneId) was closed, cleaning up surface")
-                
-                // Check if this was our primary surface BEFORE removing
-                let wasPrimarySurface = paneSurfaces[paneId] === primarySurface
-                
-                removeSurface(for: paneId, paneActuallyClosed: true)
-                panes.removeValue(forKey: paneId)
-                
-                // Clean up output buffer for this pane
-                pendingOutput.removeValue(forKey: paneId)
-                
-                // If the removed pane had our primary surface, reassign it atomically
-                if wasPrimarySurface {
-                    reassignPrimarySurface(excludingPaneId: paneId, fromPaneIds: newPaneIds)
-                }
-            }
-            
-            if !removedPaneIds.isEmpty {
-                logger.info("📐 Cleaned up \(removedPaneIds.count) closed pane(s): \(removedPaneIds.sorted())")
-            }
-        }
-        
-        logger.info("📐 Split tree for \(windowId): panes=\(newTree.paneIds), isSplit=\(newTree.isSplit), focusedWindow=\(focusedWindowId)")
-        
-        // Log the tree details including dimensions for debugging
-        if let rootNode = newTree.root {
-            logTreeNode(rootNode, prefix: "📐 Tree: ")
-        }
-        
-        // Update current split tree if this is the focused window,
-        // or if focusedWindowId hasn't been set yet (initial connection)
-        if windowId == focusedWindowId || focusedWindowId.isEmpty {
-            if focusedWindowId.isEmpty {
-                logger.info("📐 Setting focusedWindowId from first layout: \(windowId)")
-                focusedWindowId = windowId
-            }
-            currentSplitTree = newTree
-            logger.info("📐 ✅ Updated currentSplitTree: \(newTree.paneIds.count) panes, isSplit=\(newTree.isSplit)")
-            
-            // Ensure surfaces exist for all panes in this window
-            // This is important when switching to a window that hasn't received output yet
-            for numericPaneId in newTree.paneIds {
-                let paneId = "%\(numericPaneId)"
-                if paneSurfaces[paneId] == nil {
-                    logger.info("📐 🆕 Pre-creating surface for pane \(paneId) in newly focused window")
-                    _ = getSurfaceOrCreate(for: paneId)
-                }
-            }
-            
-            // Ensure primarySurface is valid (might be nil after window close)
-            // Use the first pane in the new tree as primary
-            if primarySurface == nil, let firstPaneId = newTree.paneIds.first {
-                let paneId = "%\(firstPaneId)"
-                if let surface = paneSurfaces[paneId] {
-                    logger.info("📐 🔄 Assigning primarySurface to \(paneId) (was nil)")
-                    primarySurface = surface
-                    surface.onCellSizeChanged = { [weak self] cellSize in
-                        self?.primaryCellSize = cellSize
-                    }
-                    // Manually trigger if cell size is already valid
-                    if surface.cellSize.width > 0 && surface.cellSize.height > 0 {
-                        primaryCellSize = surface.cellSize
-                    }
-                }
-            }
-            
-            // Update focused pane if needed
-            if let firstPaneId = newTree.paneIds.first {
-                let paneIdStr = "%\(firstPaneId)"
-                if focusedPaneId.isEmpty || paneSurfaces[focusedPaneId] == nil {
-                    logger.info("📐 Updating focusedPaneId to \(paneIdStr)")
-                    focusedPaneId = paneIdStr
-                }
-            }
-        } else {
-            logger.info("📐 ⏭️ Not updating currentSplitTree - windowId \(windowId) != focusedWindowId \(focusedWindowId)")
-        }
-    }
-    
-    /// Handle window pane changed notification
-    func handleWindowPaneChanged(windowId: String, paneId: String) {
-        logger.info("Window pane changed: \(windowId) -> \(paneId)")
-        
-        if var window = windows[windowId] {
-            window.activePaneId = paneId
-            windows[windowId] = window
-        }
-        
-        // Update pane active states
-        for (id, var pane) in panes where pane.windowId == windowId {
-            pane.isActive = (id == paneId)
-            panes[id] = pane
-        }
-        
-        focusedPaneId = paneId
-    }
-    
-    /// Handle sessions changed notification
-    /// This fires when a session is created or destroyed on the server.
-    /// If it arrives before %session-changed, it means our connection created a new session.
-    func handleSessionsChanged() {
-        logger.info("Sessions changed - a session was created or destroyed")
-        
-        // Mark that a session creation/destruction happened before we saw %session-changed
-        // This distinguishes "new session created" from "attached to existing"
-        sawSessionsChanged = true
-        
-        // In native Ghostty mode, we can't query sessions via command/response.
-        // Ghostty's viewer tracks session state internally and notifies via
-        // TMUX_STATE_CHANGED. The sawSessionsChanged flag is what matters here.
-        logger.debug("Sessions changed — relying on Ghostty state tracking")
-    }
+
     
     // MARK: - Surface Management
     
@@ -954,7 +583,7 @@ class TmuxSessionManager: ObservableObject {
         } else {
             // No split tree yet — in native Ghostty mode, select-window triggers
             // %layout-change which Ghostty processes, firing TMUX_STATE_CHANGED.
-            // The layout will arrive via handleLayoutChanged() when it does.
+            // The layout will arrive via Ghostty's TMUX_STATE_CHANGED notification when it does.
             logger.info("📑 No split tree for window \(windowId), waiting for layout notification from Ghostty")
             
             // Clear current split tree while we wait for the layout notification
@@ -1257,57 +886,6 @@ class TmuxSessionManager: ObservableObject {
         sendCommandFireAndForget("detach-client")
     }
     
-    // MARK: - Layout Helpers
-    
-    /// Log tree node dimensions for debugging
-    private func logTreeNode(_ node: TmuxSplitTree.Node, prefix: String) {
-        switch node {
-        case .leaf(let info):
-            logger.info("\(prefix)Leaf pane %\(info.paneId): \(info.cols)x\(info.rows)")
-        case .split(let split):
-            logger.info("\(prefix)Split \(split.direction) ratio=\(String(format: "%.2f", split.ratio))")
-            logTreeNode(split.left, prefix: prefix + "  L: ")
-            logTreeNode(split.right, prefix: prefix + "  R: ")
-        }
-    }
-    
-    /// Update pane positions from parsed layout
-    private func updatePanePositions(from layout: TmuxLayout, in windowId: String) {
-        // Extract pane positions from layout tree
-        let positions = extractPanePositions(from: layout)
-        
-        for position in positions {
-            // tmux pane IDs in format strings are numeric, but we store them as "%0", "%1" etc.
-            let paneId = "%\(position.paneId)"
-            if var pane = panes[paneId] {
-                pane.positionX = position.x
-                pane.positionY = position.y
-                pane.width = position.width
-                pane.height = position.height
-                panes[paneId] = pane
-            }
-        }
-    }
-    
-    /// Pane position extracted from layout
-    private struct PanePosition {
-        let paneId: Int
-        let x: Int
-        let y: Int
-        let width: Int
-        let height: Int
-    }
-    
-    /// Recursively extract pane positions from layout tree
-    private func extractPanePositions(from layout: TmuxLayout) -> [PanePosition] {
-        switch layout.content {
-        case .pane(let id):
-            return [PanePosition(paneId: id, x: layout.x, y: layout.y, width: layout.width, height: layout.height)]
-        case .horizontal(let children), .vertical(let children):
-            return children.flatMap { extractPanePositions(from: $0) }
-        }
-    }
-    
     // MARK: - Pending Input Visual Feedback
     
     /// Display pending input text as preedit (inverted preview) in the focused pane
@@ -1339,9 +917,6 @@ class TmuxSessionManager: ObservableObject {
         // Cancel debounce tasks to prevent crashes after cleanup
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
-        layoutDebounceTask?.cancel()
-        layoutDebounceTask = nil
-        pendingLayoutChanges.removeAll()
         
         // Remove all surfaces
         for paneId in paneSurfaces.keys {
@@ -1350,13 +925,10 @@ class TmuxSessionManager: ObservableObject {
         
         // Clear output buffers
         pendingOutput.removeAll()
-        sawSessionsChanged = false
-        sessionResumeStatus = nil
         
         sessions.removeAll()
         windows.removeAll()
         panes.removeAll()
-        lastProcessedLayouts.removeAll()
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
         currentSession = nil

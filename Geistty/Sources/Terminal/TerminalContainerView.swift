@@ -695,11 +695,6 @@ class RawTerminalUIViewController: UIViewController {
     private var keyTableIndicatorHostingController: UIHostingController<KeyTableIndicatorView>?
     private var keyTableObserver: AnyCancellable?
     
-    // Session resume toast (tmux session created vs resumed)
-    private var sessionResumeToastHostingController: UIHostingController<SessionResumeToastView>?
-    private var sessionResumeObserver: AnyCancellable?
-    private var sessionResumeToastDismissTask: Task<Void, Never>?
-    
     // Multi-pane support
     private var multiPaneHostingController: UIHostingController<TmuxMultiPaneView>?
     private var multiPaneTopConstraint: NSLayoutConstraint?
@@ -1257,72 +1252,6 @@ class RawTerminalUIViewController: UIViewController {
         }
     }
     
-    // MARK: - Session Resume Toast
-    
-    private func setupSessionResumeObserver() {
-        guard let manager = viewModel?.tmuxManager else { return }
-        
-        sessionResumeObserver = manager.$sessionResumeStatus
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                guard let status = status else { return }
-                self?.showSessionResumeToast(status: status)
-            }
-    }
-    
-    private func showSessionResumeToast(status: SessionResumeStatus) {
-        // Remove any existing toast
-        removeSessionResumeToast()
-        sessionResumeToastDismissTask?.cancel()
-        
-        let toast = SessionResumeToastView(status: status)
-        let hostingController = UIHostingController(rootView: toast)
-        hostingController.view.backgroundColor = .clear
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        hostingController.view.alpha = 0
-        
-        addChild(hostingController)
-        view.addSubview(hostingController.view)
-        
-        // Position at top-center
-        NSLayoutConstraint.activate([
-            hostingController.view.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            hostingController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12)
-        ])
-        
-        hostingController.didMove(toParent: self)
-        sessionResumeToastHostingController = hostingController
-        
-        // Fade in
-        UIView.animate(withDuration: 0.3) {
-            hostingController.view.alpha = 1
-        }
-        
-        // Auto-dismiss after 3 seconds
-        sessionResumeToastDismissTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard !Task.isCancelled else { return }
-            self?.dismissSessionResumeToast()
-        }
-    }
-    
-    private func dismissSessionResumeToast() {
-        guard let hostingController = sessionResumeToastHostingController else { return }
-        UIView.animate(withDuration: 0.3, animations: {
-            hostingController.view.alpha = 0
-        }) { [weak self] _ in
-            self?.removeSessionResumeToast()
-        }
-    }
-    
-    private func removeSessionResumeToast() {
-        if let hostingController = sessionResumeToastHostingController {
-            hostingController.willMove(toParent: nil)
-            hostingController.view.removeFromSuperview()
-            hostingController.removeFromParent()
-            sessionResumeToastHostingController = nil
-        }
-    }
 
     private func setupSearchStateObserver() {
         // Observe search state changes on the surface view
@@ -1768,7 +1697,6 @@ class RawTerminalUIViewController: UIViewController {
                     self?.setupTmuxSurfaceFactory()
                     self?.setupSplitTreeObserver()
                     self?.setupWindowsObserver()
-                    self?.setupSessionResumeObserver()
                 }
             }
     }

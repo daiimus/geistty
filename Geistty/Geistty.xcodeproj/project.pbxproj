@@ -10,7 +10,6 @@
 		708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */; };
 		A10000A0 /* FontMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A0 /* FontMapping.swift */; };
 		A10000A2 /* KeyTableIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A2 /* KeyTableIndicatorView.swift */; };
-		A10000A3 /* SessionResumeToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000A3 /* SessionResumeToastView.swift */; };
 		B1000001 /* GeisttyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* GeisttyUITests.swift */; };
 		B1000002 /* TmuxPaneUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* TmuxPaneUITests.swift */; };
 		B1000003 /* TmuxSizingDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* TmuxSizingDebugTests.swift */; };
@@ -166,7 +165,6 @@
 		A2000090 /* NIOSSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NIOSSHConnection.swift; sourceTree = "<group>"; };
 		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
 		A20000A2 /* KeyTableIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTableIndicatorView.swift; sourceTree = "<group>"; };
-		A20000A3 /* SessionResumeToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionResumeToastView.swift; sourceTree = "<group>"; };
 		A2000096 /* TmuxSessionNameResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolver.swift; sourceTree = "<group>"; };
 
 		D1000001 /* GeisttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -312,7 +310,6 @@
 				A2000030 /* ConnectionListView.swift */,
 				A2000031 /* ConnectionEditorView.swift */,
 				A20000A2 /* KeyTableIndicatorView.swift */,
-				A20000A3 /* SessionResumeToastView.swift */,
 				A2000050 /* SettingsView.swift */,
 					);
 			path = UI;
@@ -563,7 +560,6 @@
 				A1000031 /* ConnectionEditorView.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
 				A10000A2 /* KeyTableIndicatorView.swift in Sources */,
-				A10000A3 /* SessionResumeToastView.swift in Sources */,
 				A1000060 /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
