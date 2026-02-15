@@ -167,21 +167,71 @@ class ConfigSyncManager: ObservableObject {
         return updatedLines.joined(separator: "\n")
     }
     
-    // MARK: - Config File → GUI
+    // MARK: - Config → GUI Sync
     
-    /// Parse config file and update GUI settings (UserDefaults) for display
+    /// Sync GUI settings from a finalized Ghostty.Config object.
+    /// Uses `ghostty_config_get()` to read the authoritative values
+    /// after Ghostty's config finalization (theme resolution, defaults, etc.).
+    ///
+    /// Only syncs fields that `ghostty_config_get()` supports (simple types).
+    /// Complex types (font-family → RepeatableString, theme → Theme struct)
+    /// must be read from the config file — see `loadConfigToGUI()`.
+    func syncFromConfig(_ config: Ghostty.Config) {
+        // Cursor style
+        let cursor = config.cursorStyle
+        if ["block", "bar", "underline"].contains(cursor) {
+            defaults.set(cursor, forKey: "terminal.cursorStyle")
+            logger.debug("Synced cursor-style: \(cursor)")
+        }
+        
+        // Font thicken
+        defaults.set(config.fontThicken, forKey: "terminal.fontThicken")
+        logger.debug("Synced font-thicken: \(config.fontThicken)")
+        
+        // Background opacity
+        defaults.set(config.backgroundOpacity, forKey: "terminal.backgroundOpacity")
+        logger.debug("Synced background-opacity: \(config.backgroundOpacity)")
+        
+        logger.info("Synced supported config fields via ghostty_config_get()")
+    }
+    
+    /// Load config and sync to GUI settings (UserDefaults).
+    ///
+    /// Hybrid approach:
+    /// 1. If Ghostty runtime is available, create a Config and use
+    ///    `ghostty_config_get()` for supported simple types (cursor-style,
+    ///    font-thicken, background-opacity).
+    /// 2. ALWAYS parse the config file for fields that `ghostty_config_get()`
+    ///    cannot read: font-family (RepeatableString) and theme (?Theme struct).
+    /// 3. If Ghostty runtime is NOT available (early startup), fall back to
+    ///    file parsing for ALL fields.
     func loadConfigToGUI() {
-        guard FileManager.default.fileExists(atPath: configFilePath.path),
-              let content = try? String(contentsOf: configFilePath, encoding: .utf8) else {
-            logger.info("No config file found, using defaults")
+        // Try the Config-based path for supported fields
+        if let config = Ghostty.Config() {
+            syncFromConfig(config)
+        }
+        
+        // Always parse the file for fields ghostty_config_get() can't handle
+        // (font-family, theme) — and as full fallback if Config wasn't available
+        guard FileManager.default.fileExists(atPath: configFilePath.path) else {
+            logger.info("No config file found at \(configFilePath.path), using defaults")
             return
         }
         
-        parseConfigAndUpdateGUI(content)
+        guard let content = try? String(contentsOf: configFilePath, encoding: .utf8) else {
+            logger.error("Failed to read config file at \(configFilePath.path)")
+            return
+        }
+        
+        parseConfigFileForGUI(content)
     }
     
-    /// Parse config string and update UserDefaults for GUI display
-    func parseConfigAndUpdateGUI(_ configString: String) {
+    /// Parse config file line-by-line to populate GUI defaults.
+    ///
+    /// This is the ONLY path for font-family (RepeatableString) and theme
+    /// (?Theme struct), which `ghostty_config_get()` cannot read.
+    /// Also serves as the full fallback before Ghostty runtime is initialized.
+    private func parseConfigFileForGUI(_ configString: String) {
         let lines = configString.components(separatedBy: "\n")
         
         for line in lines {
@@ -204,34 +254,31 @@ class ConfigSyncManager: ObservableObject {
             // Map config keys to UserDefaults
             switch key {
             case "font-family":
-                // Reverse map Ghostty font name to GUI font name
-                let guiFont = reverseMapFontFamily(value)
+                let guiFont = FontMapping.fromGhostty(value)
                 defaults.set(guiFont, forKey: "terminal.fontFamily")
-                defaults.synchronize()
-                logger.debug("Set font-family: \(guiFont)")
+                logger.debug("File parser: font-family = \(guiFont)")
                 
             case "cursor-style":
-                // block, bar, underline
                 if ["block", "bar", "underline"].contains(value) {
                     defaults.set(value, forKey: "terminal.cursorStyle")
-                    defaults.synchronize()
-                    logger.debug("Set cursor-style: \(value)")
+                    logger.debug("File parser: cursor-style = \(value)")
                 }
                 
             case "font-thicken":
-                let boolValue = value == "true"
-                defaults.set(boolValue, forKey: "terminal.fontThicken")
-                defaults.synchronize()
-                logger.debug("Set font-thicken: \(boolValue)")
+                defaults.set(value == "true", forKey: "terminal.fontThicken")
+                logger.debug("File parser: font-thicken = \(value)")
+                
+            case "background-opacity":
+                if let opacity = Double(value) {
+                    defaults.set(opacity, forKey: "terminal.backgroundOpacity")
+                    logger.debug("File parser: background-opacity = \(opacity)")
+                }
                 
             case "theme":
-                // Sync theme name to ThemeManager for UI display (theme picker selection)
                 defaults.set(value, forKey: "terminal.colorTheme")
-                defaults.synchronize()
-                
-                // Update ThemeManager's selected theme for UI preview
+                logger.debug("File parser: theme = \(value)")
                 let availableThemes = ThemeManager.shared.themes
-                if let theme = availableThemes.first(where: { 
+                if let theme = availableThemes.first(where: {
                     $0.name.lowercased() == value.lowercased() ||
                     $0.id.lowercased() == value.lowercased()
                 }) {
@@ -241,18 +288,11 @@ class ConfigSyncManager: ObservableObject {
                 }
                 
             default:
-                // Ignore other config options
                 break
             }
         }
         
-        logger.info("Loaded config file into GUI settings")
-    }
-    
-    /// Reverse map Ghostty font family to GUI display name
-    private func reverseMapFontFamily(_ ghosttyFont: String) -> String {
-        // Implementation now in FontMapping.swift
-        FontMapping.fromGhostty(ghosttyFont)
+        logger.info("Parsed config file for GUI settings")
     }
     
     // MARK: - GUI Setting Updates (writes to config file)
@@ -283,8 +323,16 @@ class ConfigSyncManager: ObservableObject {
         updateConfigValue(key: "background-opacity", value: String(format: "%.2f", opacity))
     }
     
-    /// Get current background opacity from config (default 0.95)
+    /// Get current background opacity.
+    /// Reads from a finalized Ghostty.Config (preferred) or falls back to
+    /// parsing the config file directly.
     func getBackgroundOpacity() -> Double {
+        // Preferred: read from Ghostty's finalized config
+        if let config = Ghostty.Config() {
+            return config.backgroundOpacity
+        }
+        
+        // Fallback: parse the file
         guard FileManager.default.fileExists(atPath: configFilePath.path),
               let content = try? String(contentsOf: configFilePath, encoding: .utf8) else {
             return 0.95
