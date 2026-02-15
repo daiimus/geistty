@@ -487,47 +487,6 @@ class TerminalViewModel: ObservableObject {
         sshSession?.tmuxSessionManager
     }
     
-    /// Capture tmux pane content for search
-    /// - Parameter completion: Called with the captured content or error
-    /// NOTE: capture-pane requires command/response pattern which is not available
-    /// after migration to Ghostty's native tmux. Ghostty's native search should be
-    /// used instead. This stub remains to keep the search overlay wiring compilable.
-    func captureTmuxPane(completion: @escaping (Result<String, Error>) -> Void) {
-        // capture-pane requires the old gateway command/response pattern.
-        // With Ghostty handling tmux natively, use Ghostty's built-in search instead.
-        completion(.failure(NSError(
-            domain: "com.geistty",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Tmux pane capture not available — use terminal search"]
-        )))
-    }
-    
-    /// Navigate to a specific line in tmux using copy mode
-    /// - Parameter lineNumber: The line number to navigate to (0-based from top of scrollback)
-    func tmuxGotoLine(_ lineNumber: Int) {
-        // Send tmux prefix (Ctrl+B) then copy-mode key ([)
-        // Then navigate to the line using tmux copy-mode commands
-        // Ctrl+B = \u{02}, [ enters copy mode
-        // g goes to top, then we can use : to go to line number
-        
-        // Enter copy mode: Ctrl+B [
-        send(text: "\u{02}[")
-        
-        // Small delay then go to top and line
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            // g = go to top of history
-            self?.send(text: "g")
-            
-            // Then go down to the target line
-            // In tmux copy mode, we can use : followed by line number
-            // Or just send the line number followed by Enter for goto-line
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                // : enters command mode, then line number
-                self?.send(text: ":\(lineNumber)\r")
-            }
-        }
-    }
-    
     enum SpecialKey {
         case escape, tab, up, down, left, right, enter, backspace
     }
@@ -1178,31 +1137,13 @@ class RawTerminalUIViewController: UIViewController {
         if let searchState = surface.searchState {
             // Show/update search overlay
             if searchOverlayHostingController == nil {
-                // Create tmux callbacks if this is a tmux session
-                let tmuxCaptureCallback: ((@escaping (Result<String, Error>) -> Void) -> Void)?
-                let tmuxGotoLineCallback: ((Int) -> Void)?
-                
-                if let vm = viewModel, vm.isTmuxSession {
-                    tmuxCaptureCallback = { [weak vm] completion in
-                        vm?.captureTmuxPane(completion: completion)
-                    }
-                    tmuxGotoLineCallback = { [weak vm] lineNumber in
-                        vm?.tmuxGotoLine(lineNumber)
-                    }
-                } else {
-                    tmuxCaptureCallback = nil
-                    tmuxGotoLineCallback = nil
-                }
-                
                 // Create and add the overlay
                 let overlay = Ghostty.SurfaceSearchOverlay(
                     surfaceView: surface,
                     searchState: searchState,
                     onClose: { [weak self] in
                         self?.closeSearch()
-                    },
-                    onCaptureTmux: tmuxCaptureCallback,
-                    onTmuxGotoLine: tmuxGotoLineCallback
+                    }
                 )
                 
                 let hostingController = UIHostingController(rootView: overlay)

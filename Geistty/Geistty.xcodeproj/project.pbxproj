@@ -32,10 +32,6 @@
 		A1000024 /* SSHKeyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* SSHKeyParser.swift */; };
 		A1000030 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* ConnectionListView.swift */; };
 		A1000031 /* ConnectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* ConnectionEditorView.swift */; };
-		A1000040 /* SFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* SFTPClient.swift */; };
-		A1000041 /* SFTPClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* SFTPClientProtocol.swift */; };
-		A1000044 /* MockSFTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000044 /* MockSFTPClient.swift */; };
-		A1000042 /* SFTPChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* SFTPChannel.swift */; };
 		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
 		A1000060 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* Theme.swift */; };
 		A1000061 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* Themes */; };
@@ -142,9 +138,6 @@
 		A2000024 /* SSHKeyParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyParser.swift; sourceTree = "<group>"; };
 		A2000030 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
 		A2000031 /* ConnectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEditorView.swift; sourceTree = "<group>"; };
-		A2000040 /* SFTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPClient.swift; sourceTree = "<group>"; };
-		A2000041 /* SFTPClientProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPClientProtocol.swift; sourceTree = "<group>"; };
-		A2000044 /* MockSFTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSFTPClient.swift; sourceTree = "<group>"; };
 		A2000050 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000060 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A2000061 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
@@ -238,7 +231,6 @@
 				A5000005 /* SSH */,
 				A5000008 /* Auth */,
 				A5000009 /* UI */,
-				A5000011 /* SFTP */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -342,18 +334,6 @@
 				B2000005 /* TestConfig.local.swift */,
 			);
 			path = GeisttyUITests;
-			sourceTree = "<group>";
-		};
-		A2000042 /* SFTPChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPChannel.swift; sourceTree = "<group>"; };
-		A5000011 /* SFTP */ = {
-			isa = PBXGroup;
-			children = (
-				A2000040 /* SFTPClient.swift */,
-				A2000041 /* SFTPClientProtocol.swift */,
-				A2000044 /* MockSFTPClient.swift */,
-				A2000042 /* SFTPChannel.swift */,
-			);
-			path = SFTP;
 			sourceTree = "<group>";
 		};
 		A5000012 /* Resources */ = {
@@ -575,10 +555,6 @@
 				A1000024 /* SSHKeyParser.swift in Sources */,
 				A1000030 /* ConnectionListView.swift in Sources */,
 				A1000031 /* ConnectionEditorView.swift in Sources */,
-				A1000040 /* SFTPClient.swift in Sources */,
-				A1000041 /* SFTPClientProtocol.swift in Sources */,
-				A1000044 /* MockSFTPClient.swift in Sources */,
-				A1000042 /* SFTPChannel.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
 				A10000A2 /* KeyTableIndicatorView.swift in Sources */,
 				A10000A3 /* SessionResumeToastView.swift in Sources */,

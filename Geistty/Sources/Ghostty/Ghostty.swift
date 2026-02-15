@@ -3304,12 +3304,6 @@ extension Ghostty {
     
     // MARK: - Search State
     
-    /// Search mode - determines which buffer to search
-    enum SearchMode {
-        case ghostty  // Normal Ghostty scrollback search
-        case tmux     // Search tmux's internal scrollback via capture-pane
-    }
-    
     /// Observable search state for the terminal, matching macOS Ghostty implementation
     class SearchState: ObservableObject {
         /// The current search query (needle)
@@ -3325,21 +3319,6 @@ extension Ghostty {
         /// When true, search only sees visible rows (no scrollback)
         @Published var isAlternateScreen: Bool = false
         
-        /// The search mode (ghostty vs tmux)
-        @Published var searchMode: SearchMode = .ghostty
-        
-        /// Captured tmux pane content (for tmux search mode)
-        @Published var tmuxContent: String? = nil
-        
-        /// Positions of matches in tmux content (line numbers)
-        @Published var tmuxMatchLines: [Int] = []
-        
-        /// Whether a tmux capture is in progress
-        @Published var isCapturing: Bool = false
-        
-        /// Error message if capture failed
-        @Published var captureError: String? = nil
-        
         /// Initialize with optional starting query
         init(needle: String = "") {
             self.needle = needle
@@ -3351,11 +3330,6 @@ extension Ghostty {
             total = nil
             selected = nil
             isAlternateScreen = false
-            searchMode = .ghostty
-            tmuxContent = nil
-            tmuxMatchLines = []
-            isCapturing = false
-            captureError = nil
         }
     }
 }
