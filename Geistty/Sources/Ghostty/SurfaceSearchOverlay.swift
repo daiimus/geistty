@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Combine
 
 extension Ghostty {
     /// Search overlay view that appears when search is active
@@ -26,9 +25,6 @@ extension Ghostty {
         
         /// Padding from edges
         private let padding: CGFloat = 12
-        
-        /// Debounce timer for search input
-        @State private var searchDebounceTimer: Timer?
         
         var body: some View {
             // Just the search bar - positioning is handled by UIKit
@@ -53,9 +49,6 @@ extension Ghostty {
                     .overlay(alignment: .trailing) {
                         resultCountView
                             .padding(.trailing, 8)
-                    }
-                    .onChange(of: searchState.needle) { _, newValue in
-                        handleSearchQueryChanged(newValue)
                     }
                     .onSubmit {
                         // Return key: navigate to next result
@@ -107,25 +100,6 @@ extension Ghostty {
         }
         
         // MARK: - Search Helpers
-        
-        /// Handle search query changes
-        private func handleSearchQueryChanged(_ query: String) {
-            // Cancel previous debounce timer
-            searchDebounceTimer?.invalidate()
-            
-            guard !query.isEmpty else {
-                // Clear search
-                surfaceView.updateSearch(query)
-                return
-            }
-            
-            // Debounce search (wait for user to stop typing)
-            searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { _ in
-                Task { @MainActor in
-                    surfaceView.updateSearch(query)
-                }
-            }
-        }
         
         /// Navigate to next result
         private func navigateNext() {

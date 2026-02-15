@@ -18,13 +18,7 @@ struct TerminalContainerView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var ghosttyApp: Ghostty.App
     @ObservedObject private var settings = AppSettings.shared
-    @State private var terminalTitle: String = "Terminal"
     @StateObject private var terminalViewModel = TerminalViewModel()
-    @State private var keyboardHeight: CGFloat = 0
-    
-    // Link preview state
-    @State private var hoverUrl: String? = nil
-    @State private var hoverUrlCancellable: AnyCancellable? = nil
     
     /// Theme background color to prevent flash
     private var themeBackground: Color {
@@ -77,11 +71,6 @@ struct TerminalContainerView: View {
             logger.warning("🔌 Not connecting - no session or params available")
         }
     }
-    
-    private func disconnect() {
-        terminalViewModel.disconnect()
-        appState.connectionStatus = .disconnected
-    }
 }
 
 /// ViewModel that bridges Ghostty with SSH connection
@@ -93,11 +82,6 @@ class TerminalViewModel: ObservableObject {
     @Published var disconnectError: String? = nil
     @Published var isSelectingText: Bool = false
     @Published var currentFontSize: Float = 14.0
-    @Published var connectionDuration: TimeInterval = 0
-    
-    /// Connection start time for duration tracking
-    private var connectionStartTime: Date?
-    private var durationTimer: Timer?
     
     /// Buffer for data received before surface is ready
     private var preSurfaceBuffer: [Data] = []
@@ -194,40 +178,6 @@ class TerminalViewModel: ObservableObject {
         lifecycleObservers.append(activeObserver)
     }
     
-    /// Start tracking connection duration
-    func startDurationTimer() {
-        connectionStartTime = Date()
-        connectionDuration = 0
-        
-        // Update duration every second
-        durationTimer?.invalidate()
-        durationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self, let startTime = self.connectionStartTime else { return }
-                self.connectionDuration = Date().timeIntervalSince(startTime)
-            }
-        }
-    }
-    
-    /// Stop duration timer
-    func stopDurationTimer() {
-        durationTimer?.invalidate()
-        durationTimer = nil
-    }
-    
-    /// Formatted connection duration string
-    var formattedDuration: String {
-        let hours = Int(connectionDuration) / 3600
-        let minutes = (Int(connectionDuration) % 3600) / 60
-        let seconds = Int(connectionDuration) % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%d:%02d", minutes, seconds)
-        }
-    }
-    
     func connect(host: String, port: Int, username: String, password: String?) {
         logger.info("📡 TerminalViewModel.connect called - \(host):\(port) user=\(username)")
         Task {
@@ -248,7 +198,6 @@ class TerminalViewModel: ObservableObject {
                 
                 logger.info("📡 SSH connected successfully!")
                 isConnected = true
-                startDurationTimer()
                 
                 // Read the actual grid size from Ghostty surface rather than
                 // relying on callback-updated cols/rows which may still be the
@@ -276,7 +225,6 @@ class TerminalViewModel: ObservableObject {
         sshSession?.delegate = self
         sshSession?.ghosttySurface = surfaceView
         isConnected = true
-        startDurationTimer()
         
         // Flush any pending resize that arrived before the session was wired.
         // This handles the common case: layoutSubviews → onResize fired with
@@ -301,8 +249,6 @@ class TerminalViewModel: ObservableObject {
     }
     
     func disconnect() {
-        stopDurationTimer()
-        
         sshSession?.disconnect()
         sshSession = nil
         isConnected = false
@@ -754,9 +700,6 @@ class RawTerminalUIViewController: UIViewController {
     private var sessionResumeObserver: AnyCancellable?
     private var sessionResumeToastDismissTask: Task<Void, Never>?
     
-    // Secure keyboard entry state
-    private var secureKeyboardEntry = false
-    
     // Multi-pane support
     private var multiPaneHostingController: UIHostingController<TmuxMultiPaneView>?
     private var multiPaneTopConstraint: NSLayoutConstraint?
@@ -951,9 +894,6 @@ class RawTerminalUIViewController: UIViewController {
         }
         NotificationCenter.default.addObserver(forName: .terminalToggleStatusBar, object: nil, queue: .main) { [weak self] _ in
             self?.toggleStatusBar()
-        }
-        NotificationCenter.default.addObserver(forName: .terminalToggleSecureKeyboard, object: nil, queue: .main) { [weak self] _ in
-            self?.toggleSecureKeyboardEntry()
         }
         NotificationCenter.default.addObserver(forName: .showKeyboardShortcuts, object: nil, queue: .main) { [weak self] _ in
             self?.showKeyboardShortcutsHelp()
@@ -1267,9 +1207,6 @@ class RawTerminalUIViewController: UIViewController {
         }
     }
     
-    /// Container view for search overlay (unused now - hosting view is positioned directly)
-    private var searchOverlayContainer: UIView?
-    
     private func removeSearchOverlay() {
         if let hostingController = searchOverlayHostingController {
             hostingController.willMove(toParent: nil)
@@ -1433,13 +1370,6 @@ class RawTerminalUIViewController: UIViewController {
     private func handleResetTerminal() {
         // Send reset terminal escape sequence
         viewModel?.send(text: "\u{1B}c")  // ESC c - Full reset
-    }
-    
-    private func toggleSecureKeyboardEntry() {
-        secureKeyboardEntry.toggle()
-        // Note: On iOS, keyboard input is already sandboxed per-app.
-        // There's no system API equivalent to macOS "Secure Keyboard Entry".
-        // This toggle is kept for UI parity but has no effect.
     }
     
     private func showKeyboardShortcutsHelp() {
@@ -1889,60 +1819,6 @@ class RawTerminalUIViewController: UIViewController {
         // If we're in multi-pane mode, stay there - TmuxMultiPaneView handles all pane counts
     }
     
-    /// Update the displayed surface in single-pane mode when primary surface changes
-    private func updateSinglePaneSurface() {
-        guard let tmuxManager = viewModel?.tmuxManager,
-              let newPrimarySurface = tmuxManager.primarySurface else {
-            logger.warning("🔄 No primary surface available for single-pane update")
-            return
-        }
-        
-        // Check if we're already showing this surface
-        if surfaceView === newPrimarySurface {
-            logger.debug("🔄 Already showing correct primary surface")
-            return
-        }
-        
-        logger.info("🔄 Updating single-pane surface (old != new primary)")
-        
-        // Remove old surface if exists
-        if let oldSurface = surfaceView {
-            oldSurface.removeFromSuperview()
-        }
-        
-        // Add new primary surface
-        newPrimarySurface.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(newPrimarySurface)
-        
-        surfaceTopConstraint = newPrimarySurface.topAnchor.constraint(equalTo: view.topAnchor)
-        surfaceBottomConstraint = newPrimarySurface.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        
-        NSLayoutConstraint.activate([
-            surfaceTopConstraint!,
-            surfaceBottomConstraint!,
-            newPrimarySurface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            newPrimarySurface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-        
-        // Update references
-        self.surfaceView = newPrimarySurface
-        viewModel?.surfaceView = newPrimarySurface
-        
-        // Force layout to establish the frame
-        view.layoutIfNeeded()
-        
-        // CRITICAL: Notify surface of its new size after re-parenting
-        // The surface needs to know its size changed to update its Metal rendering
-        newPrimarySurface.sizeDidChange(newPrimarySurface.frame.size)
-        
-        // Make visible and focus
-        newPrimarySurface.isHidden = false
-        newPrimarySurface.focusDidChange(true)
-        _ = newPrimarySurface.becomeFirstResponder()
-        
-        logger.info("🔄 ✅ Updated single-pane surface (frame=\(newPrimarySurface.frame))")
-    }
-    
     /// Clean up multi-pane mode without requiring a primary surface
     private func cleanupMultiPaneMode() {
         // Clean up divider overlay
@@ -2162,21 +2038,6 @@ class RawTerminalUIViewController: UIViewController {
         TerminalContainerView()
             .environmentObject(AppState())
             .environmentObject(Ghostty.App())
-    }
-}
-
-// MARK: - Pass-Through View
-
-/// A UIView that passes through touches to views beneath it,
-/// but still allows interaction with its subviews.
-class PassThroughView: UIView {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hitView = super.hitTest(point, with: event)
-        // If the hit view is self (not a subview), pass through
-        if hitView === self {
-            return nil
-        }
-        return hitView
     }
 }
 

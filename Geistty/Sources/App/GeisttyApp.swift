@@ -172,12 +172,6 @@ struct GeisttyApp: App {
                 Button("SSH Key Manager…") {
                     NotificationCenter.default.post(name: .showSSHKeyManager, object: nil)
                 }
-                
-                Divider()
-                
-                Button("Toggle Secure Keyboard Entry") {
-                    NotificationCenter.default.post(name: .terminalToggleSecureKeyboard, object: nil)
-                }
             }
             
             // MARK: - Help Menu
@@ -220,7 +214,6 @@ extension Notification.Name {
     static let terminalCopy = Notification.Name("terminalCopy")
     static let terminalPaste = Notification.Name("terminalPaste")
     static let terminalToggleStatusBar = Notification.Name("terminalToggleStatusBar")
-    static let terminalToggleSecureKeyboard = Notification.Name("terminalToggleSecureKeyboard")
     static let terminalReconnect = Notification.Name("terminalReconnect")
     static let reloadConfiguration = Notification.Name("reloadConfiguration")
     
