@@ -45,7 +45,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 | Task | Effort | Notes |
 |------|--------|-------|
-| Dead code removal across 4 big files | Medium | ~30 dead methods/properties/enum cases identified across Ghostty.swift, TerminalContainerView.swift, SSHSession.swift, TmuxSessionManager.swift. See [details](#dead-code-audit-feb-2026). |
+| Dead code removal across 4 big files | **DONE** | Completed Feb 2026. ~900 lines removed across Sessions 7-10. All archived in `docs/archive/DEAD_CODE_FEB_2026.swift`. |
 
 ### Medium Priority
 
@@ -63,49 +63,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 | Review and standardize naming conventions | Low | |
 | Add missing documentation comments | Low | |
 
-### Dead Code Audit (Feb 2026)
+### Dead Code Audit (Feb 2026) — COMPLETED
 
-Comprehensive audit of the 4 largest files. Items to archive/remove:
+Comprehensive audit of the 4 largest files. All items resolved across Sessions 7-10:
 
-**Ghostty.swift (3405 lines):**
-- `sendBytes(_:)` — never called, superseded by Ghostty key API
-- `applyControlToCharacter(_:)` — never called, superseded by Ghostty key API
-- `sendInput(_:)` — duplicates `sendText(_:)`, never called externally
-- `startSearch(_ query:)` / `updateSearch(_:)` — use invalid binding action strings
-- `endSearch()` — superseded by `searchState = nil` didSet observer
-- `sendKeyEvent(_:)` — never called externally
-- `updateAccessibilityValue()` — never called
-- `ShortcutAction.newWindow`, `.closeSurface`, `.closeTab`, `.disconnect` — never dispatched
-- Stale Logger comment about iOS 14+
+- **Session 7**: ~465 lines removed from Ghostty.swift, SurfaceSearchOverlay.swift, TerminalContainerView.swift, GeisttyApp.swift, SSHSession.swift, TmuxSessionManager.swift (commit `362b2a2`)
+- **Sessions 8-9 (Batch 2)**: ~420 lines of dead TmuxGateway legacy code removed — layout helpers, QueryFormat, dead pane properties, SessionResumeStatus chain (commit `3a77551`)
+- **Session 10 (Batch 1)**: Fixed Swift code duplicating Ghostty — paste() bracketed paste bug, copy() redundancy, clearScreen() scrollback clearing, SET_TITLE wiring, config parser redundancies, dead properties (commit `0cb98d1`)
+- **Session 10 (final sweep)**: Removed last dead method — `SSHSession.write(_ string:)`
 
-**TerminalContainerView.swift (2329 lines):**
-- `PassThroughView` class — never instantiated anywhere
-- `searchOverlayContainer` — declared with "unused now" comment, never read/written
-- `hoverUrl` / `hoverUrlCancellable` — @State props never read or set
-- `keyboardHeight` — @State prop never read, keyboard handled in UIKit
-- `terminalTitle` — @State prop never read or displayed
-- `updateSinglePaneSurface()` — never called, superseded by `transitionToSingleSurfaceMode()`
-- `connectionDuration` / `formattedDuration` — published but no subscriber
-- `toggleSecureKeyboardEntry()` — toggles bool with no effect on iOS
-- `disconnect()` — defined but never called
+**4 ShortcutAction enum cases** (`.newWindow`, `.closeSurface`, `.closeTab`, `.disconnect`) are defined but not yet dispatched by keyboard shortcuts. Kept intentionally — they have handler arms wired in `handleShortcut` for future use.
 
-**SSHSession.swift (1380 lines):**
-- `stripMPIntPadding(_:)` instance method — dead, local function used instead
-- `connect(host:...:password:...)` — never called externally, superseded by profile/credential API
-- `connectWithKey(host:...:privateKeyPath:...)` — never called externally, same
-- `write(_ string: String)` — never called externally
-- `performWrite(_ command: String, originalData:)` — never called
-- `SSHSessionError.notInTmux` / `.tmuxExited` — never thrown
-- `injectEnvironmentVariables()` — only reachable via unused connect methods
-
-**TmuxSessionManager.swift (1549 lines):**
-- `reassignPrimarySurface()` no-arg overload — never called
-- `queryWindows(for:)` / `queryPanes(for:)` — stubs that only log
-- `refreshState()` — near-stub, never called externally
-- `parseSessionsResponse(_:)` — private, never called (public wrapper does inline parsing)
-- `handleSessionsResponse/WindowsResponse/PanesResponse` — public wrappers never called
-- `handlePaneModeChanged(paneId:)` — stub, only logs
-- `newSession(name:)` / `switchSession(_:)` — unreachable from UI
+All removed code archived in `docs/archive/DEAD_CODE_FEB_2026.swift`.
 
 ---
 
@@ -134,6 +103,7 @@ Comprehensive audit of the 4 largest files. Items to archive/remove:
 | Refactor | Config introspection via ghostty_config_get() with hybrid fallback | Feb 2026 |
 | Cleanup | Font mapping consolidation (FontMapping.swift), SF Mono default fix | Feb 2026 |
 | Refactor | ControlModeState enum (replaced controlModeActive/controlModeDataRouting booleans) | Feb 2026 |
+| Cleanup | Dead code audit complete — ~900 lines removed, Ghostty delegation fixes, SET_TITLE wired | Feb 2026 |
 
 ---
 

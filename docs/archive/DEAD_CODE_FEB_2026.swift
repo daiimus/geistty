@@ -978,3 +978,15 @@ extension TmuxPane {
 // File: Sources/UI/SettingsView.swift
 //
 //     @AppStorage("terminal.colorTheme") var colorTheme: String = "Default"
+
+// --- Final sweep: SSHSession.write(_ string: String) — dead String overload, zero callers ---
+// File: Sources/SSH/SSHSession.swift
+//
+//     /// Write string to the SSH channel.
+//     /// Delegates to `write(_ data: Data)` for consistent send-keys wrapping in
+//     /// tmux control mode.
+//     func write(_ string: String) {
+//         logger.debug("SSHSession.write(string): \(string.prefix(20))")
+//         guard let data = string.data(using: .utf8) else { return }
+//         write(data)
+//     }

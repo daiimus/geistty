@@ -340,11 +340,11 @@ final class TmuxViewerReadyTests: XCTestCase {
         session.setTmuxModeForTesting(.controlMode)
         session.setControlModeStateForTesting(.active)
 
-        session.write("hello\r")
+        session.write("hello\r".data(using: .utf8)!)
 
         let expectedData = "hello\r".data(using: .utf8)!
         XCTAssertEqual(session.pendingInputQueue.count, 1,
-                       "write(String) should queue via write(Data) in control mode")
+                       "write(Data) should queue in control mode")
         XCTAssertEqual(session.pendingInputQueue.first, expectedData)
     }
 

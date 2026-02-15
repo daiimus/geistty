@@ -832,7 +832,9 @@ class SSHSession: ObservableObject, Identifiable {
         // - Uses POSIX-compatible syntax for maximum shell compatibility
         // NOTE: No 'clear' - it interferes with session restore
         let envSetup = " eval 'export COLORTERM=truecolor TERM_PROGRAM=ghostty TERM_PROGRAM_VERSION=1.0.0; [ -z \"$LANG\" ] && export LANG=en_US.UTF-8' 2>/dev/null\n"
-        write(envSetup)
+        if let data = envSetup.data(using: .utf8) {
+            write(data)
+        }
     }
     
     /// Auto-attach to or create a tmux session.
@@ -997,15 +999,6 @@ class SSHSession: ObservableObject, Identifiable {
                 }
             }
         }
-    }
-    
-    /// Write string to the SSH channel.
-    /// Delegates to `write(_ data: Data)` for consistent send-keys wrapping in
-    /// tmux control mode.
-    func write(_ string: String) {
-        logger.debug("SSHSession.write(string): \(string.prefix(20))")
-        guard let data = string.data(using: .utf8) else { return }
-        write(data)
     }
     
     /// Update the visual display of pending input using preedit
