@@ -195,8 +195,13 @@ final class SSHChannelDataHandler: ChannelInboundHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let channelData = unwrapInboundIn(data)
         
-        // Only process regular data (not stderr for now)
-        guard case .channel = channelData.type else {
+        // Process both stdout (.channel) and stderr (.stdErr).
+        // SSH multiplexes both over the same interactive channel — terminal apps
+        // display them inline (stderr is not a separate stream in a PTY session).
+        switch channelData.type {
+        case .channel, .stdErr:
+            break
+        default:
             return
         }
         
@@ -401,36 +406,6 @@ public class NIOSSHConnection {
             eventLoopGroup = nil
             throw NIOSSHError.connectionFailed(error.localizedDescription)
         }
-    }
-    
-    /// Open an SSH shell channel with PTY
-    /// Verify that SSH authentication completed successfully by creating a test channel
-    /// This is necessary because bootstrap.connect() returns before auth finishes.
-    private func verifyAuthentication(on channel: Channel) async throws {
-        logger.info("🔐 Verifying SSH authentication...")
-        
-        let sshHandler = try await channel.pipeline.handler(type: NIOSSHHandler.self).get()
-        
-        // Attempt to create a session channel - this will fail if auth isn't complete
-        let channelPromise = channel.eventLoop.makePromise(of: Channel.self)
-        
-        sshHandler.createChannel(channelPromise) { childChannel, channelType in
-            guard channelType == .session else {
-                return childChannel.eventLoop.makeFailedFuture(
-                    NIOSSHError.channelError("Unexpected channel type during auth verification")
-                )
-            }
-            // No handlers needed - we're just verifying auth works
-            return childChannel.eventLoop.makeSucceededVoidFuture()
-        }
-        
-        // Wait for channel creation - this blocks until auth completes
-        let testChannel = try await channelPromise.futureResult.get()
-        
-        // Close the test channel immediately - we only needed it to verify auth
-        try await testChannel.close().get()
-        
-        logger.info("🔐 SSH authentication verified successfully")
     }
     
     // MARK: - Shell Channel

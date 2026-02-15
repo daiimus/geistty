@@ -35,7 +35,7 @@ struct ConnectionEditorView: View {
     @State private var showingImportError = false
     
     // SSH Key manager
-    @StateObject private var keyManager = SSHKeyManager.shared
+    @ObservedObject private var keyManager = SSHKeyManager.shared
     
     var body: some View {
         Form {
@@ -308,11 +308,10 @@ struct ConnectionEditorView: View {
 
 struct SSHKeyGeneratorView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var keyManager = SSHKeyManager.shared
+    @ObservedObject private var keyManager = SSHKeyManager.shared
     
     @State private var keyName = ""
     @State private var keyType: KeyType = .ed25519
-    @State private var useSecureEnclave = false
     @State private var isGenerating = false
     @State private var generatedKey: SSHKeyPair?
     @State private var showingPublicKey = false
@@ -465,7 +464,7 @@ struct SSHKeyGeneratorView: View {
 
 struct PublicKeyView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var keyManager = SSHKeyManager.shared
+    @ObservedObject private var keyManager = SSHKeyManager.shared
     
     let keyInfo: SSHKeyPair
     @State private var publicKey: String = "Loading..."
@@ -518,7 +517,7 @@ struct PublicKeyView: View {
 // MARK: - SSH Key List View
 
 struct SSHKeyListView: View {
-    @StateObject private var keyManager = SSHKeyManager.shared
+    @ObservedObject private var keyManager = SSHKeyManager.shared
     @State private var showingGenerator = false
     @State private var showingFilePicker = false
     @State private var selectedKey: SSHKeyPair?

@@ -14,17 +14,57 @@ private func sendBytes(_ bytes: [UInt8]) {
     guard !bytes.isEmpty else { return }
     let data = Data(bytes)
     onWrite?(data)
+    }
 }
 
-/// Convert character to control sequence (Ctrl+A = 0x01, etc.)
-/// REASON: Never called anywhere. Ghostty handles Ctrl modifier internally.
-private func applyControlToCharacter(_ scalar: UnicodeScalar) -> [UInt8] {
-    let value = scalar.value
-    
-    // Ctrl+A through Ctrl+Z -> 0x01-0x1A
-    if value >= 0x61 && value <= 0x7A {  // a-z
-        return [UInt8(value - 0x60)]
-    }
+// MARK: - Session 30 — Phase B H10 Dead Code Audit (Feb 15, 2026)
+// ================================================================
+
+// --- From NIOSSHConnection.swift (lines 411-439) ---
+// Never called. The connect flow goes straight from bootstrap.connect()
+// to openShellChannel(). This method creates a test channel to verify auth
+// works, then closes it — an unnecessary extra round-trip.
+
+//    /// Open an SSH shell channel with PTY
+//    /// Verify that SSH authentication completed successfully by creating a test channel
+//    /// This is necessary because bootstrap.connect() returns before auth finishes.
+//    private func verifyAuthentication(on channel: Channel) async throws {
+//        logger.info("🔐 Verifying SSH authentication...")
+//        
+//        let sshHandler = try await channel.pipeline.handler(type: NIOSSHHandler.self).get()
+//        
+//        // Attempt to create a session channel - this will fail if auth isn't complete
+//        let channelPromise = channel.eventLoop.makePromise(of: Channel.self)
+//        
+//        sshHandler.createChannel(channelPromise) { childChannel, channelType in
+//            guard channelType == .session else {
+//                return childChannel.eventLoop.makeFailedFuture(
+//                    NIOSSHError.channelError("Unexpected channel type during auth verification")
+//                )
+//            }
+//            // No handlers needed - we're just verifying auth works
+//            return childChannel.eventLoop.makeSucceededVoidFuture()
+//        }
+//        
+//        // Wait for channel creation - this blocks until auth completes
+//        let testChannel = try await channelPromise.futureResult.get()
+//        
+//        // Close the test channel immediately - we only needed it to verify auth
+//        try await testChannel.close().get()
+//        
+//        logger.info("🔐 SSH authentication verified successfully")
+//    }
+
+// --- From TmuxSessionManager.swift (lines 1119-1123) ---
+// Never referenced. Also depends on windowIds which is initialized to []
+// and never populated.
+
+//    /// Get windows for current session
+//    var currentSessionWindows: [TmuxWindow] {
+//        guard let session = currentSession else { return [] }
+//        return session.windowIds.compactMap { windows[$0] }
+//    }
+
     if value >= 0x41 && value <= 0x5A {  // A-Z
         return [UInt8(value - 0x40)]
     }

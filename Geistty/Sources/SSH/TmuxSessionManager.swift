@@ -1115,10 +1115,4 @@ extension TmuxSessionManager {
     var focusedWindow: TmuxWindow? {
         return windows[focusedWindowId]
     }
-    
-    /// Get windows for current session
-    var currentSessionWindows: [TmuxWindow] {
-        guard let session = currentSession else { return [] }
-        return session.windowIds.compactMap { windows[$0] }
-    }
 }
