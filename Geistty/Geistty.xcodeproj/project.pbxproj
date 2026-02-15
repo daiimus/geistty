@@ -34,7 +34,7 @@
 		A1000031 /* ConnectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* ConnectionEditorView.swift */; };
 		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
 		A1000060 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060 /* Theme.swift */; };
-		A1000061 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* Themes */; };
+		A1000061 /* themes in Resources */ = {isa = PBXBuildFile; fileRef = A2000061 /* themes */; };
 		A1000070 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000070 /* JetBrainsMono-Regular.ttf */; };
 		A1000071 /* JetBrainsMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000071 /* JetBrainsMono-Bold.ttf */; };
 		A1000072 /* FiraCode-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000072 /* FiraCode-Regular.ttf */; };
@@ -70,6 +70,7 @@
 		D1000018 /* TmuxSplitTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000018 /* TmuxSplitTreeTests.swift */; };
 		D1000020 /* TmuxSessionNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000020 /* TmuxSessionNameResolverTests.swift */; };
 		D1000023 /* ResizeTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000023 /* ResizeTimingTests.swift */; };
+		D1000024 /* ConfigSyncThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000024 /* ConfigSyncThemeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -140,7 +141,7 @@
 		A2000031 /* ConnectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEditorView.swift; sourceTree = "<group>"; };
 		A2000050 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000060 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		A2000061 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
+		A2000061 /* themes */ = {isa = PBXFileReference; lastKnownFileType = folder; path = themes; sourceTree = "<group>"; };
 		A2000070 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
 		A2000071 /* JetBrainsMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Bold.ttf"; sourceTree = "<group>"; };
 		A2000072 /* FiraCode-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "FiraCode-Regular.ttf"; sourceTree = "<group>"; };
@@ -178,6 +179,7 @@
 
 		D2000022 /* TmuxViewerReadyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxViewerReadyTests.swift; sourceTree = "<group>"; };
 		D2000023 /* ResizeTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResizeTimingTests.swift; sourceTree = "<group>"; };
+		D2000024 /* ConfigSyncThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSyncThemeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -340,7 +342,7 @@
 			isa = PBXGroup;
 			children = (
 				A5000013 /* Fonts */,
-				A2000061 /* Themes */,
+				A2000061 /* themes */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -377,6 +379,7 @@
 				D2000020 /* TmuxSessionNameResolverTests.swift */,
 				D2000022 /* TmuxViewerReadyTests.swift */,
 				D2000023 /* ResizeTimingTests.swift */,
+				D2000024 /* ConfigSyncThemeTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -505,7 +508,7 @@
 				A1000079 /* IBMPlexMono-Bold.ttf in Resources */,
 				A100007A /* Inconsolata-Regular.ttf in Resources */,
 				A100007B /* Inconsolata-Bold.ttf in Resources */,
-				A1000061 /* Themes in Resources */,
+				A1000061 /* themes in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -587,6 +590,7 @@
 				D1000020 /* TmuxSessionNameResolverTests.swift in Sources */,
 				D1000022 /* TmuxViewerReadyTests.swift in Sources */,
 				D1000023 /* ResizeTimingTests.swift in Sources */,
+				D1000024 /* ConfigSyncThemeTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};

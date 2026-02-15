@@ -211,7 +211,8 @@ extension Ghostty {
             cursor-style-blink = true
             
             # === Colors ===
-            # Using Ghostty default theme (or specify: theme = tokyo-night)
+            # Ghostty resolves themes natively from the bundle's themes/ directory
+            # Uncomment to use a theme: theme = Dracula+
             background-opacity = 0.95
             bold-color = bright
             
@@ -298,6 +299,12 @@ extension Ghostty {
         /// Initialize the Ghostty runtime (must be called before any other Ghostty API)
         private static func initializeRuntime() -> Bool {
             guard !isInitialized else { return true }
+            
+            // Point Ghostty at our app bundle so it can find bundled themes
+            // in <bundle>/themes/. This enables native `theme = <name>` resolution
+            // in ghostty.conf without Swift-side theme parsing.
+            setenv("GHOSTTY_RESOURCES_DIR", Bundle.main.bundlePath, 1)
+            logger.info("Set GHOSTTY_RESOURCES_DIR to \(Bundle.main.bundlePath)")
             
             let argc: UInt = 0
             var argv: UnsafeMutablePointer<CChar>? = nil
