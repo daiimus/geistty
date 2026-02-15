@@ -79,9 +79,8 @@ class TerminalViewModel: ObservableObject {
     @Published var title: String = ""
     @Published var isConnected: Bool = false
     @Published var disconnectedByRemote: Bool = false
-    @Published var disconnectError: String? = nil
-    @Published var isSelectingText: Bool = false
-    @Published var currentFontSize: Float = 14.0
+        @Published var disconnectError: String? = nil
+        @Published var currentFontSize: Float = 14.0
     
     /// Buffer for data received before surface is ready
     private var preSurfaceBuffer: [Data] = []
@@ -282,42 +281,11 @@ class TerminalViewModel: ObservableObject {
     }
     
     func copy() {
-        guard let surface = surfaceView?.surface else {
-            logger.warning("📋 Copy: no surface available")
-            return
-        }
-        
-        // Check if there's a selection
-        guard ghostty_surface_has_selection(surface) else {
-            logger.info("📋 Copy: no selection")
-            return
-        }
-        
-        // Read the selection
-        var textStruct = ghostty_text_s()
-        if ghostty_surface_read_selection(surface, &textStruct) {
-            if let textPtr = textStruct.text, textStruct.text_len > 0 {
-                let selectedText = String(cString: textPtr)
-                UIPasteboard.general.string = selectedText
-                logger.info("📋 Copied \(textStruct.text_len) characters to clipboard")
-            }
-            // Free the text
-            ghostty_surface_free_text(surface, &textStruct)
-        }
-        
-        // Clear selection state after copying
-        isSelectingText = false
-    }
-    
-    /// Called when selection state changes (from SurfaceView)
-    func selectionDidChange(_ hasSelection: Bool) {
-        isSelectingText = hasSelection
+        surfaceView?.copy(nil)
     }
     
     func paste() {
-        if let text = UIPasteboard.general.string {
-            send(text: text)
-        }
+        surfaceView?.paste(nil)
     }
     
     func send(text: String) {
@@ -409,10 +377,13 @@ class TerminalViewModel: ObservableObject {
         surfaceView?.updateConfig()
     }
     
-    /// Clear the terminal screen (Ctrl+L)
+    /// Clear the terminal screen using Ghostty's clear_screen binding action.
+    /// This clears selection, erases scrollback history, and at a prompt erases
+    /// the display then sends form-feed — superior to raw Ctrl+L.
     func clearScreen() {
-        // Send Ctrl+L (form feed / clear screen)
-        send(text: "\u{0c}")
+        guard let surface = surfaceView?.surface else { return }
+        let action = "clear_screen"
+        ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
     }
     
     /// Reset the terminal (ESC c - full reset)
@@ -1292,13 +1263,11 @@ class RawTerminalUIViewController: UIViewController {
     }
     
     private func handleClearScreen() {
-        // Send clear screen escape sequence (Ctrl+L equivalent)
-        viewModel?.send(text: "\u{0C}")  // Form feed / Ctrl+L
+        viewModel?.clearScreen()
     }
     
     private func handleResetTerminal() {
-        // Send reset terminal escape sequence
-        viewModel?.send(text: "\u{1B}c")  // ESC c - Full reset
+        viewModel?.resetTerminal()
     }
     
     private func showKeyboardShortcutsHelp() {

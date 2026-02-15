@@ -258,21 +258,8 @@ class ConfigSyncManager: ObservableObject {
                 defaults.set(guiFont, forKey: "terminal.fontFamily")
                 logger.debug("File parser: font-family = \(guiFont)")
                 
-            case "cursor-style":
-                if ["block", "bar", "underline"].contains(value) {
-                    defaults.set(value, forKey: "terminal.cursorStyle")
-                    logger.debug("File parser: cursor-style = \(value)")
-                }
-                
-            case "font-thicken":
-                defaults.set(value == "true", forKey: "terminal.fontThicken")
-                logger.debug("File parser: font-thicken = \(value)")
-                
-            case "background-opacity":
-                if let opacity = Double(value) {
-                    defaults.set(opacity, forKey: "terminal.backgroundOpacity")
-                    logger.debug("File parser: background-opacity = \(opacity)")
-                }
+            // cursor-style, font-thicken, background-opacity are handled by
+            // syncFromConfig() via ghostty_config_get() API — no file parsing needed.
                 
             case "theme":
                 defaults.set(value, forKey: "terminal.colorTheme")

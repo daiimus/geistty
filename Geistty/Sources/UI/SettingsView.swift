@@ -13,14 +13,13 @@ class AppSettings: ObservableObject {
     
     // MARK: - Terminal Settings
     
-    @AppStorage("terminal.colorTheme") var colorTheme: String = "Default"
     @AppStorage("terminal.cursorStyle") var cursorStyle: String = "block"
     @AppStorage("terminal.fontFamily") var fontFamily: String = "Menlo"
     
     // MARK: - Font Rendering Settings
     
     @AppStorage("terminal.fontThicken") var fontThicken: Bool = true
-    @AppStorage("terminal.fontThickenStrength") var fontThickenStrength: Int = 255
+
     
     // MARK: - Appearance Settings
     
