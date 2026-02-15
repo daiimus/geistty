@@ -213,7 +213,7 @@ class ConnectionProfileManager: ObservableObject {
                 self.mergeFromiCloud()
             }
         case NSUbiquitousKeyValueStoreQuotaViolationChange:
-            print("iCloud storage quota exceeded")
+            logger.warning("iCloud storage quota exceeded")
         case NSUbiquitousKeyValueStoreAccountChange:
             // Account changed - reload
             DispatchQueue.main.async {

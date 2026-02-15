@@ -9,7 +9,7 @@
 import SwiftUI
 import os
 
-private let logger = os.Logger(subsystem: "com.geistty.app", category: "TmuxSplitView")
+private let logger = os.Logger(subsystem: "com.geistty", category: "TmuxSplitView")
 
 // MARK: - SplitViewDirection
 
