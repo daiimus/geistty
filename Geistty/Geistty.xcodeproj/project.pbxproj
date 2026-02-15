@@ -83,6 +83,9 @@
 		D1000024 /* ConfigSyncThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000024 /* ConfigSyncThemeTests.swift */; };
 		D1000025 /* ConfigIntrospectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000025 /* ConfigIntrospectionTests.swift */; };
 		D1000026 /* TmuxStateReconciliationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000026 /* TmuxStateReconciliationTests.swift */; };
+		D1000027 /* SSHKeyParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000027 /* SSHKeyParserTests.swift */; };
+		D1000028 /* SSHKeyManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000028 /* SSHKeyManagerTests.swift */; };
+		D1000029 /* KeychainManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000029 /* KeychainManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -204,6 +207,9 @@
 		D2000024 /* ConfigSyncThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSyncThemeTests.swift; sourceTree = "<group>"; };
 		D2000025 /* ConfigIntrospectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigIntrospectionTests.swift; sourceTree = "<group>"; };
 		D2000026 /* TmuxStateReconciliationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxStateReconciliationTests.swift; sourceTree = "<group>"; };
+		D2000027 /* SSHKeyParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyParserTests.swift; sourceTree = "<group>"; };
+		D2000028 /* SSHKeyManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyManagerTests.swift; sourceTree = "<group>"; };
+		D2000029 /* KeychainManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManagerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -416,6 +422,9 @@
 				D2000024 /* ConfigSyncThemeTests.swift */,
 				D2000025 /* ConfigIntrospectionTests.swift */,
 				D2000026 /* TmuxStateReconciliationTests.swift */,
+				D2000027 /* SSHKeyParserTests.swift */,
+				D2000028 /* SSHKeyManagerTests.swift */,
+				D2000029 /* KeychainManagerTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -639,6 +648,9 @@
 				D1000024 /* ConfigSyncThemeTests.swift in Sources */,
 				D1000025 /* ConfigIntrospectionTests.swift in Sources */,
 				D1000026 /* TmuxStateReconciliationTests.swift in Sources */,
+				D1000027 /* SSHKeyParserTests.swift in Sources */,
+				D1000028 /* SSHKeyManagerTests.swift in Sources */,
+				D1000029 /* KeychainManagerTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
