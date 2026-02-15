@@ -656,15 +656,13 @@ public class NIOSSHConnection: ObservableObject {
     
     /// Resize the PTY
     public func resizePTY(cols: Int, rows: Int) {
-        guard let channel = sshChannel else { return }
-        
-        // Deduplicate: skip if size hasn't changed. This prevents redundant
-        // window-change requests when both sizeDidChange() and the Zig-side
-        // resize callback fire for the same layout change.
-        guard cols != self.cols || rows != self.rows else { return }
-        
+        // Always update stored dimensions, even if we can't send yet.
+        // This mirrors Ghostty's External.zig pattern: internal state is updated
+        // unconditionally, then the callback/channel is invoked if available.
         self.cols = cols
         self.rows = rows
+        
+        guard let channel = sshChannel else { return }
         
         let windowChange = SSHChannelRequestEvent.WindowChangeRequest(
             terminalCharacterWidth: cols,
