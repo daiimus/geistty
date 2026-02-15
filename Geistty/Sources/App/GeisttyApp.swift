@@ -213,7 +213,6 @@ extension Notification.Name {
     static let terminalSelectAll = Notification.Name("terminalSelectAll")
     static let terminalCopy = Notification.Name("terminalCopy")
     static let terminalPaste = Notification.Name("terminalPaste")
-    static let terminalToggleStatusBar = Notification.Name("terminalToggleStatusBar")
     static let terminalReconnect = Notification.Name("terminalReconnect")
     static let reloadConfiguration = Notification.Name("reloadConfiguration")
     

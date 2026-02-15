@@ -309,6 +309,7 @@ struct ConnectionListView: View {
                     showingPasswordPrompt = true
                 }
             } catch {
+                logger.error("Connection failed to \(profile.username)@\(profile.host): \(error.localizedDescription)")
                 await MainActor.run {
                     connectionInProgress = nil
                     errorMessage = error.localizedDescription
@@ -344,6 +345,7 @@ struct ConnectionListView: View {
                     onConnect?(session)
                 }
             } catch {
+                logger.error("Password connection failed to \(profile.username)@\(profile.host): \(error.localizedDescription)")
                 await MainActor.run {
                     connectionInProgress = nil
                     errorMessage = error.localizedDescription
@@ -523,6 +525,7 @@ struct QuickConnectView: View {
                     onConnect(session)
                 }
             } catch {
+                logger.error("Quick connect failed to \(host): \(error.localizedDescription)")
                 await MainActor.run {
                     isConnecting = false
                     errorMessage = error.localizedDescription

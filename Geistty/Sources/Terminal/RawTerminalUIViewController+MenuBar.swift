@@ -38,9 +38,6 @@ extension RawTerminalUIViewController {
         menuBarObservers.append(nc.addObserver(forName: .terminalSelectAll, object: nil, queue: .main) { [weak self] _ in
             self?.handleSelectAll()
         })
-        menuBarObservers.append(nc.addObserver(forName: .terminalToggleStatusBar, object: nil, queue: .main) { [weak self] _ in
-            self?.toggleStatusBar()
-        })
         menuBarObservers.append(nc.addObserver(forName: .showKeyboardShortcuts, object: nil, queue: .main) { [weak self] _ in
             self?.showKeyboardShortcutsHelp()
         })

@@ -60,7 +60,8 @@ struct TmuxSessionNameResolver {
             // Split from the right to handle session names with spaces (unlikely but safe)
             let parts = trimmed.split(separator: " ")
             guard parts.count >= 2,
-                  let count = Int(parts.last!) else {
+                  let lastPart = parts.last,
+                  let count = Int(lastPart) else {
                 continue
             }
             
@@ -104,7 +105,7 @@ struct TmuxSessionNameResolver {
         }
         
         // All attached → create next number
-        let maxNumber = geisttySessions.last!.number
+        let maxNumber = geisttySessions.last?.number ?? 0
         return "\(prefix)\(maxNumber + 1)"
     }
     

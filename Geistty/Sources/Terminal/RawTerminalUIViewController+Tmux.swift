@@ -318,12 +318,14 @@ extension RawTerminalUIViewController {
         view.addSubview(primarySurface)
         view.bringSubviewToFront(primarySurface)  // Ensure it's on top
         
-        surfaceTopConstraint = primarySurface.topAnchor.constraint(equalTo: view.topAnchor)
-        surfaceBottomConstraint = primarySurface.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        let topConstraint = primarySurface.topAnchor.constraint(equalTo: view.topAnchor)
+        let bottomConstraint = primarySurface.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        surfaceTopConstraint = topConstraint
+        surfaceBottomConstraint = bottomConstraint
         
         NSLayoutConstraint.activate([
-            surfaceTopConstraint!,
-            surfaceBottomConstraint!,
+            topConstraint,
+            bottomConstraint,
             primarySurface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             primarySurface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])

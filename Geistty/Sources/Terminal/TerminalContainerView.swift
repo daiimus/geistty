@@ -807,12 +807,14 @@ class RawTerminalUIViewController: UIViewController {
         surface.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(surface)
         
-        surfaceTopConstraint = surface.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
-        surfaceBottomConstraint = surface.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 0)
+        let topConstraint = surface.topAnchor.constraint(equalTo: view.topAnchor, constant: 0)
+        let bottomConstraint = surface.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 0)
+        surfaceTopConstraint = topConstraint
+        surfaceBottomConstraint = bottomConstraint
         
         NSLayoutConstraint.activate([
-            surfaceTopConstraint!,
-            surfaceBottomConstraint!,
+            topConstraint,
+            bottomConstraint,
             surface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
