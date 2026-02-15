@@ -188,9 +188,12 @@ class KeychainManager {
         // Fallback: old kSecClassKey format (pre-migration)
         if status == errSecItemNotFound {
             let tag = "com.geistty.key.\(name)"
+            guard let tagData = tag.data(using: .utf8) else {
+                throw KeychainError.dataConversionError
+            }
             let oldQuery: [String: Any] = [
                 kSecClass as String: kSecClassKey,
-                kSecAttrApplicationTag as String: tag.data(using: .utf8)!,
+                kSecAttrApplicationTag as String: tagData,
                 kSecReturnData as String: true,
                 kSecMatchLimit as String: kSecMatchLimitOne
             ]
@@ -233,9 +236,13 @@ class KeychainManager {
         
         // Also delete old kSecClassKey format
         let tag = "com.geistty.key.\(name)"
+        guard let tagData = tag.data(using: .utf8) else {
+            logger.warning("Failed to encode tag for old-format key deletion: \(name)")
+            return
+        }
         let oldQuery: [String: Any] = [
             kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: tag.data(using: .utf8)!
+            kSecAttrApplicationTag as String: tagData
         ]
         SecItemDelete(oldQuery as CFDictionary)
         

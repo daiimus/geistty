@@ -15,6 +15,7 @@ private let logger = Logger(subsystem: "com.geistty", category: "SSHKey")
 /// Types of SSH keys we support
 enum SSHKeyType: String, CaseIterable, Identifiable {
     case ed25519 = "ed25519"
+    case ecdsa = "ecdsa"
     case rsa2048 = "rsa-2048"
     case rsa4096 = "rsa-4096"
     
@@ -23,6 +24,7 @@ enum SSHKeyType: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .ed25519: return "Ed25519 (Recommended)"
+        case .ecdsa: return "ECDSA (P-256)"
         case .rsa2048: return "RSA 2048-bit"
         case .rsa4096: return "RSA 4096-bit"
         }
@@ -31,6 +33,7 @@ enum SSHKeyType: String, CaseIterable, Identifiable {
     var keySize: Int {
         switch self {
         case .ed25519: return 256
+        case .ecdsa: return 256
         case .rsa2048: return 2048
         case .rsa4096: return 4096
         }
@@ -84,7 +87,7 @@ class SSHKeyManager: ObservableObject {
     // MARK: - Key Generation
     
     /// Generate a new SSH key pair
-    func generateKey(name: String, type: SSHKeyType, passphrase: String? = nil) throws -> SSHKeyPair {
+    func generateKey(name: String, type: SSHKeyType) throws -> SSHKeyPair {
         logger.info("🔑 Generating \(type.rawValue) key: \(name)")
         
         let (privateKey, publicKey): (Data, String)
@@ -92,6 +95,8 @@ class SSHKeyManager: ObservableObject {
         switch type {
         case .ed25519:
             (privateKey, publicKey) = try generateEd25519Key(name: name)
+        case .ecdsa:
+            throw SSHKeyError.notSupported
         case .rsa2048, .rsa4096:
             (privateKey, publicKey) = try generateRSAKey(name: name, bits: type.keySize)
         }
@@ -397,8 +402,8 @@ class SSHKeyManager: ObservableObject {
             type = .rsa4096
             logger.info("📥 Detected RSA PEM format")
         } else if pemString.contains("EC PRIVATE KEY") {
-            type = .ed25519 // Map ECDSA to ed25519 for display purposes
-            logger.info("📥 Detected EC PEM format")
+            type = .ecdsa
+            logger.info("📥 Detected EC PEM format (ECDSA)")
         } else {
             logger.error("📥 Unknown key format! Headers: \(pemString.prefix(200))")
             throw SSHKeyError.unsupportedKeyType
@@ -523,7 +528,7 @@ class SSHKeyManager: ObservableObject {
         case "ssh-rsa":
             return .rsa4096
         case "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521":
-            return .ed25519 // Map ECDSA to ed25519 for display (actual parsing handles it correctly)
+            return .ecdsa
         default:
             logger.warning("📥 Unknown key type: \(keyType)")
             return nil

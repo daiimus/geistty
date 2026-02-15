@@ -200,7 +200,17 @@ class SSHSession: ObservableObject, Identifiable {
     private var terminalCols: Int = 80
     private var terminalRows: Int = 24
     
-    init() {}
+    // Serial write queue — ensures keystrokes are sent in order.
+    // performWrite() yields to this stream; a single consumer Task
+    // processes writes sequentially, preventing out-of-order delivery
+    // that occurred with the previous Task-per-keystroke approach.
+    private var writeStream: AsyncStream<(command: Data, original: Data)>?
+    private var writeContinuation: AsyncStream<(command: Data, original: Data)>.Continuation?
+    private var writeConsumerTask: Task<Void, Never>?
+    
+    init() {
+        setupWriteStream()
+    }
     
     deinit {
         // NotificationCenter.removeObserver is thread-safe, so this is safe
@@ -684,34 +694,65 @@ class SSHSession: ObservableObject, Identifiable {
         performWrite(data, originalData: data)
     }
     
-    /// Perform the actual write with error handling
+    /// Set up the serial write stream and consumer task.
+    /// Called from init() and after reconnect to ensure a fresh stream.
+    private func setupWriteStream() {
+        // Cancel any previous consumer
+        writeConsumerTask?.cancel()
+        writeContinuation?.finish()
+        
+        let (stream, continuation) = AsyncStream<(command: Data, original: Data)>.makeStream()
+        writeStream = stream
+        writeContinuation = continuation
+        
+        writeConsumerTask = Task { [weak self] in
+            for await (command, original) in stream {
+                guard let self = self, !Task.isCancelled else { break }
+                await self.executeWrite(command, originalData: original)
+            }
+        }
+    }
+    
+    /// Perform the actual write with error handling.
+    /// Enqueues the write into the serial stream for ordered delivery.
     /// - Parameters:
     ///   - command: The data to write (may be tmux-wrapped command)
     ///   - originalData: The original user input (for queueing on failure)
     private func performWrite(_ command: Data, originalData: Data) {
-        guard let connection = connection else {
+        guard connection != nil else {
             logger.warning("⚠️ No connection for write, queueing")
             pendingInputQueue.append(originalData)
             updatePendingInputDisplay()
             return
         }
         
-        Task {
-            do {
-                try await connection.writeAsync(command)
-                // Success! If we were stale, NIOSSHConnection will mark us healthy
-            } catch {
-                // Write failed - queue the ORIGINAL data (not the tmux command)
-                logger.error("❌ Write failed: \(error.localizedDescription) - queueing input")
-                await MainActor.run {
-                    self.pendingInputQueue.append(originalData)
-                    self.updatePendingInputDisplay()
-                    
-                    // Update health state if not already dead
-                    if self.connectionHealth.isHealthy || self.connectionHealth != .dead(reason: error.localizedDescription) {
-                        self.connectionHealth = .dead(reason: error.localizedDescription)
-                        self.delegate?.sshSession(self, healthDidChange: self.connectionHealth)
-                    }
+        writeContinuation?.yield((command: command, original: originalData))
+    }
+    
+    /// Execute a single write to the SSH connection (called serially by consumer task).
+    private func executeWrite(_ command: Data, originalData: Data) async {
+        guard let connection = connection else {
+            await MainActor.run {
+                self.pendingInputQueue.append(originalData)
+                self.updatePendingInputDisplay()
+            }
+            return
+        }
+        
+        do {
+            try await connection.writeAsync(command)
+            // Success! If we were stale, NIOSSHConnection will mark us healthy
+        } catch {
+            // Write failed - queue the ORIGINAL data (not the tmux command)
+            logger.error("❌ Write failed: \(error.localizedDescription) - queueing input")
+            await MainActor.run {
+                self.pendingInputQueue.append(originalData)
+                self.updatePendingInputDisplay()
+                
+                // Update health state if not already dead
+                if self.connectionHealth.isHealthy || self.connectionHealth != .dead(reason: error.localizedDescription) {
+                    self.connectionHealth = .dead(reason: error.localizedDescription)
+                    self.delegate?.sshSession(self, healthDidChange: self.connectionHealth)
                 }
             }
         }
@@ -771,6 +812,13 @@ class SSHSession: ObservableObject, Identifiable {
         sessionDiscoveryState = .idle
         pendingInputQueue.removeAll()
         removeTmuxNotificationObservers()
+        
+        // Tear down serial write queue
+        writeConsumerTask?.cancel()
+        writeConsumerTask = nil
+        writeContinuation?.finish()
+        writeContinuation = nil
+        writeStream = nil
         
         // Send clean detach before tearing down, so tmux session survives
         // on the server and can be reattached later (like iTerm2's behavior)
@@ -901,6 +949,9 @@ class SSHSession: ObservableObject, Identifiable {
         conn.rows = terminalRows
         conn.delegate = self
         connection = conn
+        
+        // Set up fresh serial write queue for the new connection
+        setupWriteStream()
         
         try await conn.connect(authMethod: authMethod)
         

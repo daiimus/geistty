@@ -2115,8 +2115,10 @@ extension Ghostty {
             // IMPORTANT: On iOS, the IOSurfaceLayer is added as a sublayer (not the view's layer).
             // We must manually resize it to match the view's bounds, otherwise it stays at (0,0,0,0).
             // On macOS, the IOSurfaceLayer IS the view's layer, so it auto-sizes.
+            // Skip the scroll indicator's layer — it's positioned separately in layoutSubviews.
             if let sublayers = layer.sublayers {
-                for sublayer in sublayers {
+                let scrollLayer = scrollIndicator?.layer
+                for sublayer in sublayers where sublayer !== scrollLayer {
                     // Disable implicit animations for immediate resize
                     CATransaction.begin()
                     CATransaction.setDisableActions(true)
@@ -2333,8 +2335,9 @@ extension Ghostty {
         /// Update sublayer frames to match current bounds (without changing surface size)
         private func updateSublayerFrames() {
             let scale = contentScaleFactor
+            let scrollLayer = scrollIndicator?.layer
             if let sublayers = layer.sublayers {
-                for sublayer in sublayers {
+                for sublayer in sublayers where sublayer !== scrollLayer {
                     CATransaction.begin()
                     CATransaction.setDisableActions(true)
                     sublayer.frame = bounds
