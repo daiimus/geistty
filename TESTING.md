@@ -50,8 +50,9 @@ xcodebuild build \
 - Tests core logic without UI or network dependencies
 - Files in `GeisttyTests/`
 - Run with: `./ci.sh test`
-- **369 tests** across 8 test files, all passing
+- **401 tests** across 20 test suites in 15 test files, all passing
 - No mocks — direct unit tests of real implementations
+- Auth module tests use real Keychain on simulator (cleaned up in tearDown)
 
 ### GeisttyUITests (UI Tests)
 - Requires a running app instance

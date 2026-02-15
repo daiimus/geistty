@@ -58,13 +58,19 @@ public enum SSHKeyParser {
                 logger.debug("[KeyParse] Parsed RSA key")
                 return NIOSSHPrivateKey(rsaKey: rsaKey)
             } catch {
-                logger.debug("[KeyParse] WARNING: RSA key parsing failed: \(error.localizedDescription)")
-                throw SSHKeyParseError.invalidKey("Failed to parse RSA key: \(error.localizedDescription)")
+                // For generic PKCS#8 ("BEGIN PRIVATE KEY"), RSA parsing may fail because
+                // the key is actually ECDSA. Fall through to try ECDSA below.
+                if pemString.contains("BEGIN PRIVATE KEY") {
+                    logger.debug("[KeyParse] PKCS#8 key is not RSA, trying ECDSA...")
+                } else {
+                    logger.debug("[KeyParse] WARNING: RSA key parsing failed: \(error.localizedDescription)")
+                    throw SSHKeyParseError.invalidKey("Failed to parse RSA key: \(error.localizedDescription)")
+                }
             }
         }
         
-        // Try ECDSA
-        if pemString.contains("EC PRIVATE KEY") {
+        // Try ECDSA — matches both SEC1 ("EC PRIVATE KEY") and PKCS#8 ("BEGIN PRIVATE KEY")
+        if pemString.contains("EC PRIVATE KEY") || pemString.contains("BEGIN PRIVATE KEY") {
             // Try P-256 first (most common)
             if let p256Key = try? P256.Signing.PrivateKey(pemRepresentation: pemString) {
                 logger.debug("[KeyParse] Parsed P-256 ECDSA key")
