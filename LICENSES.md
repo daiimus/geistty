@@ -38,7 +38,7 @@ SOFTWARE.
 ### libxev
 - **License**: MIT
 - **Copyright**: © 2023 Mitchell Hashimoto
-- **Source**: https://github.com/Vexu/libxev
+- **Source**: https://github.com/mitchellh/libxev
 
 ```
 MIT License

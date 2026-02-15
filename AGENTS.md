@@ -8,13 +8,12 @@ Geistty is an iOS SSH terminal app built on top of Ghostty's terminal emulator. 
 
 ## Development Philosophy
 
-We're open to bleeding-edge solutions, but **favor approaches that align with the coding style and architectural patterns established by Ghostty's creator (Mitchell Hashimoto) and contributors**, as well as those of the libraries we modify (libxev, SwiftNIO-SSH). When in doubt, look at how similar problems are solved in the upstream codebases.
+We're open to bleeding-edge solutions, but **favor approaches that align with the coding style and architectural patterns established by Ghostty's creator (Mitchell Hashimoto) and contributors**, as well as those of the libraries we modify (SwiftNIO-SSH). When in doubt, look at how similar problems are solved in the upstream codebases.
 
 ## Repository Structure
 
 - **Main App**: `Geistty/` - Xcode project and Swift sources
 - **Ghostty Fork**: `../ghostty/` - Custom ghostty with iOS support (branch: `ios-external-backend`)
-- **libxev Fork**: `../libxev-ios/` - Custom libxev with iOS kqueue support
 
 ## Commands
 
@@ -148,7 +147,7 @@ Live font updates use `ghostty_surface_update_config()` with a new config.
 ## Dependencies
 
 - **Ghostty** - Terminal emulator (custom fork with External backend)
-- **libxev** - Event loop (custom fork with iOS kqueue support)
+- **libxev** - Event loop (used by Ghostty internally, upstream mitchellh/libxev)
 - **SwiftNIO-SSH** - SSH protocol (via daiimus/swift-nio-ssh fork with RSA support)
 
 ## tmux Integration
@@ -270,7 +269,7 @@ If revisiting, start fresh from the archive branch and read the learnings doc fi
 | Ghostty Native tmux | Ghostty's upstream viewer.zig/control.zig handles all protocol parsing, output routing, and session restore — eliminates dual-parser conflicts |
 | Fire-and-forget tmux commands | With Ghostty owning the protocol, Swift can only write commands to stdin; %begin/%end responses go to Ghostty's viewer |
 | send-keys wrapping | In tmux control mode, ALL stdin is tmux commands; user input wrapped in `send-keys -H` by Ghostty's Zig-side `viewer.sendKeys()` in `Termio.queueWrite()` |
-| libxev fork | iOS uses `kevent`, not `kevent64` |
+| libxev (via Ghostty) | Ghostty uses upstream mitchellh/libxev internally |
 | Custom module.modulemap name | Renamed to avoid Xcode module conflicts |
 
 ## Data Flow
@@ -406,9 +405,6 @@ xcrun devicectl device process launch --device <device-id> --console com.geistty
   - C API extensions for config loading
   - tmux C API: state change actions, pane queries, active pane switching
   
-- `libxev-ios` (daiimus/libxev-ios)
-  - iOS kqueue support (uses kevent instead of kevent64)
-
 - `swift-nio-ssh` (daiimus/swift-nio-ssh, branch: add-rsa-support)
   - Fork with RSA key support added
   - Pure Swift SSH implementation with Network.framework integration

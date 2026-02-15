@@ -17,7 +17,7 @@
 | **Nerd Fonts** | https://github.com/ryanoasis/nerd-fonts | Patched fonts with icons |
 | **SwiftNIO-SSH** | https://github.com/apple/swift-nio-ssh | Pure Swift SSH implementation |
 | **SwiftNIO-SSH (fork)** | https://github.com/daiimus/swift-nio-ssh | Fork with RSA key support |
-| **libxev** | https://github.com/Cloudef/libxev | Event loop (Geistty uses [daiimus/libxev-ios](https://github.com/daiimus/libxev-ios) fork for iOS kqueue support) |
+| **libxev** | https://github.com/mitchellh/libxev | Event loop used by Ghostty (upstream, no fork needed) |
 
 > **Note:** libssh2 was replaced with SwiftNIO-SSH in Dec 2024 for pure Swift async/await support.
 

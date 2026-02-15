@@ -9,10 +9,6 @@
 			"path": "../ghostty"
 		},
 		{
-			"name": "libxev-ios",
-			"path": "../libxev-ios"
-		},
-		{
 			"name": "swift-nio-ssh",
 			"path": "../swift-nio-ssh-fork"
 		}
