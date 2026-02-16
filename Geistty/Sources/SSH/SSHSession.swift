@@ -1092,56 +1092,50 @@ class SSHSession: ObservableObject, Identifiable {
 
 // MARK: - NIOSSHConnectionDelegate
 
+// All delegate methods are called from NIOSSHConnection's closures which already
+// run inside Task { @MainActor }. Both NIOSSHConnection and SSHSession are @MainActor.
+// No nonisolated + Task wrapper needed — that pattern created unnecessary unstructured
+// Tasks which, on the hot data path (didReceiveData), could reorder SSH data chunks
+// under high throughput (cmatrix, blightmud via tmux) and corrupt the tmux control
+// mode byte stream.
 extension SSHSession: NIOSSHConnectionDelegate {
-    nonisolated func connectionDidConnect(_ connection: NIOSSHConnection) {
-        Task { @MainActor in
-            self.state = .connected
-        }
+    func connectionDidConnect(_ connection: NIOSSHConnection) {
+        self.state = .connected
     }
     
-    nonisolated func connectionDidAuthenticate(_ connection: NIOSSHConnection) {
-        Task { @MainActor in
-            self.state = .authenticated
-            self.delegate?.sshSessionDidConnect(self)
-        }
+    func connectionDidAuthenticate(_ connection: NIOSSHConnection) {
+        self.state = .authenticated
+        self.delegate?.sshSessionDidConnect(self)
     }
     
-    nonisolated func connectionDidFailAuthentication(_ connection: NIOSSHConnection, error: Error) {
-        Task { @MainActor in
-            self.lastError = error
-            self.state = .disconnected
-            self.delegate?.sshSession(self, didDisconnectWithError: error)
-        }
+    func connectionDidFailAuthentication(_ connection: NIOSSHConnection, error: Error) {
+        self.lastError = error
+        self.state = .disconnected
+        self.delegate?.sshSession(self, didDisconnectWithError: error)
     }
     
-    nonisolated func connectionDidClose(_ connection: NIOSSHConnection, error: Error?) {
-        Task { @MainActor in
-            self.lastError = error
-            self.state = .disconnected
-            self.delegate?.sshSession(self, didDisconnectWithError: error)
-        }
+    func connectionDidClose(_ connection: NIOSSHConnection, error: Error?) {
+        self.lastError = error
+        self.state = .disconnected
+        self.delegate?.sshSession(self, didDisconnectWithError: error)
     }
     
-    nonisolated func connection(_ connection: NIOSSHConnection, didReceiveData data: Data) {
-        Task { @MainActor in
-            self.handleReceivedData(data)
-        }
+    func connection(_ connection: NIOSSHConnection, didReceiveData data: Data) {
+        self.handleReceivedData(data)
     }
     
-    nonisolated func connection(_ connection: NIOSSHConnection, healthDidChange health: ConnectionHealth) {
-        Task { @MainActor in
-            self.connectionHealth = health
-            logger.info("🔌 Connection health changed: \(String(describing: health))")
-            
-            // Notify delegate
-            self.delegate?.sshSession(self, healthDidChange: health)
-            
-            // If connection became healthy again and we have pending input, flush it.
-            // Route through Ghostty for proper send-keys wrapping in tmux mode.
-            if health.isHealthy && !self.pendingInputQueue.isEmpty {
-                logger.info("Connection healthy, flushing \(self.pendingInputQueue.count) queued inputs")
-                self.flushPendingInput()
-            }
+    func connection(_ connection: NIOSSHConnection, healthDidChange health: ConnectionHealth) {
+        self.connectionHealth = health
+        logger.info("🔌 Connection health changed: \(String(describing: health))")
+        
+        // Notify delegate
+        self.delegate?.sshSession(self, healthDidChange: health)
+        
+        // If connection became healthy again and we have pending input, flush it.
+        // Route through Ghostty for proper send-keys wrapping in tmux mode.
+        if health.isHealthy && !self.pendingInputQueue.isEmpty {
+            logger.info("Connection healthy, flushing \(self.pendingInputQueue.count) queued inputs")
+            self.flushPendingInput()
         }
     }
 }

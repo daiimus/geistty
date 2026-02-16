@@ -426,7 +426,18 @@ class NIOSSHConnection {
             return childChannel.pipeline.addHandlers([
                 SSHChannelDataHandler(
                     onData: { [weak self] data in
-                        Task { @MainActor [weak self] in
+                        // Use DispatchQueue.main for strictly FIFO ordered delivery.
+                        // The previous Task { @MainActor } created independent unstructured
+                        // Tasks per NIO read. While Swift's MainActor executor is nominally
+                        // FIFO, under high data rates (cmatrix, blightmud via tmux) the
+                        // cooperative executor can interleave MainActor tasks with other
+                        // work, potentially reordering SSH data chunks and corrupting the
+                        // tmux control mode DCS byte stream.
+                        //
+                        // DispatchQueue.main is GCD's serial queue — blocks execute strictly
+                        // in enqueue order with no exceptions. This matches the pattern used
+                        // by Ghostty's own externalWriteCallback.
+                        DispatchQueue.main.async { [weak self] in
                             guard let self = self else { return }
                             // Received data means connection is healthy
                             if !self.health.isHealthy {
