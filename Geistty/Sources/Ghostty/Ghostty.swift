@@ -71,8 +71,6 @@ enum Ghostty {
 
 import os
 
-// MARK: - Simple Logger wrapper around os.Logger
-
 struct Logger {
     private let osLogger: os.Logger
     

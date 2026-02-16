@@ -187,8 +187,6 @@ extension RawTerminalUIViewController {
             }
             // If single pane and not in multi-pane mode, stay with single surface
             // This handles initial connection with no splits
-        } else if !hasPanes && isMultiPaneMode {
-            // No panes left - already handled above
         }
         // If we're in multi-pane mode, stay there - TmuxMultiPaneView handles all pane counts
     }

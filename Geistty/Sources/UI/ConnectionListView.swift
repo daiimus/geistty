@@ -482,7 +482,7 @@ struct QuickConnectView: View {
     }
     
     private var isValid: Bool {
-        !host.isEmpty && !username.isEmpty && (Int(port) ?? 0) > 0
+        !host.isEmpty && !username.isEmpty && (Int(port) ?? 0) > 0 && (Int(port) ?? 0) <= 65535
     }
     
     private func connect() {

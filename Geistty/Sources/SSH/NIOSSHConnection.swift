@@ -18,12 +18,12 @@ private let logger = Logger(subsystem: "com.geistty", category: "NIOSSHConnectio
 // MARK: - Connection Health
 
 /// Connection health state for tracking network viability
-public enum ConnectionHealth: Equatable, Sendable {
+enum ConnectionHealth: Equatable, Sendable {
     case healthy
     case stale(since: Date)
     case dead(reason: String)
     
-    public var isHealthy: Bool {
+    var isHealthy: Bool {
         if case .healthy = self { return true }
         return false
     }
@@ -33,7 +33,7 @@ public enum ConnectionHealth: Equatable, Sendable {
 
 /// Delegate protocol for SSH connection events
 @MainActor
-public protocol NIOSSHConnectionDelegate: AnyObject {
+protocol NIOSSHConnectionDelegate: AnyObject {
     func connectionDidConnect(_ connection: NIOSSHConnection)
     func connectionDidAuthenticate(_ connection: NIOSSHConnection)
     func connectionDidFailAuthentication(_ connection: NIOSSHConnection, error: Error)
@@ -45,7 +45,7 @@ public protocol NIOSSHConnectionDelegate: AnyObject {
 // MARK: - Errors
 
 /// Errors that can occur during SSH operations
-public enum NIOSSHError: LocalizedError {
+enum NIOSSHError: LocalizedError {
     case notConnected
     case alreadyConnected
     case connectionFailed(String)
@@ -55,7 +55,7 @@ public enum NIOSSHError: LocalizedError {
     case timeout
     case networkUnavailable
     
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .notConnected: return "Not connected to server"
         case .alreadyConnected: return "Already connected"
@@ -70,7 +70,7 @@ public enum NIOSSHError: LocalizedError {
 }
 
 /// SSH Connection state
-public enum NIOSSHState: Sendable {
+enum NIOSSHState: Sendable {
     case disconnected
     case connecting
     case connected  // TCP connected, SSH handshake done
@@ -81,7 +81,7 @@ public enum NIOSSHState: Sendable {
 // MARK: - Authentication
 
 /// SSH credential for authentication
-public enum SSHAuthMethod: Sendable {
+enum SSHAuthMethod: Sendable {
     case password(String)
     case publicKey(privateKey: NIOSSHPrivateKey, publicKey: NIOSSHPublicKey? = nil)
 }
@@ -233,22 +233,22 @@ final class SSHChannelDataHandler: ChannelInboundHandler {
 
 /// Manages an SSH connection using SwiftNIO-SSH with Network.framework
 @MainActor
-public class NIOSSHConnection {
+class NIOSSHConnection {
     // Connection parameters
-    public let host: String
-    public let port: Int
-    public let username: String
+    let host: String
+    let port: Int
+    let username: String
     
     // State
-    public private(set) var state: NIOSSHState = .disconnected
-    public private(set) var health: ConnectionHealth = .healthy
+    private(set) var state: NIOSSHState = .disconnected
+    private(set) var health: ConnectionHealth = .healthy
     
     // Delegate
-    public weak var delegate: NIOSSHConnectionDelegate?
+    weak var delegate: NIOSSHConnectionDelegate?
     
     // Terminal dimensions
-    public var cols: Int = 80
-    public var rows: Int = 24
+    var cols: Int = 80
+    var rows: Int = 24
     
     // NIO components
     private var eventLoopGroup: NIOTSEventLoopGroup?
@@ -262,7 +262,7 @@ public class NIOSSHConnection {
     
     // MARK: - Initialization
     
-    public init(host: String, port: Int = 22, username: String) {
+    init(host: String, port: Int = 22, username: String) {
         self.host = host
         self.port = port
         self.username = username
@@ -330,12 +330,12 @@ public class NIOSSHConnection {
     // MARK: - Connection
     
     /// Connect to the SSH server and perform handshake with password authentication
-    public func connect(password: String) async throws {
+    func connect(password: String) async throws {
         try await connect(authMethod: .password(password))
     }
     
     /// Connect to the SSH server with a specific authentication method
-    public func connect(authMethod: SSHAuthMethod) async throws {
+    func connect(authMethod: SSHAuthMethod) async throws {
         logger.info("🔗 NIOSSHConnection.connect() - host=\(self.host) port=\(self.port)")
         
         guard state == .disconnected else {
@@ -493,7 +493,7 @@ public class NIOSSHConnection {
     private var activeWriteTask: Task<Void, Never>?
     
     /// Write data to the channel (fire-and-forget for backwards compatibility)
-    public func write(_ data: Data) {
+    func write(_ data: Data) {
         activeWriteTask = Task {
             do {
                 try await writeAsync(data)
@@ -512,7 +512,7 @@ public class NIOSSHConnection {
     /// Write data to the channel with async/await error handling
     /// - Parameter data: The data to write
     /// - Throws: NIOSSHError if write fails
-    public func writeAsync(_ data: Data) async throws {
+    func writeAsync(_ data: Data) async throws {
         guard state == .channelOpen, let channel = sshChannel else {
             logger.warning("⚠️ Write called but channel not open")
             throw NIOSSHError.notConnected
@@ -547,14 +547,14 @@ public class NIOSSHConnection {
     }
     
     /// Write string to channel (fire-and-forget for backwards compatibility)
-    public func write(_ string: String) {
+    func write(_ string: String) {
         if let data = string.data(using: .utf8) {
             write(data)
         }
     }
     
     /// Write string to channel with async/await error handling
-    public func writeAsync(_ string: String) async throws {
+    func writeAsync(_ string: String) async throws {
         guard let data = string.data(using: .utf8) else {
             throw NIOSSHError.channelError("Invalid string encoding")
         }
@@ -564,7 +564,7 @@ public class NIOSSHConnection {
     // MARK: - PTY Resize
     
     /// Resize the PTY
-    public func resizePTY(cols: Int, rows: Int) {
+    func resizePTY(cols: Int, rows: Int) {
         // Always update stored dimensions, even if we can't send yet.
         // This mirrors Ghostty's External.zig pattern: internal state is updated
         // unconditionally, then the callback/channel is invoked if available.
@@ -586,7 +586,7 @@ public class NIOSSHConnection {
     // MARK: - Disconnect
     
     /// Disconnect from the server
-    public func disconnect() {
+    func disconnect() {
         logger.info("Disconnecting...")
         
         // Cancel any in-flight write task
@@ -611,7 +611,7 @@ public class NIOSSHConnection {
     // MARK: - Health Management
     
     /// Mark the connection as healthy (e.g., after receiving data)
-    public func markHealthy() {
+    func markHealthy() {
         if !health.isHealthy {
             health = .healthy
             delegate?.connection(self, healthDidChange: health)
@@ -619,7 +619,7 @@ public class NIOSSHConnection {
     }
     
     /// Mark the connection as stale (e.g., after network event)
-    public func markStale(reason: String? = nil) {
+    func markStale(reason: String? = nil) {
         if health.isHealthy {
             health = .stale(since: Date())
             delegate?.connection(self, healthDidChange: health)
@@ -627,7 +627,7 @@ public class NIOSSHConnection {
     }
     
     /// Mark the connection as dead
-    public func markDead(reason: String) {
+    func markDead(reason: String) {
         health = .dead(reason: reason)
         delegate?.connection(self, healthDidChange: health)
     }

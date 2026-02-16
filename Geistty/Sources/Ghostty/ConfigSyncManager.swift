@@ -16,6 +16,9 @@ private let logger = Logger(subsystem: "com.geistty", category: "ConfigSync")
 class ConfigSyncManager: ObservableObject {
     static let shared = ConfigSyncManager()
     
+    /// Default background opacity when not specified in config
+    private static let defaultBackgroundOpacity: Double = 0.95
+    
     private let defaults = UserDefaults.standard
     
     /// Path to config file
@@ -321,7 +324,7 @@ class ConfigSyncManager: ObservableObject {
         // Fallback: parse the file
         guard FileManager.default.fileExists(atPath: configFilePath.path),
               let content = try? String(contentsOf: configFilePath, encoding: .utf8) else {
-            return 0.95
+            return Self.defaultBackgroundOpacity
         }
         
         let lines = content.components(separatedBy: "\n")
@@ -333,10 +336,10 @@ class ConfigSyncManager: ObservableObject {
             let key = trimmed[..<equalsIndex].trimmingCharacters(in: .whitespaces)
             if key == "background-opacity" {
                 let value = String(trimmed[trimmed.index(after: equalsIndex)...]).trimmingCharacters(in: .whitespaces)
-                return Double(value) ?? 0.95
+                return Double(value) ?? Self.defaultBackgroundOpacity
             }
         }
-        return 0.95
+        return Self.defaultBackgroundOpacity
     }
     
     /// Called when config file is edited externally - reload GUI

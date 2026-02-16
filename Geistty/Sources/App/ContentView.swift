@@ -77,7 +77,7 @@ struct ContentView: View {
                         case .connecting:
                             ConnectingView(backgroundColor: themeBackground)
                         case .connected:
-                            // This case won't be reached due to outer if
+                            // Unreachable: handled by outer `if` — required for exhaustiveness
                             EmptyView()
                         case .error(let message):
                             ErrorView(
