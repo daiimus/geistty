@@ -420,47 +420,44 @@ class TerminalViewModel: ObservableObject {
 }
 
 // MARK: - SSHSessionDelegate
+// SSHSessionDelegate is @MainActor. TerminalViewModel is @MainActor. Delegate calls
+// arrive synchronously from SSHSession.handleReceivedData() on MainActor. No nonisolated
+// or Task wrapper needed — methods execute synchronously, preserving SSH chunk ordering.
 extension TerminalViewModel: SSHSessionDelegate {
-    nonisolated func sshSession(_ session: SSHSession, didReceiveData data: Data) {
-        Task { @MainActor in
-            // Feed data from SSH to Ghostty terminal for display
-            if let surface = surfaceView {
-                logger.info("📥 Received \(data.count) bytes from SSH, feeding to Ghostty")
-                if let text = String(data: data, encoding: .utf8) {
-                    logger.debug("📥 Data preview: \(text.prefix(100))")
-                }
-                surface.feedData(data)
-            } else {
-                // Buffer data until surface is ready
-                logger.info("📦 Buffering \(data.count) bytes (surface not ready yet)")
-                preSurfaceBuffer.append(data)
+    func sshSession(_ session: SSHSession, didReceiveData data: Data) {
+        // Feed data from SSH to Ghostty terminal for display
+        if let surface = surfaceView {
+            logger.info("📥 Received \(data.count) bytes from SSH, feeding to Ghostty")
+            if let text = String(data: data, encoding: .utf8) {
+                logger.debug("📥 Data preview: \(text.prefix(100))")
             }
+            surface.feedData(data)
+        } else {
+            // Buffer data until surface is ready
+            logger.info("📦 Buffering \(data.count) bytes (surface not ready yet)")
+            preSurfaceBuffer.append(data)
         }
     }
     
-    nonisolated func sshSession(_ session: SSHSession, didDisconnectWithError error: Error?) {
-        Task { @MainActor in
-            isConnected = false
-            // Set disconnectedByRemote for both error and clean disconnects
-            // This triggers navigation back to the connection screen
-            disconnectedByRemote = true
-            if let error = error {
-                logger.error("❌ SSH disconnected with error: \(error.localizedDescription)")
-                disconnectError = error.localizedDescription
-            } else {
-                logger.info("🔌 SSH disconnected cleanly (remote closed)")
-                disconnectError = nil
-            }
-        }
-    }
-    
-    nonisolated func sshSessionDidConnect(_ session: SSHSession) {
-        Task { @MainActor in
-            logger.info("✅ SSH session connected!")
-            isConnected = true
-            disconnectedByRemote = false
+    func sshSession(_ session: SSHSession, didDisconnectWithError error: Error?) {
+        isConnected = false
+        // Set disconnectedByRemote for both error and clean disconnects
+        // This triggers navigation back to the connection screen
+        disconnectedByRemote = true
+        if let error = error {
+            logger.error("❌ SSH disconnected with error: \(error.localizedDescription)")
+            disconnectError = error.localizedDescription
+        } else {
+            logger.info("🔌 SSH disconnected cleanly (remote closed)")
             disconnectError = nil
         }
+    }
+    
+    func sshSessionDidConnect(_ session: SSHSession) {
+        logger.info("✅ SSH session connected!")
+        isConnected = true
+        disconnectedByRemote = false
+        disconnectError = nil
     }
 }
 

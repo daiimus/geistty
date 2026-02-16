@@ -37,11 +37,9 @@ final class MockSSHSessionDelegate: SSHSessionDelegate {
     
     // MARK: - SSHSessionDelegate
     
-    // SSHSessionDelegate is not @MainActor, but all callers (SSHSession.handleReceivedData,
-    // TmuxConnectionLifecycleTests, etc.) run on @MainActor. Since MockSSHSessionDelegate
-    // is @MainActor, these calls execute synchronously — no Task hop needed.
-    // The previous nonisolated + Task pattern caused receivedDataCalls to be populated
-    // asynchronously, making ordering assertions unreliable.
+    // SSHSessionDelegate is @MainActor, MockSSHSessionDelegate is @MainActor.
+    // All calls arrive synchronously on MainActor — no Task hop, enabling
+    // reliable ordering assertions on receivedDataCalls.
     
     func sshSessionDidConnect(_ session: SSHSession) {
         self.didConnectCalls.append(session)

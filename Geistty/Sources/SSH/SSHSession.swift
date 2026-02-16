@@ -12,7 +12,13 @@ import os
 
 private let logger = Logger(subsystem: "com.geistty", category: "SSHSession")
 
-/// Delegate protocol for SSHSession events
+/// Delegate protocol for SSHSession events.
+/// @MainActor because SSHSession is @MainActor and calls delegate methods synchronously
+/// from the main thread. Without this, conforming @MainActor classes (TerminalViewModel)
+/// must mark methods nonisolated + Task { @MainActor }, creating unstructured Tasks per
+/// data chunk that can reorder under load — the same bug pattern fixed in Session 49
+/// for NIOSSHConnectionDelegate.
+@MainActor
 protocol SSHSessionDelegate: AnyObject {
     func sshSessionDidConnect(_ session: SSHSession)
     func sshSession(_ session: SSHSession, didReceiveData data: Data)
