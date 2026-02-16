@@ -542,6 +542,9 @@ class RawTerminalUIViewController: UIViewController {
     var dividerOverlayView: DividerOverlayView?
     var dividerTreeObserver: AnyCancellable?
     
+    // Command palette overlay
+    var commandPaletteHostingController: UIHostingController<AnyView>?
+    
     // Window picker support (shown when multiple tmux windows exist)
     var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
     private var windowPickerHeightConstraint: NSLayoutConstraint?

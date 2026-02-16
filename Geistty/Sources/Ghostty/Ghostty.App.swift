@@ -538,6 +538,14 @@ extension Ghostty {
                 }
                 return true
                 
+            case GHOSTTY_ACTION_TOGGLE_COMMAND_PALETTE:
+                // Toggle command palette overlay
+                logger.info("🔍 Toggle command palette requested")
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
+                }
+                return true
+                
             case GHOSTTY_ACTION_TMUX_STATE_CHANGED:
                 // tmux control mode: windows/panes changed
                 guard target.tag == GHOSTTY_TARGET_SURFACE,
