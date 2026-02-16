@@ -10,6 +10,7 @@ import Foundation
 import UIKit
 import GhosttyKit
 import UserNotifications
+import os
 
 // MARK: - Ghostty.App
 
@@ -33,9 +34,16 @@ extension Ghostty {
         /// The underlying ghostty_app_t handle
         private(set) var app: ghostty_app_t?
         
-        /// Static flag to track if ghostty_init has been called
+        /// Thread-safe flag to track if ghostty_init has been called (H3 fix).
+        /// Uses OSAllocatedUnfairLock for safe concurrent access.
         /// Internal (not fileprivate) so Ghostty.Config can check it from Ghostty.Config.swift
-        static var isInitialized = false
+        static let isInitializedLock = OSAllocatedUnfairLock(initialState: false)
+        
+        /// Convenience accessor for isInitialized state
+        static var isInitialized: Bool {
+            get { isInitializedLock.withLock { $0 } }
+            set { isInitializedLock.withLock { $0 = newValue } }
+        }
         
         /// Initialize the Ghostty runtime (must be called before any other Ghostty API)
         private static func initializeRuntime() -> Bool {
@@ -561,9 +569,8 @@ extension Ghostty {
                 // state changes and Swift reacting to them.
                 NotificationCenter.default.post(
                     name: .tmuxStateChanged,
-                    object: nil,
+                    object: surface,
                     userInfo: [
-                        "surface": surface,
                         "windowCount": tmuxState.window_count,
                         "paneCount": tmuxState.pane_count
                     ]
@@ -582,8 +589,8 @@ extension Ghostty {
                 // Post synchronously — already on main thread via tick().
                 NotificationCenter.default.post(
                     name: .tmuxExited,
-                    object: nil,
-                    userInfo: ["surface": surface]
+                    object: surface,
+                    userInfo: [:]
                 )
                 return true
                 
@@ -603,8 +610,8 @@ extension Ghostty {
                 // minimizing the window where active_pane_id is unset.
                 NotificationCenter.default.post(
                     name: .tmuxReady,
-                    object: nil,
-                    userInfo: ["surface": surface]
+                    object: surface,
+                    userInfo: [:]
                 )
                 return true
                 

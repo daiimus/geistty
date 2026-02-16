@@ -43,6 +43,7 @@ struct WindowContentView: View {
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showConnectionSheet = false
     @State private var showConnectionList = false
     @State private var showSettings = false
@@ -128,27 +129,34 @@ struct ContentView: View {
             transaction.animation = nil
         }
         .animation(nil, value: appState.connectionStatus)
-        // Handle navigation notifications from menu bar
+        // Handle navigation notifications from menu bar.
+        // H13 fix: Guard on scenePhase == .active to prevent inactive/background
+        // scenes from processing keyboard shortcut notifications on multi-window iPad.
         .onReceive(NotificationCenter.default.publisher(for: .showNewConnection)) { _ in
+            guard scenePhase == .active else { return }
             // Disconnect active session before showing new connection
             disconnectAndReset()
             showConnectionList = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showQuickConnect)) { _ in
+            guard scenePhase == .active else { return }
             // Disconnect active session before showing quick connect
             disconnectAndReset()
             showConnectionSheet = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showConnectionProfiles)) { _ in
+            guard scenePhase == .active else { return }
             // Disconnect active session before showing connection list
             disconnectAndReset()
             showConnectionList = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalDisconnect)) { _ in
+            guard scenePhase == .active else { return }
             // Disconnect active session and go back to disconnected state
             disconnectAndReset()
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalReconnect)) { _ in
+            guard scenePhase == .active else { return }
             // Reconnect using stored credentials via SSHSession
             if let session = appState.sshSession, session.canReconnect {
                 appState.connectionStatus = .connecting
@@ -165,9 +173,11 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
+            guard scenePhase == .active else { return }
             showSettings = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSSHKeyManager)) { _ in
+            guard scenePhase == .active else { return }
             showSSHKeyManager = true
         }
         .sheet(isPresented: $showSSHKeyManager) {

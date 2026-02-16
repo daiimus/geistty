@@ -139,20 +139,30 @@ extension Ghostty {
                 // Migration: Fix scrollback-limit = 0 or too small (breaks scrolling)
                 // Old versions used 0 which disables all scrollback
                 // Unit is BYTES, not lines! 50000000 = 50MB
-                if content.contains("scrollback-limit = 0") || content.contains("scrollback-limit = 10000\n") || content.contains("scrollback-limit = 10000000") {
+                // H4 fix: use line-based matching to handle \r\n, EOF without newline,
+                // and avoid false-matching "10000" inside "10000000"
+                let needsMigration = content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).contains { line in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    return trimmed == "scrollback-limit = 0" ||
+                           trimmed == "scrollback-limit = 10000" ||
+                           trimmed == "scrollback-limit = 10000000"
+                }
+                
+                if needsMigration {
                     logger.info("🔧 Migrating config: fixing scrollback-limit → 50000000 (50MB)")
-                    var migratedContent = content.replacingOccurrences(
-                        of: "scrollback-limit = 0",
-                        with: "scrollback-limit = 50000000"
-                    )
-                    migratedContent = migratedContent.replacingOccurrences(
-                        of: "scrollback-limit = 10000\n",
-                        with: "scrollback-limit = 50000000\n"
-                    )
-                    migratedContent = migratedContent.replacingOccurrences(
-                        of: "scrollback-limit = 10000000",
-                        with: "scrollback-limit = 50000000"
-                    )
+                    // Replace line-by-line to preserve line endings
+                    let lines = content.components(separatedBy: .newlines)
+                    let migratedLines = lines.map { line -> String in
+                        let trimmed = line.trimmingCharacters(in: .whitespaces)
+                        if trimmed == "scrollback-limit = 0" ||
+                           trimmed == "scrollback-limit = 10000" ||
+                           trimmed == "scrollback-limit = 10000000" {
+                            return "scrollback-limit = 50000000"
+                        }
+                        return line
+                    }
+                    let migratedContent = migratedLines.joined(separator: "\n")
+                    
                     // Save the migrated config
                     do {
                         try migratedContent.write(to: configFilePath, atomically: true, encoding: .utf8)

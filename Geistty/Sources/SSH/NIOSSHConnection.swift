@@ -378,9 +378,23 @@ class NIOSSHConnection {
                     ])
                 }
             
-            // Connect
+            // Connect with timeout — bootstrap.connect can hang for 75s+ on unreachable hosts.
+            // Use a task group race: the real connection vs a sleep-based timeout.
             logger.info("🔗 Connecting to \(connectionHost):\(connectionPort)...")
-            let channel = try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
+            let connectionTimeoutSeconds: UInt64 = 15
+            let channel: Channel = try await withThrowingTaskGroup(of: Channel.self) { group in
+                group.addTask {
+                    try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: connectionTimeoutSeconds * 1_000_000_000)
+                    throw NIOSSHError.timeout
+                }
+                // First task to complete wins; cancel the other
+                let result = try await group.next()!
+                group.cancelAll()
+                return result
+            }
             self.channel = channel
             
             logger.info("🔗 TCP connected, SSH handshake in progress...")
