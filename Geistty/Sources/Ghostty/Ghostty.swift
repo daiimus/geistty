@@ -902,7 +902,7 @@ extension Ghostty {
                 _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
                 isMouseSelecting = false
                 isSelecting = false
-                justFinishedSelecting = true
+                markJustFinishedSelecting()
             }
             super.touchesEnded(touches, with: event)
         }
@@ -1106,6 +1106,19 @@ extension Ghostty {
         /// Track when we just finished selecting (to prevent tap from clearing selection)
         private var justFinishedSelecting = false
         
+        /// Timer to auto-reset justFinishedSelecting flag if no tap follows
+        private var selectionResetTimer: Timer?
+        
+        /// Set justFinishedSelecting with automatic reset after 0.5s.
+        /// This prevents the flag from remaining true indefinitely if no tap follows.
+        private func markJustFinishedSelecting() {
+            justFinishedSelecting = true
+            selectionResetTimer?.invalidate()
+            selectionResetTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                self?.justFinishedSelecting = false
+            }
+        }
+        
         /// Track accumulated single-finger scroll
         private var accumulatedSingleFingerScrollY: CGFloat = 0
         
@@ -1182,7 +1195,7 @@ extension Ghostty {
                     ghostty_surface_mouse_pos(surface, ghosttyX, ghosttyY, GHOSTTY_MODS_NONE)
                     _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
                     isSelecting = false
-                    justFinishedSelecting = true
+                    markJustFinishedSelecting()
                 }
                 
             case .cancelled, .failed:
@@ -1639,6 +1652,8 @@ extension Ghostty {
             // Invalidate the display link to break the retain cycle
             // (CADisplayLink strongly retains its target)
             stopScrollMomentum()
+            selectionResetTimer?.invalidate()
+            selectionResetTimer = nil
             
             // Clear callbacks to prevent invocations during/after free
             onWrite = nil

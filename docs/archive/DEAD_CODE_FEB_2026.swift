@@ -1524,3 +1524,29 @@ class TmuxMultiPaneContainerView: UIView {
     // TextField("Private Key Path", text: $connectionInfo.privateKeyPath)
     // Validation: (connectionInfo.useKeyAuth ? !connectionInfo.privateKeyPath.isEmpty : ...)
 */
+
+// MARK: - TmuxPane model (never instantiated in production) — Archived Session 61 (L12)
+// TmuxWindow.activePaneId and .flags were also dead — never populated after init.
+// The Ghostty-native tmux integration uses C API queries + TmuxSplitTree instead.
+/*
+struct TmuxPane: Identifiable, Equatable {
+    let id: String
+    let windowId: String
+    var width: Int
+    var height: Int
+    var positionX: Int = 0
+    var positionY: Int = 0
+    var isActive: Bool = false
+
+    init(id: String, windowId: String, width: Int, height: Int) {
+        self.id = id
+        self.windowId = windowId
+        self.width = width
+        self.height = height
+    }
+}
+
+// On TmuxWindow:
+var activePaneId: String?
+var flags: String = ""
+*/

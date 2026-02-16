@@ -46,7 +46,7 @@ struct ConnectionEditorView: View {
                 
                 TextField("Host", text: $host)
                     .textContentType(.URL)
-                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                 
                 TextField("Port", text: $port)
@@ -54,7 +54,7 @@ struct ConnectionEditorView: View {
                 
                 TextField("Username", text: $username)
                     .textContentType(.username)
-                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
             }
             
             // Authentication
@@ -160,7 +160,7 @@ struct ConnectionEditorView: View {
                 
                 if useTmux {
                     TextField("Session Name", text: $tmuxSessionName)
-                        .autocapitalization(.none)
+                        .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
             } header: {
@@ -339,10 +339,11 @@ struct SSHKeyGeneratorView: View {
         Form {
             Section("Key Details") {
                 TextField("Key Name", text: $keyName)
-                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
                 
                 Picker("Key Type", selection: $keyType) {
-                    ForEach(KeyType.allCases) { type in
+                    // Note: .secureEnclave excluded — not yet implemented (throws .notSupported)
+                    ForEach(KeyType.allCases.filter { $0 != .secureEnclave }) { type in
                         VStack(alignment: .leading) {
                             Text(type.rawValue)
                             Text(type.description)
@@ -350,22 +351,6 @@ struct SSHKeyGeneratorView: View {
                                 .foregroundColor(.secondary)
                         }
                         .tag(type)
-                    }
-                }
-            }
-            
-            if keyType == .secureEnclave {
-                Section {
-                    HStack {
-                        Image(systemName: "lock.shield.fill")
-                            .foregroundColor(.green)
-                        VStack(alignment: .leading) {
-                            Text("Secure Enclave")
-                                .font(.headline)
-                            Text("Key is stored in hardware and never leaves the device")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
                     }
                 }
             }
@@ -467,7 +452,12 @@ struct PublicKeyView: View {
     @ObservedObject private var keyManager = SSHKeyManager.shared
     
     let keyInfo: SSHKeyPair
-    @State private var publicKey: String = "Loading..."
+    @State private var publicKey: String
+    
+    init(keyInfo: SSHKeyPair) {
+        self.keyInfo = keyInfo
+        _publicKey = State(initialValue: keyInfo.publicKey)
+    }
     
     var body: some View {
         NavigationStack {
@@ -502,15 +492,8 @@ struct PublicKeyView: View {
                     }
                 }
             }
-            .onAppear {
-                loadPublicKey()
-            }
+
         }
-    }
-    
-    private func loadPublicKey() {
-        // Public key is already in the keyInfo
-        publicKey = keyInfo.publicKey
     }
 }
 

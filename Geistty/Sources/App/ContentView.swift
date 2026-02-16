@@ -395,7 +395,7 @@ struct ConnectionSheet: View {
                 Section("Server") {
                     TextField("Host", text: $connectionInfo.host)
                         .textContentType(.URL)
-                        .autocapitalization(.none)
+                        .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                     
                     HStack {
@@ -411,7 +411,7 @@ struct ConnectionSheet: View {
                 Section("Authentication") {
                     TextField("Username", text: $connectionInfo.username)
                         .textContentType(.username)
-                        .autocapitalization(.none)
+                        .textInputAutocapitalization(.never)
                     
                     SecureField("Password", text: $connectionInfo.password)
                         .textContentType(.password)
@@ -457,8 +457,7 @@ struct ConnectionSheet: View {
     
     private var isValid: Bool {
         !connectionInfo.host.isEmpty &&
-        !connectionInfo.username.isEmpty &&
-        !connectionInfo.password.isEmpty
+        !connectionInfo.username.isEmpty
     }
 }
 

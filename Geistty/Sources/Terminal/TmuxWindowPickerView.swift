@@ -123,13 +123,6 @@ private struct WindowTab: View {
                 .foregroundColor(textColor)
                 .lineLimit(1)
             
-            // Window flags (*, -, etc.)
-            if !window.flags.isEmpty {
-                Text(window.flags)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-            
             // Close button (show when selected or hovering)
             if isSelected || isHovering {
                 Button(action: onClose) {

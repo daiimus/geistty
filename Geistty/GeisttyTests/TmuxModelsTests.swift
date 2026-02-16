@@ -106,18 +106,6 @@ final class TmuxModelsTests: XCTestCase {
         XCTAssertEqual(a, b)
     }
 
-    func testPaneEquatable() {
-        let a = TmuxPane(id: "%0", windowId: "@0", width: 80, height: 24)
-        let b = TmuxPane(id: "%0", windowId: "@0", width: 80, height: 24)
-        XCTAssertEqual(a, b)
-    }
-
-    func testPaneNotEqualDifferentDimensions() {
-        let a = TmuxPane(id: "%0", windowId: "@0", width: 80, height: 24)
-        let b = TmuxPane(id: "%0", windowId: "@0", width: 120, height: 40)
-        XCTAssertNotEqual(a, b)
-    }
-
     // MARK: - TmuxId Round-trip
 
     func testPaneIdRoundTrip() {

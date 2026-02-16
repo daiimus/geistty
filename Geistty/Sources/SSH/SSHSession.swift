@@ -968,50 +968,59 @@ class SSHSession: ObservableObject, Identifiable {
     /// externally (e.g., from a Reconnect button in ContentView).
     func attemptReconnect() async {
         guard !isReconnecting else { return }
-        guard reconnectAttempts < maxReconnectAttempts else {
-            logger.error("🔄 Max reconnect attempts (\(maxReconnectAttempts)) reached")
-            tmuxSessionManager?.controlModeExited(reason: "Reconnect failed after \(maxReconnectAttempts) attempts")
-            return
-        }
         
         isReconnecting = true
-        reconnectAttempts += 1
-        logger.info("🔄 Reconnect attempt \(reconnectAttempts)/\(maxReconnectAttempts)")
+        defer { isReconnecting = false }
         
-        // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
-        controlModeState = .inactive
-        tmuxPaneActivated = false
-        activeTmuxPaneId = nil
-        viewerReady = false
-        connection?.disconnect()
-        connection = nil
-        
-        do {
-            // Reconnect using stored auth method
-            guard let authMethod = storedAuthMethod else {
-                throw SSHSessionError.notConnected
-            }
+        while reconnectAttempts < maxReconnectAttempts {
+            reconnectAttempts += 1
+            logger.info("🔄 Reconnect attempt \(reconnectAttempts)/\(maxReconnectAttempts)")
             
-            try await reconnectWithAuth(authMethod)
+            // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
+            controlModeState = .inactive
+            tmuxPaneActivated = false
+            activeTmuxPaneId = nil
+            viewerReady = false
+            connection?.disconnect()
+            connection = nil
             
-            // Success!
-            isReconnecting = false
-            reconnectAttempts = 0
-            logger.info("🔄 ✅ Reconnect successful!")
-            
-        } catch {
-            logger.error("🔄 Reconnect failed: \(error.localizedDescription)")
-            isReconnecting = false
-            
-            // Retry after delay if attempts remaining
-            if reconnectAttempts < maxReconnectAttempts {
+            do {
+                // Reconnect using stored auth method
+                guard let authMethod = storedAuthMethod else {
+                    throw SSHSessionError.notConnected
+                }
+                
+                try await reconnectWithAuth(authMethod)
+                
+                // Success!
+                reconnectAttempts = 0
+                logger.info("🔄 ✅ Reconnect successful!")
+                return
+                
+            } catch is CancellationError {
+                logger.info("🔄 Reconnect cancelled")
+                return
+            } catch {
+                logger.error("🔄 Reconnect failed: \(error.localizedDescription)")
+                
+                guard reconnectAttempts < maxReconnectAttempts else {
+                    tmuxSessionManager?.controlModeExited(reason: "Reconnect failed: \(error.localizedDescription)")
+                    return
+                }
+                
+                // Retry after delay — propagate cancellation properly
                 logger.info("🔄 Retrying in 2 seconds...")
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                await attemptReconnect()
-            } else {
-                tmuxSessionManager?.controlModeExited(reason: "Reconnect failed: \(error.localizedDescription)")
+                do {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                } catch {
+                    logger.info("🔄 Reconnect retry cancelled during sleep")
+                    return
+                }
             }
         }
+        
+        logger.error("🔄 Max reconnect attempts (\(maxReconnectAttempts)) reached")
+        tmuxSessionManager?.controlModeExited(reason: "Reconnect failed after \(maxReconnectAttempts) attempts")
     }
     
     /// Reconnect using stored auth method
