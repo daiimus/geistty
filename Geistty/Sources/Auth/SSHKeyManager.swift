@@ -242,10 +242,19 @@ class SSHKeyManager: ObservableObject {
             throw SSHKeyError.keyGenerationFailed
         }
         
-        // Export private key
+        // Export private key — SecKeyCopyExternalRepresentation returns raw PKCS#1 DER
         var exportError: Unmanaged<CFError>?
-        guard let privateKeyData = SecKeyCopyExternalRepresentation(privateKey, &exportError) as Data? else {
+        guard let privateKeyDER = SecKeyCopyExternalRepresentation(privateKey, &exportError) as Data? else {
             throw (exportError?.takeRetainedValue() as Error?) ?? SSHKeyError.keyGenerationFailed
+        }
+        
+        // Wrap in PEM armor (C8 fix): the raw DER must be PEM-encoded so that
+        // SSHKeyParser can parse it later. PKCS#1 uses "RSA PRIVATE KEY" headers.
+        let base64 = privateKeyDER.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\n\(base64)\n-----END RSA PRIVATE KEY-----\n"
+        guard let privateKeyPEM = pem.data(using: .utf8) else {
+            logger.error("Failed to encode RSA PEM as UTF-8")
+            throw SSHKeyError.keyGenerationFailed
         }
         
         // Export public key and format as OpenSSH
@@ -255,7 +264,7 @@ class SSHKeyManager: ObservableObject {
         
         let publicKeyString = formatRSAPublicKey(publicKeyData, name: name)
         
-        return (privateKeyData, publicKeyString)
+        return (privateKeyPEM, publicKeyString)
     }
     
     /// Format RSA public key in OpenSSH format.

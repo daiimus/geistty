@@ -162,16 +162,11 @@ extension Ghostty {
                             self?.performSyncSearch(needle: needle)
                         }
                 } else if oldValue != nil {
-                    // Search ended - cancel pending search and end search in Ghostty
+                    // Search ended - cancel pending debounce and end search in Ghostty
                     searchNeedleCancellable = nil
-                    currentSearchTask?.cancel()
-                    currentSearchTask = nil
-                    // End search (clears highlights) — route through searchQueue
-                    // to serialize with any in-flight search operations
+                    // End search (clears highlights) on main thread
                     if let surface = self.surface {
-                        searchQueue.async {
-                            ghostty_surface_search_end(surface)
-                        }
+                        ghostty_surface_search_end(surface)
                     }
                 }
             }
@@ -180,76 +175,40 @@ extension Ghostty {
         /// Cancellable for search state needle changes (debounced search)
         private var searchNeedleCancellable: AnyCancellable?
         
-        /// Current async search task
-        private var currentSearchTask: Task<Void, Never>?
-        
-        /// Serial queue for search operations to prevent race conditions
-        private let searchQueue = DispatchQueue(label: "com.geistty.search", qos: .userInitiated)
-        
-        /// Perform synchronous search on background queue, update UI on main queue
-        /// This uses the new ScreenSearch-based sync API with autoscroll
+        /// Perform synchronous search on main thread.
+        /// Ghostty's search APIs operate on in-memory terminal screen data and are fast.
+        /// Running on main thread eliminates the TOCTOU race where surface could be
+        /// freed between capture and use on a background queue (C1 fix).
         private func performSyncSearch(needle: String) {
+            assert(Thread.isMainThread, "performSyncSearch must run on main thread")
             logger.debug("🔍 performSyncSearch called with needle: '\(needle)'")
-            // Cancel any previous search
-            currentSearchTask?.cancel()
             
             guard let surface = self.surface else { return }
             guard !needle.isEmpty else {
-                // Empty needle - end search on serial queue
-                searchQueue.async {
-                    ghostty_surface_search_end(surface)
-                }
-                Task { @MainActor in
-                    self.searchState?.total = nil
-                    self.searchState?.selected = nil
-                }
+                // Empty needle - end search
+                ghostty_surface_search_end(surface)
+                self.searchState?.total = nil
+                self.searchState?.selected = nil
                 return
             }
             
-            // Capture needle for use in closure
-            let needleCopy = needle
+            // Call the search_start API (initializes search and scrolls to first match)
+            logger.debug("🔍 Calling ghostty_surface_search_start with needle: '\(needle)'")
+            let result = needle.withCString { needlePtr in
+                ghostty_surface_search_start(surface, needlePtr, UInt(needle.utf8.count))
+            }
             
-            // Use Swift Task wrapping serial queue for proper cancellation + serialization
-            currentSearchTask = Task { [weak self] in
-                guard let self = self else { return }
-                
-                // Run search on serial queue to prevent overlapping operations
-                await withCheckedContinuation { continuation in
-                    self.searchQueue.async {
-                        // Check if cancelled before starting
-                        if Task.isCancelled {
-                            continuation.resume()
-                            return
-                        }
-                        
-                        // Call the search_start API (initializes search and scrolls to first match)
-                        logger.debug("🔍 Calling ghostty_surface_search_start with needle: '\(needleCopy)'")
-                        let result = needleCopy.withCString { needlePtr in
-                            ghostty_surface_search_start(surface, needlePtr, UInt(needleCopy.utf8.count))
-                        }
-                        
-                        // screen_type: 0 = primary (has scrollback), 1 = alternate (e.g. tmux - no scrollback)
-                        let isAlternateScreen = result.screen_type == 1
-                        if isAlternateScreen {
-                            logger.info("🔍 Search on alternate screen (tmux/vim) - limited to visible rows only")
-                        }
-                        logger.info("🔍 ghostty_surface_search_start returned: success=\(result.success), total=\(result.total), selected=\(result.selected), screen_type=\(result.screen_type), has_scrollback=\(result.has_scrollback)")
-                        
-                        continuation.resume()
-                        
-                        // Check if cancelled after search
-                        if Task.isCancelled { return }
-                        
-                        // Update UI on main queue
-                        DispatchQueue.main.async { [weak self] in
-                            if result.success {
-                                self?.searchState?.total = result.total >= 0 ? UInt(result.total) : nil
-                                self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
-                                self?.searchState?.isAlternateScreen = isAlternateScreen
-                            }
-                        }
-                    }
-                }
+            // screen_type: 0 = primary (has scrollback), 1 = alternate (e.g. tmux - no scrollback)
+            let isAlternateScreen = result.screen_type == 1
+            if isAlternateScreen {
+                logger.info("🔍 Search on alternate screen (tmux/vim) - limited to visible rows only")
+            }
+            logger.info("🔍 ghostty_surface_search_start returned: success=\(result.success), total=\(result.total), selected=\(result.selected), screen_type=\(result.screen_type), has_scrollback=\(result.has_scrollback)")
+            
+            if result.success {
+                self.searchState?.total = result.total >= 0 ? UInt(result.total) : nil
+                self.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
+                self.searchState?.isAlternateScreen = isAlternateScreen
             }
         }
         
@@ -1607,18 +1566,17 @@ extension Ghostty {
             
             let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
             
-            // Check if surface is still valid (not closed)
-            guard surfaceView.surface != nil else {
-                Ghostty.logger.warning("⚠️ externalWriteCallback: surfaceView.surface is nil (closed)")
-                return
-            }
+            // Copy data immediately — it may be freed after this callback returns
+            guard let data = data, len > 0 else { return }
+            let swiftData = Data(bytes: data, count: Int(len))
             
-            // Convert to Data and call the onWrite callback
-            if let data = data, len > 0 {
-                let swiftData = Data(bytes: data, count: Int(len))
-                DispatchQueue.main.async {
-                    surfaceView.onWrite?(swiftData)
-                }
+            // Dispatch to main thread where we can safely check surface liveness
+            // The surface nil check must be inside the main dispatch block (C2 fix):
+            // checking on the IO thread is a TOCTOU race — surface can be freed between
+            // the check here and the actual use on main.
+            DispatchQueue.main.async {
+                guard surfaceView.surface != nil else { return }
+                surfaceView.onWrite?(swiftData)
             }
         }
         
@@ -1637,15 +1595,14 @@ extension Ghostty {
             }
             
             let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            let colsInt = Int(cols)
+            let rowsInt = Int(rows)
             
-            guard surfaceView.surface != nil else {
-                Ghostty.logger.warning("externalResizeCallback: surfaceView.surface is nil (closed)")
-                return
-            }
-            
-            // Dispatch to main thread since this callback fires from the IO thread
+            // Dispatch to main thread where we can safely check surface liveness
+            // (C2 fix: surface nil check must be inside main dispatch to avoid TOCTOU race)
             DispatchQueue.main.async {
-                surfaceView.onResize?(Int(cols), Int(rows))
+                guard surfaceView.surface != nil else { return }
+                surfaceView.onResize?(colsInt, rowsInt)
             }
         }
         
@@ -1985,35 +1942,25 @@ extension Ghostty {
         
         /// Navigate to next search result (iOS ScreenSearch-based sync API with autoscroll)
         func searchNext() {
+            assert(Thread.isMainThread, "searchNext must run on main thread")
             guard let surface = surface else { return }
             guard searchState != nil else { return }
             
-            // Route through searchQueue to serialize with performSyncSearch and searchEnd
-            searchQueue.async { [weak self] in
-                let result = ghostty_surface_search_next(surface)
-                
-                if result.success {
-                    DispatchQueue.main.async {
-                        self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
-                    }
-                }
+            let result = ghostty_surface_search_next(surface)
+            if result.success {
+                self.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
             }
         }
         
         /// Navigate to previous search result (iOS ScreenSearch-based sync API with autoscroll)
         func searchPrevious() {
+            assert(Thread.isMainThread, "searchPrevious must run on main thread")
             guard let surface = surface else { return }
             guard searchState != nil else { return }
             
-            // Route through searchQueue to serialize with performSyncSearch and searchEnd
-            searchQueue.async { [weak self] in
-                let result = ghostty_surface_search_prev(surface)
-                
-                if result.success {
-                    DispatchQueue.main.async {
-                        self?.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
-                    }
-                }
+            let result = ghostty_surface_search_prev(surface)
+            if result.success {
+                self.searchState?.selected = result.selected >= 0 ? UInt(result.selected) : nil
             }
         }
         

@@ -85,7 +85,7 @@ struct CommandPaletteView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: isPresented)
-        .onChange(of: isPresented) { newValue in
+        .onChange(of: isPresented) { _, newValue in
             if newValue {
                 query = ""
                 selectedIndex = nil
@@ -126,7 +126,7 @@ struct CommandPaletteView: View {
                 .textInputAutocapitalization(.never)
                 .focused($isTextFieldFocused)
                 .onSubmit { submitSelected() }
-                .onChange(of: query) { newValue in
+                .onChange(of: query) { _, newValue in
                     if !newValue.isEmpty {
                         if selectedIndex == nil { selectedIndex = 0 }
                     } else {
@@ -161,7 +161,7 @@ struct CommandPaletteView: View {
                         .padding(10)
                     }
                     .frame(maxHeight: 300)
-                    .onChange(of: selectedIndex) { newIndex in
+                    .onChange(of: selectedIndex) { _, newIndex in
                         guard let newIndex, newIndex < filteredCommands.count else { return }
                         withAnimation(.easeInOut(duration: 0.1)) {
                             proxy.scrollTo(filteredCommands[newIndex].action, anchor: .center)
@@ -258,7 +258,7 @@ struct CommandPaletteWrapper: View {
             commands: commands,
             onAction: onAction
         )
-        .onChange(of: state.isPresented) { newValue in
+        .onChange(of: state.isPresented) { _, newValue in
             if !newValue {
                 onDismiss()
             }

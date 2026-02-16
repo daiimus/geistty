@@ -130,33 +130,38 @@ struct ContentView: View {
         .animation(nil, value: appState.connectionStatus)
         // Handle navigation notifications from menu bar
         .onReceive(NotificationCenter.default.publisher(for: .showNewConnection)) { _ in
-            // Disconnect and show new connection
-            appState.connectionStatus = .disconnected
+            // Disconnect active session before showing new connection
+            disconnectAndReset()
             showConnectionList = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showQuickConnect)) { _ in
-            // Disconnect and show quick connect
-            appState.connectionStatus = .disconnected
+            // Disconnect active session before showing quick connect
+            disconnectAndReset()
             showConnectionSheet = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showConnectionProfiles)) { _ in
-            // Disconnect and show connection list
-            appState.connectionStatus = .disconnected
+            // Disconnect active session before showing connection list
+            disconnectAndReset()
             showConnectionList = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalDisconnect)) { _ in
-            // Go back to disconnected state
-            appState.connectionStatus = .disconnected
+            // Disconnect active session and go back to disconnected state
+            disconnectAndReset()
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalReconnect)) { _ in
             // Reconnect using stored credentials via SSHSession
             if let session = appState.sshSession, session.canReconnect {
+                appState.connectionStatus = .connecting
                 Task {
                     await session.attemptReconnect()
                     if session.state != .disconnected {
                         appState.connectionStatus = .connected
+                    } else {
+                        appState.connectionStatus = .error("Reconnect failed")
                     }
                 }
+            } else {
+                appState.connectionStatus = .error("No session available for reconnect")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
@@ -190,10 +195,31 @@ struct ContentView: View {
             password: connectionInfo.password
         )
         
-        // Set status to connected - shows terminal view which handles SSH connection internally
-        // The terminal view shows its own connecting indicator while SSH handshake happens
-        appState.connectionStatus = .connected
+        // Route through .connecting state (C4 fix) — TerminalContainerView handles
+        // the actual SSH handshake and transitions to .connected on success,
+        // or .error on failure.
+        appState.connectionStatus = .connecting
         showConnectionSheet = false
+        
+        // Transition to .connected after a brief moment to show connecting UI.
+        // The terminal view shows its own connecting indicator while SSH handshake happens.
+        // We move to .connected quickly so TerminalContainerView gets mounted and can
+        // begin the SSH connection internally.
+        Task { @MainActor in
+            // Small delay so the .connecting UI is visible
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            if appState.connectionStatus == .connecting {
+                appState.connectionStatus = .connected
+            }
+        }
+    }
+    
+    /// Disconnect the active SSH session and reset to disconnected state (C3 fix).
+    /// Prevents leaking active SSH connections when navigating away.
+    private func disconnectAndReset() {
+        appState.sshSession?.disconnect()
+        appState.clearConnectionParams()
+        appState.connectionStatus = .disconnected
     }
 }
 
