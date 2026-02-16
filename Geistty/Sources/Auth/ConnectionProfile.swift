@@ -19,8 +19,8 @@ private let logger = Logger(subsystem: "com.geistty", category: "ConnectionProfi
 ///   Files app or generate keys directly in Geistty.
 /// - **Password**: Enter manually at connection time. Optionally save in Keychain.
 ///
-/// Note: 1Password/LastPass SSH key integration requires their desktop SSH Agent,
-/// which is not available on iOS. Store SSH keys in Geistty directly.
+/// Note: Desktop SSH agent integrations (1Password, LastPass, etc.) are not available
+/// on iOS. Import SSH keys into Geistty directly via Files, or generate them in-app.
 enum AuthMethod: String, Codable, CaseIterable, Identifiable {
     case sshKey = "ssh_key"
     case password = "password"

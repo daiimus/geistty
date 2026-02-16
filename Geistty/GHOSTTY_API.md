@@ -208,8 +208,14 @@ All Ghostty types have Swift equivalents:
 
 ## Files
 
-- `Ghostty.swift` - Main API implementation (Config, App, SurfaceView)
+- `Ghostty.swift` - Core integration: SurfaceView, action callback dispatch
+- `Ghostty.App.swift` - App lifecycle, runtime init, config management
+- `Ghostty.Config.swift` - Config wrapper (create, load, finalize)
+- `Ghostty.SearchState.swift` - Search overlay state model
+- `Ghostty.SurfaceConfiguration.swift` - Surface init configuration
+- `GhosttyInput.swift` - UIKit key event translation → Ghostty input
 - `FontMapping.swift` - Font name translation (GUI names ↔ CoreText names)
+- `ConfigSyncManager.swift` - ghostty.conf ↔ Ghostty Config synchronization
 
 ## Usage Examples
 

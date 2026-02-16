@@ -14,10 +14,9 @@
 //     - Can be saved to Keychain for convenience
 //     - Never stored in plaintext
 //
-//  Note on Password Managers (1Password, LastPass, etc.):
-//  - Their SSH integration works via desktop SSH Agent (macOS/Windows/Linux)
-//  - No iOS API exists to retrieve SSH keys from these apps
-//  - For SSH keys, export from 1Password and import into Geistty via Files app
+//  Note on Password Managers:
+//  - Desktop SSH agent integrations (1Password, LastPass, etc.) are not available on iOS
+//  - To use keys from a password manager, export the .pem file and import into Geistty via Files
 //
 
 import Foundation

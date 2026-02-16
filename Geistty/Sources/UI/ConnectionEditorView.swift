@@ -78,7 +78,7 @@ struct ConnectionEditorView: View {
                 Text("Authentication")
             } footer: {
                 if authMethod == .sshKey {
-                    Text("SSH keys are more secure than passwords. Import a .pem file from 1Password or Files, or generate a new key.")
+                    Text("SSH keys are more secure than passwords. Import a .pem file from Files, or generate a new key.")
                 } else {
                     Text("Password is saved securely in the iOS Keychain.")
                 }

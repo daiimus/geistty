@@ -106,7 +106,7 @@ Full architecture documentation with Mermaid diagrams: **[ARCHITECTURE.md](ARCHI
 - macOS with Xcode 15+
 - Zig 0.14+ (for building GhosttyKit)
 - iOS 17+ device or simulator
-- 1Password SSH agent (for SSH key auth on dev machine)
+- SSH key for git operations (via ssh-agent, 1Password, or similar)
 
 ### Build GhosttyKit from Ghostty fork
 
