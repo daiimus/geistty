@@ -130,6 +130,11 @@ All fonts included in Geistty are licensed under the **SIL Open Font License, Ve
 - **Copyright**: © 2006-2012 Raph Levien
 - **Source**: https://levien.com/type/myfonts/inconsolata.html
 
+### Atkinson Hyperlegible Mono
+- **Copyright**: © 2020-2024 The Atkinson Hyperlegible Mono Project Authors
+- **Source**: https://brailleinstitute.org/freefont
+- **Repository**: https://github.com/googlefonts/atkinson-hyperlegible-next-mono
+
 ### SIL Open Font License, Version 1.1
 
 ```
@@ -235,3 +240,4 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 | Source Code Pro | SIL OFL 1.1 |
 | IBM Plex Mono | SIL OFL 1.1 |
 | Inconsolata | SIL OFL 1.1 |
+| Atkinson Hyperlegible Mono | SIL OFL 1.1 |

@@ -35,6 +35,10 @@ final class FontMappingTests: XCTestCase {
         XCTAssertEqual(FontMapping.toGhostty("Inconsolata"), "Inconsolata")
     }
 
+    func testToGhosttyAtkinsonHyperlegibleMono() {
+        XCTAssertEqual(FontMapping.toGhostty("Atkinson Hyperlegible Mono"), "Atkinson Hyperlegible Mono")
+    }
+
     func testToGhosttyMenlo() {
         XCTAssertEqual(FontMapping.toGhostty("Menlo"), "Menlo")
     }
@@ -88,6 +92,14 @@ final class FontMappingTests: XCTestCase {
         XCTAssertEqual(FontMapping.fromGhostty("Inconsolata-Regular"), "Inconsolata")
     }
 
+    func testFromGhosttyAtkinsonHyperlegibleMono() {
+        XCTAssertEqual(FontMapping.fromGhostty("Atkinson Hyperlegible Mono"), "Atkinson Hyperlegible Mono")
+    }
+
+    func testFromGhosttyAtkinsonHyperlegibleMonoRegular() {
+        XCTAssertEqual(FontMapping.fromGhostty("AtkinsonHyperlegibleMono-Regular"), "Atkinson Hyperlegible Mono")
+    }
+
     func testFromGhosttyMenloRegular() {
         XCTAssertEqual(FontMapping.fromGhostty("Menlo-Regular"), "Menlo")
     }
@@ -134,6 +146,7 @@ final class FontMappingTests: XCTestCase {
         XCTAssertTrue(FontMapping.Font.sourceCodePro.isBundled)
         XCTAssertTrue(FontMapping.Font.ibmPlexMono.isBundled)
         XCTAssertTrue(FontMapping.Font.inconsolata.isBundled)
+        XCTAssertTrue(FontMapping.Font.atkinsonHyperlegibleMono.isBundled)
     }
 
     func testSystemFonts() {

@@ -170,7 +170,7 @@ geistty/
 │   ├── Frameworks/
 │   │   └── GhosttyKit.xcframework/
 │   ├── Resources/
-│   │   └── Fonts/           # 7 bundled font families
+│   │   └── Fonts/           # 8 bundled font families
 │   └── Sources/
 │       ├── App/             # GeisttyApp, ContentView
 │       ├── Auth/            # ConnectionProfile, Keychain, SSH keys
