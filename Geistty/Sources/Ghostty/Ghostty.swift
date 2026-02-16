@@ -1434,7 +1434,30 @@ extension Ghostty {
                     }
                 }
                 
-                // MARK: - Local Ghostty Shortcuts (font size, clear screen)
+                // MARK: - Local Ghostty Shortcuts (font size, clear screen, jump to prompt)
+                
+                // Cmd+Shift+Up/Down or Cmd+Up/Down — Jump to Prompt
+                // Requires shell integration (OSC 133) on the remote host.
+                // Matches upstream Ghostty defaults for jump_to_prompt.
+                if hasCmd && !hasOption && !hasCtrl {
+                    if keyCode == .keyboardUpArrow {
+                        if let surface = surface {
+                            let action = "jump_to_prompt:-1"
+                            _ = action.withCString { cstr in
+                                ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
+                            }
+                        }
+                        return
+                    } else if keyCode == .keyboardDownArrow {
+                        if let surface = surface {
+                            let action = "jump_to_prompt:1"
+                            _ = action.withCString { cstr in
+                                ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
+                            }
+                        }
+                        return
+                    }
+                }
                 
                 if hasCmd {
                     switch char {

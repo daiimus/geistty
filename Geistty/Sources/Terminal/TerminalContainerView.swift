@@ -386,6 +386,16 @@ class TerminalViewModel: ObservableObject {
         ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
     }
     
+    /// Jump to the next or previous shell prompt (requires OSC 133 shell integration).
+    /// - Parameter delta: -1 for previous prompt, 1 for next prompt
+    func jumpToPrompt(delta: Int) {
+        guard let surface = surfaceView?.surface else { return }
+        let action = "jump_to_prompt:\(delta)"
+        action.withCString { cstr in
+            ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
+        }
+    }
+    
     /// Reset the terminal (ESC c - full reset)
     func resetTerminal() {
         // Send ESC c (RIS - Reset to Initial State)

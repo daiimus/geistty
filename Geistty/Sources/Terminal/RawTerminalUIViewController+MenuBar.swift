@@ -35,6 +35,12 @@ extension RawTerminalUIViewController {
         menuBarObservers.append(nc.addObserver(forName: .terminalResetFontSize, object: nil, queue: .main) { [weak self] _ in
             self?.handleResetFontSize()
         })
+        menuBarObservers.append(nc.addObserver(forName: .terminalJumpToPromptUp, object: nil, queue: .main) { [weak self] _ in
+            self?.handleJumpToPrompt(delta: -1)
+        })
+        menuBarObservers.append(nc.addObserver(forName: .terminalJumpToPromptDown, object: nil, queue: .main) { [weak self] _ in
+            self?.handleJumpToPrompt(delta: 1)
+        })
         menuBarObservers.append(nc.addObserver(forName: .terminalSelectAll, object: nil, queue: .main) { [weak self] _ in
             self?.handleSelectAll()
         })
@@ -126,6 +132,10 @@ extension RawTerminalUIViewController {
         viewModel?.resetFontSize()
     }
     
+    func handleJumpToPrompt(delta: Int) {
+        viewModel?.jumpToPrompt(delta: delta)
+    }
+    
     func handleClearScreen() {
         viewModel?.clearScreen()
     }
@@ -144,6 +154,8 @@ extension RawTerminalUIViewController {
         Cmd+0        Reset Font Size
         Cmd++        Increase Font Size
         Cmd+-        Decrease Font Size
+        Cmd+Up       Jump to Previous Prompt
+        Cmd+Down     Jump to Next Prompt
         Cmd+W        Disconnect
         
         Ctrl+C       Interrupt (SIGINT)
@@ -154,6 +166,9 @@ extension RawTerminalUIViewController {
         Arrow Keys   Navigate
         Tab          Complete
         Esc          Cancel
+        
+        Note: Jump to Prompt requires shell
+        integration (OSC 133) on the remote host.
         """
         
         let alert = UIAlertController(title: nil, message: shortcuts, preferredStyle: .alert)
