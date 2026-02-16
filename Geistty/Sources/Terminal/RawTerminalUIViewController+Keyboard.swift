@@ -56,7 +56,10 @@ extension RawTerminalUIViewController {
             surface.sizeDidChange(newSize)
         }
         
-        // Disable implicit CALayer animations during resize
+        // Disable implicit CALayer animations during resize (C6 fix:
+        // commit immediately after UIView.animate call, not in completion block —
+        // UIView.animate is non-blocking so the transaction would be left open
+        // for the entire animation duration otherwise)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         
@@ -69,11 +72,10 @@ extension RawTerminalUIViewController {
                 self.surfaceBottomConstraint?.constant = -keyboardHeight
                 self.multiPaneBottomConstraint?.constant = -keyboardHeight
                 self.view.layoutIfNeeded()
-            },
-            completion: { _ in
-                CATransaction.commit()
             }
         )
+        
+        CATransaction.commit()
         
         logger.debug("⌨️ Keyboard will show, height: \(keyboardHeight)")
     }
@@ -95,7 +97,7 @@ extension RawTerminalUIViewController {
             surface.sizeDidChange(newSize)
         }
         
-        // Disable implicit CALayer animations during resize
+        // Disable implicit CALayer animations during resize (C6 fix)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         
@@ -108,11 +110,10 @@ extension RawTerminalUIViewController {
                 self.surfaceBottomConstraint?.constant = 0
                 self.multiPaneBottomConstraint?.constant = 0
                 self.view.layoutIfNeeded()
-            },
-            completion: { _ in
-                CATransaction.commit()
             }
         )
+        
+        CATransaction.commit()
         
         logger.debug("⌨️ Keyboard will hide")
     }
