@@ -72,6 +72,7 @@
 		A1000091 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000002 /* NIOSSH */; };
 		A1000092 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = AE000003 /* NIOTransportServices */; };
 		A1000096 /* TmuxSessionNameResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000096 /* TmuxSessionNameResolver.swift */; };
+		A1000C08 /* TmuxWireDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C08 /* TmuxWireDiagnostics.swift */; };
 
 		D1000013 /* FontMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000013 /* FontMappingTests.swift */; };
 
@@ -95,6 +96,7 @@
 		D1000033 /* TmuxDataFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000033 /* TmuxDataFlowTests.swift */; };
 		D1000034 /* TmuxSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000034 /* TmuxSessionManagerTests.swift */; };
 		D1000035 /* CommandPaletteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000035 /* CommandPaletteTests.swift */; };
+		D1000036 /* TmuxWireDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000036 /* TmuxWireDiagnosticsTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -204,6 +206,7 @@
 		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
 		A20000A2 /* KeyTableIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTableIndicatorView.swift; sourceTree = "<group>"; };
 		A2000096 /* TmuxSessionNameResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolver.swift; sourceTree = "<group>"; };
+		A2000C08 /* TmuxWireDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWireDiagnostics.swift; sourceTree = "<group>"; };
 
 		D1000001 /* GeisttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D2000013 /* FontMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMappingTests.swift; sourceTree = "<group>"; };
@@ -228,6 +231,7 @@
 		D2000033 /* TmuxDataFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxDataFlowTests.swift; sourceTree = "<group>"; };
 		D2000034 /* TmuxSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionManagerTests.swift; sourceTree = "<group>"; };
 		D2000035 /* CommandPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteTests.swift; sourceTree = "<group>"; };
+		D2000036 /* TmuxWireDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWireDiagnosticsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -324,6 +328,7 @@
 				A2000083 /* TmuxSessionManager.swift */,
 				A2000096 /* TmuxSessionNameResolver.swift */,
 				A2000085 /* TmuxSplitTree.swift */,
+				A2000C08 /* TmuxWireDiagnostics.swift */,
 			);
 			path = SSH;
 			sourceTree = "<group>";
@@ -452,6 +457,7 @@
 				D2000033 /* TmuxDataFlowTests.swift */,
 				D2000034 /* TmuxSessionManagerTests.swift */,
 				D2000035 /* CommandPaletteTests.swift */,
+				D2000036 /* TmuxWireDiagnosticsTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -634,6 +640,7 @@
 				A1000083 /* TmuxSessionManager.swift in Sources */,
 				A1000096 /* TmuxSessionNameResolver.swift in Sources */,
 				A1000085 /* TmuxSplitTree.swift in Sources */,
+				A1000C08 /* TmuxWireDiagnostics.swift in Sources */,
 				A1000086 /* TmuxSplitView.swift in Sources */,
 				A1000087 /* TmuxMultiPaneView.swift in Sources */,
 				A1000088 /* TmuxWindowPickerView.swift in Sources */,
@@ -687,6 +694,7 @@
 				D1000033 /* TmuxDataFlowTests.swift in Sources */,
 				D1000034 /* TmuxSessionManagerTests.swift in Sources */,
 				D1000035 /* CommandPaletteTests.swift in Sources */,
+				D1000036 /* TmuxWireDiagnosticsTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};

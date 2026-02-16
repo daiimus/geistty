@@ -85,6 +85,11 @@ class TerminalViewModel: ObservableObject {
     /// Buffer for data received before surface is ready
     private var preSurfaceBuffer: [Data] = []
     
+    /// Wire diagnostics for tmux control mode data inspection.
+    /// Shadows the raw SSH data path, parsing %output lines and validating
+    /// escape sequences without modifying the production data flow.
+    let wireDiagnostics = TmuxWireDiagnostics()
+    
     /// Reference to the Ghostty surface view
     weak var surfaceView: Ghostty.SurfaceView? {
         didSet {
@@ -178,16 +183,16 @@ class TerminalViewModel: ObservableObject {
     }
     
     func connect(host: String, port: Int, username: String, password: String?) {
-        logger.info("📡 TerminalViewModel.connect called - \(host):\(port) user=\(username)")
+        logger.info("TerminalViewModel.connect called - \(host):\(port) user=\(username)")
         Task {
             do {
-                logger.info("📡 Creating SSHSession...")
+                logger.info("Creating SSHSession...")
                 sshSession = SSHSession()
                 sshSession?.delegate = self
                 sshSession?.ghosttySurface = surfaceView
                 
                 // Start SSH connection
-                logger.info("📡 Starting SSH connection...")
+                logger.info("Starting SSH connection...")
                 try await sshSession?.connect(
                     host: host,
                     port: port,
@@ -195,8 +200,15 @@ class TerminalViewModel: ObservableObject {
                     password: password ?? ""
                 )
                 
-                logger.info("📡 SSH connected successfully!")
+                logger.info("SSH connected successfully!")
                 isConnected = true
+                
+                // Auto-start wire diagnostics for tmux sessions
+                if sshSession?.isTmuxSession == true {
+                    wireDiagnostics.start()
+                    wireDiagnostics.startCapture(label: "tmux_wire")
+                    logger.info("Wire diagnostics auto-started for tmux session")
+                }
                 
                 // Read the actual grid size from Ghostty surface rather than
                 // relying on callback-updated cols/rows which may still be the
@@ -219,11 +231,18 @@ class TerminalViewModel: ObservableObject {
     
     /// Use a pre-connected SSH session (from ConnectionListView)
     func useExistingSession(_ session: SSHSession) {
-        logger.info("📡 Using existing pre-connected session")
+        logger.info("Using existing pre-connected session")
         sshSession = session
         sshSession?.delegate = self
         sshSession?.ghosttySurface = surfaceView
         isConnected = true
+        
+        // Auto-start wire diagnostics for tmux sessions
+        if session.isTmuxSession {
+            wireDiagnostics.start()
+            wireDiagnostics.startCapture(label: "tmux_wire")
+            logger.info("Wire diagnostics auto-started for tmux session")
+        }
         
         // Flush any pending resize that arrived before the session was wired.
         // This handles the common case: layoutSubviews → onResize fired with
@@ -248,6 +267,8 @@ class TerminalViewModel: ObservableObject {
     }
     
     func disconnect() {
+        wireDiagnostics.stopCapture()
+        wireDiagnostics.stop()
         sshSession?.disconnect()
         sshSession = nil
         isConnected = false
@@ -427,28 +448,36 @@ extension TerminalViewModel: SSHSessionDelegate {
     func sshSession(_ session: SSHSession, didReceiveData data: Data) {
         // Feed data from SSH to Ghostty terminal for display
         if let surface = surfaceView {
-            logger.info("📥 Received \(data.count) bytes from SSH, feeding to Ghostty")
-            if let text = String(data: data, encoding: .utf8) {
-                logger.debug("📥 Data preview: \(text.prefix(100))")
-            }
+            logger.info("Received \(data.count) bytes from SSH, feeding to Ghostty")
+            
+            // Shadow-analyze for tmux wire diagnostics (no-op if not active)
+            wireDiagnostics.analyze(data)
+            
             surface.feedData(data)
         } else {
             // Buffer data until surface is ready
-            logger.info("📦 Buffering \(data.count) bytes (surface not ready yet)")
+            logger.info("Buffering \(data.count) bytes (surface not ready yet)")
             preSurfaceBuffer.append(data)
         }
     }
     
     func sshSession(_ session: SSHSession, didDisconnectWithError error: Error?) {
+        // Stop wire diagnostics and log summary
+        if wireDiagnostics.isActive {
+            logger.info("Wire diagnostics summary: \(self.wireDiagnostics.summary())")
+            wireDiagnostics.stopCapture()
+            wireDiagnostics.stop()
+        }
+        
         isConnected = false
         // Set disconnectedByRemote for both error and clean disconnects
         // This triggers navigation back to the connection screen
         disconnectedByRemote = true
         if let error = error {
-            logger.error("❌ SSH disconnected with error: \(error.localizedDescription)")
+            logger.error("SSH disconnected with error: \(error.localizedDescription)")
             disconnectError = error.localizedDescription
         } else {
-            logger.info("🔌 SSH disconnected cleanly (remote closed)")
+            logger.info("SSH disconnected cleanly (remote closed)")
             disconnectError = nil
         }
     }
