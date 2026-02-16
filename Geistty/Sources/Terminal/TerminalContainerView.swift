@@ -491,7 +491,7 @@ class RawTerminalUIViewController: UIViewController {
     var surfaceBottomConstraint: NSLayoutConstraint?
     
     // Settings observation
-    var settingsObserver: NSObjectProtocol?
+    private var settingsObserver: NSObjectProtocol?
     
     // Menu bar notification observers (must be stored for cleanup)
     var menuBarObservers: [NSObjectProtocol] = []
@@ -534,7 +534,7 @@ class RawTerminalUIViewController: UIViewController {
     
     // Window picker support (shown when multiple tmux windows exist)
     var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
-    var windowPickerHeightConstraint: NSLayoutConstraint?
+    private var windowPickerHeightConstraint: NSLayoutConstraint?
     var windowsObserver: AnyCancellable?
     var isShowingWindowPicker = false
     let windowPickerHeight: CGFloat = 36

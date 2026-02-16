@@ -346,8 +346,6 @@ struct ConnectionInfo {
     var password: String = ""
     #endif
     var port: Int = 22
-    var useKeyAuth: Bool = false
-    var privateKeyPath: String = ""
 }
 
 struct ConnectionSheet: View {
@@ -379,15 +377,8 @@ struct ConnectionSheet: View {
                         .textContentType(.username)
                         .autocapitalization(.none)
                     
-                    Toggle("Use Key Authentication", isOn: $connectionInfo.useKeyAuth)
-                    
-                    if connectionInfo.useKeyAuth {
-                        TextField("Private Key Path", text: $connectionInfo.privateKeyPath)
-                            .autocapitalization(.none)
-                    } else {
-                        SecureField("Password", text: $connectionInfo.password)
-                            .textContentType(.password)
-                    }
+                    SecureField("Password", text: $connectionInfo.password)
+                        .textContentType(.password)
                 }
                 
                 Section {
@@ -404,7 +395,6 @@ struct ConnectionSheet: View {
                         connectionInfo.port = 22
                         connectionInfo.username = "demo"
                         connectionInfo.password = "password"
-                        connectionInfo.useKeyAuth = false
                     }
                     .foregroundColor(.blue)
                     
@@ -413,7 +403,6 @@ struct ConnectionSheet: View {
                         connectionInfo.port = 2220
                         connectionInfo.username = "bandit0"
                         connectionInfo.password = "bandit0"
-                        connectionInfo.useKeyAuth = false
                     }
                     .foregroundColor(.blue)
                 }
@@ -433,7 +422,7 @@ struct ConnectionSheet: View {
     private var isValid: Bool {
         !connectionInfo.host.isEmpty &&
         !connectionInfo.username.isEmpty &&
-        (connectionInfo.useKeyAuth ? !connectionInfo.privateKeyPath.isEmpty : !connectionInfo.password.isEmpty)
+        !connectionInfo.password.isEmpty
     }
 }
 

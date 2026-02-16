@@ -905,44 +905,6 @@ class TmuxSessionManager: ObservableObject {
         sendCommandFireAndForget(command)
     }
     
-    /// Update a split ratio and sync to tmux (legacy - use syncSplitRatioToTmux instead)
-    /// Called when the user finishes dragging a divider.
-    func updateSplitRatioAndSync(forPaneId paneId: Int, ratio: Double) {
-        logger.info("📐 updateSplitRatioAndSync called: pane=\(paneId), ratio=\(String(format: "%.3f", ratio))")
-        
-        // First update local state
-        updateSplitRatio(forPaneId: paneId, ratio: ratio)
-        
-        // Then send resize-pane to tmux
-        // Find the split that contains this pane to determine direction and calculate size
-        guard let splitInfo = findSplitContainingWithSize(paneId: paneId) else {
-            logger.warning("⚠️ Could not find split containing %\(paneId)")
-            return
-        }
-        
-        logger.info("📐 Syncing resize to tmux: pane %\(paneId), ratio \(ratio), direction \(splitInfo.direction), totalSize \(splitInfo.totalSize)")
-        
-        // Calculate target size in cells
-        // Account for 1 cell for the divider
-        let availableSize = splitInfo.totalSize - 1
-        let newSize = max(1, Int(Double(availableSize) * ratio))
-        
-        // Use resize-pane to set the exact size
-        // For horizontal splits (left|right), we set width (-x)
-        // For vertical splits (top|bottom), we set height (-y)
-        let sizeFlag: String
-        switch splitInfo.direction {
-        case .horizontal:
-            sizeFlag = "-x"
-        case .vertical:
-            sizeFlag = "-y"
-        }
-        
-        let command = "resize-pane -t %\(paneId) \(sizeFlag) \(newSize)"
-        logger.info("📐 Sending: \(command)")
-        sendCommandFireAndForget(command)
-    }
-    
     /// Find the split node that contains the given pane ID and return its direction and total size
     private func findSplitContainingWithSize(paneId: Int) -> (direction: TmuxSplitTree.Direction, ratio: Double, totalSize: Int)? {
         guard let root = currentSplitTree.root else {

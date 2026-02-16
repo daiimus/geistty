@@ -139,7 +139,8 @@ public enum SSHKeyParser {
         // encrypted private key (string)
         
         let authMagic = "openssh-key-v1\0"
-        guard keyData.starts(with: authMagic.data(using: .utf8)!) else {
+        guard let authMagicData = authMagic.data(using: .utf8),
+              keyData.starts(with: authMagicData) else {
             throw SSHKeyParseError.invalidKey("Invalid OpenSSH key magic")
         }
         

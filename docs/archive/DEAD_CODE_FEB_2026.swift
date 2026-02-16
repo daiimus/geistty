@@ -1416,3 +1416,111 @@ final class TmuxSendKeysTests: XCTestCase {
         XCTAssertTrue(result!.contains(" ; "), "Commands must be separated by ' ; '")
     }
 }
+
+// ============================================================================
+// MARK: - Phase C Medium Fixes (Session 34)
+// ============================================================================
+
+// ARCHIVED FROM: Sources/Terminal/TmuxMultiPaneView.swift (lines 463-550)
+// REASON: Dead code — never instantiated. RawTerminalUIViewController uses direct
+// UIHostingController<TmuxMultiPaneView> + DividerOverlayView instead.
+// REMOVED: Session 34 (M15)
+
+/*
+class TmuxMultiPaneContainerView: UIView {
+    private var hostingController: UIHostingController<TmuxMultiPaneView>?
+    private weak var parentViewController: UIViewController?
+    private var sessionManager: TmuxSessionManager?
+    private var splitTreeObserver: AnyCancellable?
+    private var dividerOverlay: DividerOverlayView?
+    
+    func configure(sessionManager: TmuxSessionManager, parentViewController: UIViewController) {
+        self.sessionManager = sessionManager
+        self.parentViewController = parentViewController
+        let multiPaneView = TmuxMultiPaneView(sessionManager: sessionManager)
+        let hosting = UIHostingController(rootView: multiPaneView)
+        self.hostingController = hosting
+        parentViewController.addChild(hosting)
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            hosting.view.topAnchor.constraint(equalTo: topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hosting.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+        hosting.didMove(toParent: parentViewController)
+        hosting.view.backgroundColor = .clear
+        backgroundColor = .clear
+        let overlay = DividerOverlayView()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.onDragEnded = { [weak sessionManager] paneId, ratio in
+            sessionManager?.updateSplitRatioAndSync(forPaneId: paneId, ratio: ratio)
+        }
+        addSubview(overlay)
+        self.dividerOverlay = overlay
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+        splitTreeObserver = sessionManager.$currentSplitTree
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] tree in
+                guard let self = self else { return }
+                self.dividerOverlay?.updateDividers(from: tree, containerSize: self.bounds.size)
+            }
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if let tree = sessionManager?.currentSplitTree {
+            dividerOverlay?.updateDividers(from: tree, containerSize: bounds.size)
+        }
+    }
+    func cleanup() {
+        splitTreeObserver?.cancel()
+        splitTreeObserver = nil
+        dividerOverlay?.removeFromSuperview()
+        dividerOverlay = nil
+        hostingController?.willMove(toParent: nil)
+        hostingController?.view.removeFromSuperview()
+        hostingController?.removeFromParent()
+        hostingController = nil
+    }
+    deinit { cleanup() }
+}
+*/
+
+// ARCHIVED FROM: Sources/SSH/TmuxSessionManager.swift (lines 908-944)
+// REASON: Legacy method — callers migrated to updateSplitRatio() + syncSplitRatioToTmux().
+// REMOVED: Session 34 (M8)
+
+/*
+    func updateSplitRatioAndSync(forPaneId paneId: Int, ratio: Double) {
+        logger.info("updateSplitRatioAndSync called: pane=\(paneId), ratio=\(ratio)")
+        updateSplitRatio(forPaneId: paneId, ratio: ratio)
+        guard let splitInfo = findSplitContainingWithSize(paneId: paneId) else { return }
+        let availableSize = splitInfo.totalSize - 1
+        let newSize = max(1, Int(Double(availableSize) * ratio))
+        let sizeFlag: String
+        switch splitInfo.direction {
+        case .horizontal: sizeFlag = "-x"
+        case .vertical: sizeFlag = "-y"
+        }
+        sendCommandFireAndForget("resize-pane -t %\(paneId) \(sizeFlag) \(newSize)")
+    }
+*/
+
+// ARCHIVED FROM: Sources/App/ContentView.swift (ConnectionInfo struct)
+// REASON: Dead fields — useKeyAuth/privateKeyPath collected in UI but never passed to connect().
+// The main ConnectionEditorView uses SSHKeyManager, not file paths.
+// REMOVED: Session 34 (M20)
+
+/*
+    var useKeyAuth: Bool = false
+    var privateKeyPath: String = ""
+    // Toggle("Use Key Authentication", isOn: $connectionInfo.useKeyAuth)
+    // TextField("Private Key Path", text: $connectionInfo.privateKeyPath)
+    // Validation: (connectionInfo.useKeyAuth ? !connectionInfo.privateKeyPath.isEmpty : ...)
+*/

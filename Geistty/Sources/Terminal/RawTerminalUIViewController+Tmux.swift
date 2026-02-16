@@ -257,8 +257,9 @@ extension RawTerminalUIViewController {
         // On drag end: update local layout and commit to tmux
         // We don't update during drag - the blue indicator provides visual feedback
         overlay.onDragEnded = { [weak tmuxManager] paneId, ratio in
-            // Update local UI and sync to tmux
-            tmuxManager?.updateSplitRatioAndSync(forPaneId: paneId, ratio: ratio)
+            // Update local UI state, then sync to tmux
+            tmuxManager?.updateSplitRatio(forPaneId: paneId, ratio: ratio)
+            tmuxManager?.syncSplitRatioToTmux(forPaneId: paneId, ratio: ratio)
         }
         view.addSubview(overlay)
         dividerOverlayView = overlay
