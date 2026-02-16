@@ -35,6 +35,8 @@ Everything below is implemented and functional:
 ### tmux Integration
 - Native tmux Control Mode (`tmux -CC`) via Ghostty's viewer.zig
 - Multi-pane layouts with per-pane output routing
+- Multi-window support with window tab bar
+- Per-window focused pane tracking via C API
 - Window tabs with switching (Cmd+1-9)
 - Ghostty-style keyboard shortcuts:
   - Split: Cmd+D (right), Cmd+Shift+D (down)
@@ -43,6 +45,7 @@ Everything below is implemented and functional:
   - Equalize: Cmd+Ctrl+=
 - Window rename (Cmd+Shift+R, double-tap, context menu)
 - Session persistence across app suspensions
+- Touch-optimized divider dragging (30pt hit areas), double-tap zoom
 
 ### Keyboard
 - Full hardware keyboard support (Magic Keyboard, external keyboards)
@@ -63,7 +66,7 @@ Everything below is implemented and functional:
 ### Settings
 - Font size adjustment (Cmd+0/+/-)
 - Theme selection (18 bundled themes)
-- Font family (Departure Mono, SF Mono, Menlo, Courier)
+- Font family (Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata, Menlo, Courier New)
 - Config file (`ghostty.conf`) is source of truth
 - Auto-hiding chrome (header/toolbar)
 - Haptic feedback toggle
@@ -106,7 +109,7 @@ Full architecture documentation with Mermaid diagrams: **[ARCHITECTURE.md](ARCHI
 - macOS with Xcode 15+
 - Zig 0.14+ (for building GhosttyKit)
 - iOS 17+ device or simulator
-- SSH key for git operations (via ssh-agent, 1Password, or similar)
+- SSH key for git operations (via ssh-agent or similar)
 
 ### Build GhosttyKit from Ghostty fork
 
@@ -148,7 +151,7 @@ xcrun devicectl device process launch --device <device-uuid> \
 ### Run tests
 
 ```bash
-# Swift tests (58 tests)
+# Swift tests (470 tests)
 cd path/to/geistty/Geistty && ./ci.sh test
 
 # Zig tests (External backend + tmux viewer)
@@ -160,24 +163,23 @@ cd path/to/ghostty && zig build test -Dtest-filter="tmux"
 
 ```
 geistty/
-├── ARCHITECTURE.md          # Deep architecture docs (you are here-adjacent)
+├── ARCHITECTURE.md          # Deep architecture docs
 ├── AGENTS.md                # Agent development guide
 ├── Geistty/
 │   ├── Geistty.xcodeproj
 │   ├── Frameworks/
 │   │   └── GhosttyKit.xcframework/
 │   ├── Resources/
-│   │   └── Fonts/           # Departure Mono
+│   │   └── Fonts/           # 7 bundled font families
 │   └── Sources/
 │       ├── App/             # GeisttyApp, ContentView
 │       ├── Auth/            # ConnectionProfile, Keychain, SSH keys
-│       ├── Ghostty/         # C API bridge, SurfaceView, config, search
-│       ├── SFTP/            # SFTP client (archived/dormant)
+│       ├── Ghostty/         # C API bridge, SurfaceView, config, search, tmux protocol
 │       ├── SSH/             # NIOSSHConnection, SSHSession, TmuxSessionManager
-│       ├── Terminal/        # TerminalContainerView, multi-pane views, themes
+│       ├── Terminal/        # TerminalContainerView, VC extensions, multi-pane views, themes
 │       └── UI/              # Connection list, editor, settings
-└── Tests/
-    └── GeisttyTests/        # 58 unit tests
+├── GeisttyTests/            # 470 unit tests (18 files + 2 mocks)
+└── GeisttyUITests/          # 4 UI test files
 ```
 
 ## Dependencies

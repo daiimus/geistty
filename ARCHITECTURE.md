@@ -95,17 +95,16 @@ graph TB
 
 ## File Inventory
 
-34 Swift source files across 7 directories:
+40 Swift source files across 6 directories:
 
 | Directory | Files | Purpose |
 |-----------|-------|---------|
 | `App/` | `GeisttyApp.swift`, `ContentView.swift` | Entry point, root navigation, `AppState` |
 | `Auth/` | `ConnectionProfile.swift`, `CredentialProvider.swift`, `KeychainManager.swift`, `SSHKeyManager.swift`, `SSHKeyParser.swift` | SSH credentials, Keychain, key generation/parsing |
-| `Ghostty/` | `Ghostty.swift`, `GhosttyInput.swift`, `FontMapping.swift`, `ConfigSyncManager.swift`, `SurfaceSearchOverlay.swift` | C API bridge, keyboard input, config, search UI |
-| `SFTP/` | `SFTPChannel.swift`, `SFTPClient.swift`, `SFTPClientProtocol.swift`, `MockSFTPClient.swift`, `SFTPBrowserView.swift` | SFTP implementation (dormant/archived) |
+| `Ghostty/` | `Ghostty.swift`, `Ghostty.App.swift`, `Ghostty.Config.swift`, `Ghostty.SearchState.swift`, `Ghostty.SurfaceConfiguration.swift`, `GhosttyInput.swift`, `FontMapping.swift`, `ConfigSyncManager.swift`, `SurfaceSearchOverlay.swift`, `TmuxSurfaceProtocol.swift` | C API bridge, keyboard input, config, search UI, tmux protocol abstraction |
 | `SSH/` | `NIOSSHConnection.swift`, `SSHSession.swift`, `TmuxSessionManager.swift`, `TmuxLayout.swift`, `TmuxSplitTree.swift`, `TmuxModels.swift`, `TmuxSessionNameResolver.swift` | SSH transport, tmux state management |
-| `Terminal/` | `TerminalContainerView.swift`, `TmuxMultiPaneView.swift`, `TmuxSplitView.swift`, `TmuxWindowPickerView.swift`, `Theme.swift` | Terminal UI, multi-pane layouts, theming |
-| `UI/` | `ConnectionListView.swift`, `ConnectionEditorView.swift`, `SettingsView.swift`, `KeyTableIndicatorView.swift`, `SessionResumeToastView.swift` | Connection management UI, settings |
+| `Terminal/` | `RawTerminalUIViewController+Keyboard.swift`, `RawTerminalUIViewController+MenuBar.swift`, `RawTerminalUIViewController+Search.swift`, `RawTerminalUIViewController+Shortcuts.swift`, `RawTerminalUIViewController+Tmux.swift`, `RawTerminalUIViewController+WindowPicker.swift`, `TerminalContainerView.swift`, `TerminalToolbar.swift`, `TmuxMultiPaneView.swift`, `TmuxSplitView.swift`, `TmuxWindowPickerView.swift`, `Theme.swift` | Terminal UI, VC extensions, multi-pane layouts, theming |
+| `UI/` | `ConnectionListView.swift`, `ConnectionEditorView.swift`, `SettingsView.swift`, `KeyTableIndicatorView.swift` | Connection management UI, settings |
 
 ---
 
@@ -113,9 +112,9 @@ graph TB
 
 Four files carry most of the weight. Everything else is supporting cast.
 
-### 1. `Ghostty.swift` (~2800 lines)
+### 1. `Ghostty.swift` (~2396 lines)
 
-The monolith. Contains `Ghostty.Config`, `Ghostty.App`, `SurfaceConfiguration`, and `Ghostty.SurfaceView`. SurfaceView alone is ~1600 lines handling:
+SurfaceView — the UIView subclass that hosts Ghostty's Metal rendering. Handles:
 
 - Surface creation/destruction via C API
 - Metal layer hosting (IOSurfaceLayer as sublayer)
@@ -125,11 +124,12 @@ The monolith. Contains `Ghostty.Config`, `Ghostty.App`, `SurfaceConfiguration`, 
 - Write callback (user input -> SSH)
 - Resize callback (terminal dimensions -> SSH/tmux)
 - Search overlay coordination
+- tmux C API wrappers (pane and window queries via `TmuxSurfaceProtocol`)
 - Notification posting for tmux actions
 
-This file should eventually be split into extensions. It's our single biggest technical debt item in terms of code organization.
+Note: `Ghostty.App`, `Ghostty.Config`, `SearchState`, and `SurfaceConfiguration` were extracted into separate files (E1-E4 decomposition, Session 25) following upstream naming conventions.
 
-### 2. `SSHSession.swift` (~1384 lines)
+### 2. `SSHSession.swift` (~1149 lines)
 
 SSH connection lifecycle, tmux control mode entry, reconnection logic, and data routing. Key responsibilities:
 
@@ -139,16 +139,20 @@ SSH connection lifecycle, tmux control mode entry, reconnection logic, and data 
 - Forwards tmux events to `TmuxSessionManager`
 - Manages `isReconnecting` state and retry logic
 
-### 3. `TerminalContainerView.swift` (~2389 lines)
+### 3. `TerminalContainerView.swift` (~912 lines)
 
-SwiftUI view + UIKit view controller + `TerminalViewModel`. The view controller (`RawTerminalUIViewController`) creates and owns the `SurfaceView`. The view model coordinates between the SSH session and the surface. The SwiftUI view handles:
+SwiftUI view + UIKit view controller bridge. The view controller (`RawTerminalUIViewController`) creates and owns the `SurfaceView`. The VC was decomposed into focused extensions:
 
-- Toolbar (connection status, tmux controls, settings)
-- Multi-pane vs single-pane transitions
-- Keyboard avoidance and resize handling
-- Disconnect overlay
+- `+Keyboard.swift` — keyboard show/hide, accessory bar
+- `+MenuBar.swift` — iPadOS menu bar integration
+- `+Search.swift` — search overlay coordination
+- `+Shortcuts.swift` — keyboard shortcut dispatch
+- `+Tmux.swift` — tmux state observation, split management
+- `+WindowPicker.swift` — tmux window tab bar
 
-### 4. `TmuxSessionManager.swift` (~1400+ lines)
+The SwiftUI wrapper handles toolbar, multi-pane vs single-pane transitions, and disconnect overlay.
+
+### 4. `TmuxSessionManager.swift` (~1137 lines)
 
 Tracks tmux windows, panes, and sessions. Manages the mapping between tmux pane IDs and Ghostty surfaces. Handles:
 
@@ -503,11 +507,11 @@ graph TB
     end
 
     subgraph "C API Boundary"
-        API["ghostty_surface_tmux_pane_count()<br/>ghostty_surface_tmux_pane_ids()<br/>ghostty_surface_tmux_set_active_pane()"]
+        API["Pane-level:<br/>ghostty_surface_tmux_pane_count()<br/>ghostty_surface_tmux_pane_ids()<br/>ghostty_surface_tmux_set_active_pane()<br/><br/>Window-level:<br/>ghostty_surface_tmux_window_count()<br/>ghostty_surface_tmux_window_info()<br/>ghostty_surface_tmux_window_layout()<br/>ghostty_surface_tmux_active_window_id()<br/>ghostty_surface_tmux_window_focused_pane_id()"]
     end
 
     subgraph "Swift Side"
-        NC["NotificationCenter<br/>.tmuxStateChanged<br/>.tmuxExit"]
+        NC["NotificationCenter<br/>.tmuxStateChanged<br/>.tmuxExit<br/>.tmuxReady"]
         SSH["SSHSession<br/>observeTmuxNotifications()"]
         TSM["TmuxSessionManager"]
         UI["TmuxMultiPaneView<br/>TmuxSplitView<br/>TmuxWindowPickerView"]
@@ -524,9 +528,9 @@ graph TB
     style TSM fill:#4a9eff,color:#fff
 ```
 
-**Dual state tracking:** The Zig viewer owns the authoritative tmux state (pane terminals, active pane, layout). The Swift `TmuxSessionManager` tracks a shadow of this state for UI purposes. When the viewer fires `TMUX_STATE_CHANGED`, Swift queries the C API to sync.
+**Dual state tracking:** The Zig viewer owns the authoritative tmux state (pane terminals, active pane, layout). The Swift `TmuxSessionManager` tracks a shadow of this state for UI purposes. When the viewer fires `TMUX_STATE_CHANGED`, Swift queries the window-level C API to sync window info, layout strings, and focused panes.
 
-**Known limitation:** `TMUX_STATE_CHANGED` only carries `window_count` and `pane_count`. The viewer internally parses `%layout-change` with full geometry, but this is NOT exposed via the C API. The Swift-side split tree UI (`TmuxSplitTree`, `TmuxLayout`) parses layout strings independently. Wiring these together is future work.
+**Layout pipeline:** When `TMUX_STATE_CHANGED` fires, `handleTmuxStateChanged()` queries `ghostty_surface_tmux_window_layout()` for each window's layout string, then parses it with `TmuxLayout.swift` to build `TmuxSplitTree` structures for the SwiftUI multi-pane rendering. The focused pane per window is queried via `ghostty_surface_tmux_window_focused_pane_id()` and used as the preferred initial focus when switching windows.
 
 ---
 
@@ -593,15 +597,13 @@ A comparison of our patterns against upstream macOS Ghostty. These are not bugs 
 
 **Fix:** Adopt the `Task.detached { @MainActor }` pattern from upstream.
 
-#### 3. `Ghostty.swift` Monolith
+#### 3. SurfaceView Organization
 
-**Upstream:** macOS Ghostty splits surface functionality across multiple files: `Ghostty.SurfaceView_AppKit.swift` for the view, `Ghostty.SurfaceView+Input.swift` for keyboard, etc.
+**Upstream:** macOS Ghostty keeps `SurfaceView` in a single file (`Ghostty.SurfaceView_AppKit.swift`), with separate files for `+Input`, `+Gestures`, etc.
 
-**Us:** `Ghostty.swift` is ~2800 lines with everything in one file. SurfaceView alone is ~1600 lines mixing input handling, gesture recognition, scroll physics, search, and keyboard management.
+**Us:** `Ghostty.swift` is ~2396 lines with SurfaceView as the primary content. We extracted `App`, `Config`, `SearchState`, and `SurfaceConfiguration` into separate files (E1-E4), following upstream naming. We decided NOT to further split SurfaceView because upstream keeps theirs in a single file too.
 
-**Impact:** Low (everything works), but makes the file hard to navigate and increases merge conflict risk.
-
-**Fix:** Split into extensions: `Ghostty+SurfaceView.swift`, `Ghostty+Input.swift`, `Ghostty+Gestures.swift`, `Ghostty+Search.swift`.
+**Impact:** Low. Matches upstream pattern. The VC side was decomposed into 6 extension files for the same purpose.
 
 ### Moderate Gaps
 
@@ -679,26 +681,22 @@ tmux control mode splits output at arbitrary byte boundaries (confirmed from tmu
 
 We attempted a persistent VT stream fix (`fe750a2`) but it caused a freeze regression and was reverted. **Not confirmed as user-visible in normal usage** -- tmux's output buffering usually keeps sequences intact.
 
-### 2. Monolithic `Ghostty.swift`
+### 2. SurfaceView in Single File
 
-~2800 lines in one file. Should be split into extensions for maintainability.
+`Ghostty.swift` is ~2396 lines — SurfaceView is the remaining large component after E1-E4 decomposition extracted App, Config, SearchState, and SurfaceConfiguration. This matches upstream Ghostty's pattern of keeping SurfaceView in a single file. The VC side was decomposed into 6 extension files.
 
 ### 3. Verbose Hex Logging in Production
 
 `SSHSession.handleReceivedData()` hex-dumps every SSH packet at `.info` level. This hits disk on every byte received. Should be `.debug` or gated.
 
-### 4. `TMUX_STATE_CHANGED` Limited Data
+### 4. `TMUX_STATE_CHANGED` Data
 
-Only carries `window_count` and `pane_count`. No layout geometry. The viewer has the data internally but doesn't expose it through the C API. The Swift-side split tree UI can't get authoritative layout from Ghostty.
+`TMUX_STATE_CHANGED` carries `window_count` and `pane_count`. Detailed per-window data (layout string, focused pane, window name) is queried via the window-level C API functions after receiving the notification.
 
-### 5. Dormant SFTP Code
-
-5 files in `SFTP/` from the archived File Provider effort. Not harmful but adds to the codebase surface area.
-
-### 6. `AppSettings.shared` vs `ghostty.conf`
+### 5. `AppSettings.shared` vs `ghostty.conf`
 
 Two config sources. Boundary is undocumented.
 
-### 7. `captureTmuxPane()` Stub
+### 6. `captureTmuxPane()` Stub
 
 Dead code that always returns failure. Leftover from the old gateway architecture.

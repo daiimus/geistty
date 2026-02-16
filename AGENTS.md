@@ -62,30 +62,46 @@ done
 ```
 Geistty/
 ├── Sources/
-│   ├── App/              # App entry point, main views
-│   ├── Auth/             # SSH authentication, credentials, keychain
-│   ├── Ghostty/          # Ghostty integration, terminal surface
-│   ├── SSH/              # SSH connection management, tmux control mode
-│   ├── Terminal/         # Terminal session, view models
-│   └── UI/               # Settings, reusable UI components
+│   ├── App/              # App entry point, main views (2 files)
+│   ├── Auth/             # SSH authentication, credentials, keychain (5 files)
+│   ├── Ghostty/          # Ghostty integration, terminal surface (9 files)
+│   ├── SSH/              # SSH connection management, tmux control mode (7 files)
+│   ├── Terminal/         # Terminal session, view models, tmux pane UI (12 files)
+│   └── UI/               # Connection list/editor, settings (4 files)
 ├── Frameworks/
 │   └── GhosttyKit.xcframework/  # Ghostty static library
 ├── Resources/
-│   └── Fonts/            # Custom fonts (Departure Mono)
+│   └── Fonts/            # Bundled fonts (7 families: Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata)
 └── Assets.xcassets/      # App icons, colors
 ```
 
+40 Swift source files across 6 directories.
+
 ## Key Files
 
-- `Sources/Ghostty/Ghostty.swift` - Main Ghostty integration, Config, App, Surface; tmux action callbacks
-- `Sources/Ghostty/FontMapping.swift` - Centralized font name mapping (GUI ↔ Ghostty/CoreText)
-- `Sources/Terminal/TerminalContainerView.swift` - Terminal session UI
+- `Sources/Ghostty/Ghostty.swift` - SurfaceView (~2396 lines): Metal rendering, keyboard input, gestures, write callback, tmux action notifications
+- `Sources/Ghostty/Ghostty.App.swift` - App lifecycle, runtime init, action callback dispatch
+- `Sources/Ghostty/Ghostty.Config.swift` - Config wrapper (create, load, finalize)
+- `Sources/Ghostty/Ghostty.SearchState.swift` - Search overlay state model
+- `Sources/Ghostty/Ghostty.SurfaceConfiguration.swift` - Surface init configuration
+- `Sources/Ghostty/GhosttyInput.swift` - UIKit key event translation to Ghostty input
+- `Sources/Ghostty/FontMapping.swift` - Centralized font name mapping (GUI <> Ghostty/CoreText)
+- `Sources/Ghostty/ConfigSyncManager.swift` - ghostty.conf <> Ghostty Config synchronization
+- `Sources/Ghostty/SurfaceSearchOverlay.swift` - Search bar UI overlay
+- `Sources/Ghostty/TmuxSurfaceProtocol.swift` - Protocol abstraction for tmux C API queries (enables mock testing)
+- `Sources/Terminal/TerminalContainerView.swift` - Terminal session UI, ViewModel, toolbar
+- `Sources/Terminal/TmuxMultiPaneView.swift` - Multi-pane split rendering with divider dragging
+- `Sources/Terminal/TmuxSplitView.swift` - Recursive split tree rendering
+- `Sources/Terminal/TmuxWindowPickerView.swift` - tmux window tab bar
 - `Sources/Terminal/KeyTableIndicatorView.swift` - Vim-style key table indicator
 - `Sources/SSH/NIOSSHConnection.swift` - SwiftNIO-SSH connection with Network.framework
 - `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux notification observer, data flow
-- `Sources/SSH/TmuxSessionManager.swift` - Multi-pane state management, surface ownership
+- `Sources/SSH/TmuxSessionManager.swift` - Multi-pane state management, surface ownership, layout reconciliation
 - `Sources/SSH/TmuxLayout.swift` - tmux layout string parser for split pane geometry
+- `Sources/SSH/TmuxSplitTree.swift` - Split tree data structure (zoom, equalize, queries)
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
+- `Sources/Auth/SSHKeyParser.swift` - SSH key format parsing (Ed25519, RSA, ECDSA)
+- `Sources/Auth/SSHKeyManager.swift` - Key generation, import, Keychain storage
 - `Sources/UI/SettingsView.swift` - App settings UI
 
 ## Ghostty C API Usage
@@ -122,24 +138,39 @@ The `ios-external-backend` branch adds:
    - `ghostty_config_load_string(config, str, len)` - Load config from string
 
 3. **tmux C API** (actions + surface queries)
+
+   **Actions:**
    - `GHOSTTY_ACTION_TMUX_STATE_CHANGED` - Action with window_count, pane_count
    - `GHOSTTY_ACTION_TMUX_EXIT` - Action when tmux control mode exits
+   - `GHOSTTY_ACTION_TMUX_READY` - Action when tmux viewer is ready (capture-pane complete)
+
+   **Pane-level queries:**
    - `ghostty_surface_tmux_pane_count()` - Get number of panes
    - `ghostty_surface_tmux_pane_ids()` - Get array of pane IDs
    - `ghostty_surface_tmux_set_active_pane(id)` - Set active pane for input routing
    - `ghostty_surface_tmux_reset_active_pane()` - Reset to default pane
 
+   **Window-level queries:**
+   - `ghostty_surface_tmux_window_count()` - Get number of tmux windows
+   - `ghostty_surface_tmux_window_info(index, name_buf, name_buf_len)` - Get window ID, name, active flag
+   - `ghostty_surface_tmux_window_layout(index, buf, buf_len)` - Get layout geometry string for a window
+   - `ghostty_surface_tmux_active_window_id()` - Get the active window ID (-1 if none)
+   - `ghostty_surface_tmux_window_focused_pane_id(index)` - Get tmux-reported focused pane for a window (-1 if unknown)
+
 ## Font Configuration
 
-Fonts are configured via the `font-family` config option:
+Fonts are configured via the `font-family` config option. All mapping is centralized in `Sources/Ghostty/FontMapping.swift`.
 
 ```swift
-// Available fonts
-["Departure Mono", "SF Mono", "Menlo", "Courier New"]
+// 9 available fonts (7 bundled + 2 system)
+// Bundled: Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata
+// System:  Menlo, Courier New
+// Note: SF Mono is excluded — it requires special system font APIs, not accessible by name via CoreText
 
-// Ghostty mapping
-"Departure Mono" -> "DepartureMono-Regular"
-"SF Mono" -> "SF Mono"
+// Ghostty mapping examples
+"Departure Mono" -> "Departure Mono"
+"JetBrains Mono" -> "JetBrains Mono"
+"Menlo"          -> "Menlo"
 ```
 
 Live font updates use `ghostty_surface_update_config()` with a new config.
@@ -172,7 +203,7 @@ SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
                               viewer.zig parses %output/%begin/%end/%layout-change/etc.
                               Routes output to per-pane Terminal instances
                                         ↓
-                              Action callback → TMUX_STATE_CHANGED / TMUX_EXIT
+                              Action callback → TMUX_STATE_CHANGED / TMUX_EXIT / TMUX_READY
                                         ↓
                               NotificationCenter → SSHSession.observeTmuxNotifications()
                                         ↓
@@ -201,9 +232,10 @@ User Input → Ghostty encodes keystroke → Termio.queueWrite()
 | `stream_handler.zig` (Ghostty) | DCS 1000p detection, creates Viewer, dispatches actions to Swift via callback |
 | `Termio.zig` (Ghostty) | `queueWrite()` intercepts writes when tmux viewer is active, calls `viewer.sendKeys()` for send-keys wrapping |
 | `External.zig` (Ghostty) | Pure pass-through: `queueWrite()` → `write_callback` → Swift |
-| `Ghostty.swift` | Action callback handles `TMUX_STATE_CHANGED`/`TMUX_EXIT`, posts notifications; Swift wrappers for pane queries |
+| `Ghostty.swift` | SurfaceView: Metal rendering, keyboard, gestures, write callback; tmux action notifications via NotificationCenter |
+| `Ghostty.App.swift` | Action callback dispatch handles `TMUX_STATE_CHANGED`/`TMUX_EXIT`/`TMUX_READY`; posts notifications |
 | `SSHSession.swift` | Observes tmux notifications, forwards to TmuxSessionManager, manages connection state |
-| `TmuxSessionManager` | Multi-pane state, surface ownership, layout parsing (partially wired — layout exposure pending) |
+| `TmuxSessionManager` | Multi-pane state, surface ownership, layout reconciliation via window-level C API queries |
 | `TmuxLayout.swift` | Parses tmux layout geometry strings for split pane UI |
 
 ### Key Design Decisions
@@ -215,7 +247,6 @@ User Input → Ghostty encodes keystroke → Termio.queueWrite()
 
 ### Known Limitations
 
-- `TMUX_STATE_CHANGED` only carries `window_count` and `pane_count` — no layout geometry string. The viewer internally parses `%layout-change` but this is NOT exposed via the C API. Split tree UI needs new C API functions to access layout data (future work).
 - `captureTmuxPane()` for search is stubbed — it relied on the old gateway command/response pattern. Use Ghostty's built-in search instead.
 
 ### Control Mode Protocol Reference
@@ -403,7 +434,7 @@ xcrun devicectl device process launch --device <device-id> --console com.geistty
 - `ghostty` (daiimus/ghostty, branch: ios-external-backend)
   - External termio backend for SSH/iOS
   - C API extensions for config loading
-  - tmux C API: state change actions, pane queries, active pane switching
+  - tmux C API: state change actions (including TMUX_READY), pane queries, active pane switching, window queries (count, info, layout, focused pane)
   
 - `swift-nio-ssh` (daiimus/swift-nio-ssh, branch: add-rsa-support)
   - Fork with RSA key support added
