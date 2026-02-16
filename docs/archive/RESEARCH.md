@@ -141,8 +141,8 @@ class UIKitSshTerminalView: TerminalView, TerminalViewDelegate {
     var shell: SSHShell?
     
     func connect() {
-        let session = SSHSession(host: "192.168.86.28", port: 22)
-        session.authenticate(.byPassword(username: "miguel", password: "..."))
+        let session = SSHSession(host: "<your-server-ip>", port: 22)
+        session.authenticate(.byPassword(username: "<your-username>", password: "..."))
         
         shell = session.shell
         shell?.withCallback { [weak self] data, error in

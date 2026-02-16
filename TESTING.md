@@ -212,8 +212,8 @@ xcrun devicectl device process launch --device DEVICE_ID --console com.geistty.a
 
 | Device | UDID | CoreDevice UUID |
 |--------|------|-----------------|
-| Icarus (iPad Pro) | `00008103-001425D11153001E` | `4E8A6D04-FCF9-5BB5-BF57-22080EC6A31A` |
-| Athena (iPhone) | `00008130-001049E23ED0001C` | `55CF3503-DC69-50E1-BC33-17A7DB9ECE9C` |
+| Icarus (iPad Pro) | `<YOUR-DEVICE-UDID>` | `<YOUR-COREDEVICE-UUID>` |
+| Athena (iPhone) | `<YOUR-DEVICE-UDID>` | `<YOUR-COREDEVICE-UUID>` |
 
 ## Build Artifacts
 

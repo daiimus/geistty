@@ -621,7 +621,10 @@ final class TmuxWireDiagnostics {
     /// File format: raw bytes, exactly as received from SSH. Can be replayed
     /// through `analyze()` to reproduce diagnostics offline.
     func startCapture(label: String = "tmux_wire") {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            logger.error("Failed to locate documents directory for wire capture")
+            return
+        }
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         let filename = "\(label)_\(timestamp).bin"

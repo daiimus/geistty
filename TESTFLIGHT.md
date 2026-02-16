@@ -88,7 +88,7 @@ In App Store Connect → TestFlight → Test Information:
   and terminal configuration.
   ```
 
-- **Feedback Email**: your-email@example.com
+- **Feedback Email**: `<your-support-email@example.com>` *(fill in before submitting)*
 
 - **What to Test**:
   ```
