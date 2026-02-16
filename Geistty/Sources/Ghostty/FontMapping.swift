@@ -28,6 +28,7 @@ public enum FontMapping {
         case sourceCodePro = "Source Code Pro"
         case ibmPlexMono = "IBM Plex Mono"
         case inconsolata = "Inconsolata"
+        case atkinsonHyperlegibleMono = "Atkinson Hyperlegible Mono"
         
         // System fonts (excludes SF Mono - see note above)
         case menlo = "Menlo"
@@ -48,6 +49,7 @@ public enum FontMapping {
             case .sourceCodePro: return "Source Code Pro"
             case .ibmPlexMono: return "IBM Plex Mono"
             case .inconsolata: return "Inconsolata"
+            case .atkinsonHyperlegibleMono: return "Atkinson Hyperlegible Mono"
             case .menlo: return "Menlo"
             case .courierNew: return "Courier New"
             }
@@ -57,7 +59,8 @@ public enum FontMapping {
         public var isBundled: Bool {
             switch self {
             case .departureMono, .jetbrainsMono, .firaCode, .hack,
-                 .sourceCodePro, .ibmPlexMono, .inconsolata:
+                 .sourceCodePro, .ibmPlexMono, .inconsolata,
+                 .atkinsonHyperlegibleMono:
                 return true
             case .menlo, .courierNew:
                 return false
@@ -82,6 +85,8 @@ public enum FontMapping {
                 return ["IBM Plex Mono", "IBMPlexMono", "IBMPlexMono-Regular"]
             case .inconsolata:
                 return ["Inconsolata", "Inconsolata-Regular"]
+            case .atkinsonHyperlegibleMono:
+                return ["Atkinson Hyperlegible Mono", "AtkinsonHyperlegibleMono-Regular"]
             case .menlo:
                 return ["Menlo", "Menlo-Regular"]
             case .courierNew:

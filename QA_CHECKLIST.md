@@ -193,7 +193,7 @@ Manual test matrix for device testing. Run through before each release.
 
 ## 5. Configuration
 
-### Fonts (7 bundled + 2 system)
+### Fonts (8 bundled + 2 system)
 - [ ] Departure Mono — renders correctly (bundled)
 - [ ] JetBrains Mono — renders correctly (bundled)
 - [ ] Fira Code — renders correctly (bundled)
@@ -201,6 +201,7 @@ Manual test matrix for device testing. Run through before each release.
 - [ ] Source Code Pro — renders correctly (bundled)
 - [ ] IBM Plex Mono — renders correctly (bundled)
 - [ ] Inconsolata — renders correctly (bundled)
+- [ ] Atkinson Hyperlegible Mono — renders correctly (bundled)
 - [ ] Menlo — renders correctly (system)
 - [ ] Courier New — renders correctly (system)
 - [ ] Font change applies live — no restart needed

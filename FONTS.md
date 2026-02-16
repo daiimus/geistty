@@ -6,7 +6,7 @@ Terminal fonts are critical to the user experience. This document covers Geistty
 
 ## Current State (v0.1-stable)
 
-### Bundled Fonts (7 families)
+### Bundled Fonts (8 families)
 
 | Font | License | Files | Notes |
 |------|---------|-------|-------|
@@ -17,6 +17,7 @@ Terminal fonts are critical to the user experience. This document covers Geistty
 | **Source Code Pro** | OFL 1.1 | `SourceCodePro-Regular.otf`, `-Bold.otf` | Adobe's monospace, great readability |
 | **IBM Plex Mono** | OFL 1.1 | `IBMPlexMono-Regular.ttf`, `-Bold.ttf` | IBM's monospace, distinctive character |
 | **Inconsolata** | OFL 1.1 | `Inconsolata-Regular.ttf`, `-Bold.ttf` | Lightweight, clean |
+| **Atkinson Hyperlegible Mono** | OFL 1.1 | `AtkinsonHyperlegibleMono-Regular.ttf`, `-Bold.ttf` | Designed for low vision readers, high character distinction |
 
 ### System Fonts (2)
 
@@ -29,7 +30,7 @@ Terminal fonts are critical to the user experience. This document covers Geistty
 
 ### Font Picker (SettingsView)
 
-The in-app font picker offers all 9 fonts in the order listed above.
+The in-app font picker offers all 10 fonts in the order listed above.
 
 Font selection is persisted to `ghostty.conf` via the `font-family` config key.
 Live updates use `ghostty_surface_update_config()`.
@@ -47,6 +48,7 @@ Font name translation between GUI display names and CoreText/Ghostty identifiers
 "Source Code Pro" -> "Source Code Pro"
 "IBM Plex Mono"  -> "IBM Plex Mono"
 "Inconsolata"    -> "Inconsolata"
+"Atkinson Hyperlegible Mono" -> "Atkinson Hyperlegible Mono"
 "Menlo"          -> "Menlo"
 "Courier New"    -> "Courier New"
 ```
@@ -96,6 +98,7 @@ Ghostty doesn't currently support font cascading on iOS -- a symbols-only Nerd F
 | Source Code Pro | OFL 1.1 | In app credits |
 | IBM Plex Mono | OFL 1.1 | In app credits |
 | Inconsolata | OFL 1.1 | In app credits |
+| Atkinson Hyperlegible Mono | OFL 1.1 | In app credits |
 
 **OFL 1.1 Requirements**: Include copyright notice, include license text, don't sell the font standalone, don't use reserved font names in derivatives.
 
@@ -110,4 +113,5 @@ Ghostty doesn't currently support font cascading on iOS -- a symbols-only Nerd F
 - **Source Code Pro**: https://github.com/adobe-fonts/source-code-pro
 - **IBM Plex Mono**: https://github.com/IBM/plex
 - **Inconsolata**: https://levien.com/type/myfonts/inconsolata.html
+- **Atkinson Hyperlegible Mono**: https://brailleinstitute.org/freefont
 - **Nerd Fonts**: https://www.nerdfonts.com/

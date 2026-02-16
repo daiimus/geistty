@@ -17,6 +17,8 @@
 		<string>IBMPlexMono-Bold.ttf</string>
 		<string>Inconsolata-Regular.ttf</string>
 		<string>Inconsolata-Bold.ttf</string>
+		<string>AtkinsonHyperlegibleMono-Regular.ttf</string>
+		<string>AtkinsonHyperlegibleMono-Bold.ttf</string>
 	</array>
 	<key>UIRequiresFullScreen</key>
 	<false/>

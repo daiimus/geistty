@@ -71,7 +71,7 @@ Geistty/
 ├── Frameworks/
 │   └── GhosttyKit.xcframework/  # Ghostty static library
 ├── Resources/
-│   └── Fonts/            # Bundled fonts (7 families: Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata)
+│   └── Fonts/            # Bundled fonts (8 families: Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata, Atkinson Hyperlegible Mono)
 └── Assets.xcassets/      # App icons, colors
 ```
 
@@ -164,8 +164,8 @@ The `ios-external-backend` branch adds:
 Fonts are configured via the `font-family` config option. All mapping is centralized in `Sources/Ghostty/FontMapping.swift`.
 
 ```swift
-// 9 available fonts (7 bundled + 2 system)
-// Bundled: Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata
+// 10 available fonts (8 bundled + 2 system)
+// Bundled: Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata, Atkinson Hyperlegible Mono
 // System:  Menlo, Courier New
 // Note: SF Mono is excluded — it requires special system font APIs, not accessible by name via CoreText
 

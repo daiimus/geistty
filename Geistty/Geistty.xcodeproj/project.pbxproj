@@ -60,6 +60,8 @@
 		A1000079 /* IBMPlexMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A2000079 /* IBMPlexMono-Bold.ttf */; };
 		A100007A /* Inconsolata-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007A /* Inconsolata-Regular.ttf */; };
 		A100007B /* Inconsolata-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007B /* Inconsolata-Bold.ttf */; };
+		A100007C /* AtkinsonHyperlegibleMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007C /* AtkinsonHyperlegibleMono-Regular.ttf */; };
+		A100007D /* AtkinsonHyperlegibleMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A200007D /* AtkinsonHyperlegibleMono-Bold.ttf */; };
 		A1000080 /* SurfaceSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000080 /* SurfaceSearchOverlay.swift */; };
 		A1000082 /* TmuxModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000082 /* TmuxModels.swift */; };
 		A1000083 /* TmuxSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000083 /* TmuxSessionManager.swift */; };
@@ -194,6 +196,8 @@
 		A2000079 /* IBMPlexMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Bold.ttf"; sourceTree = "<group>"; };
 		A200007A /* Inconsolata-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Regular.ttf"; sourceTree = "<group>"; };
 		A200007B /* Inconsolata-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inconsolata-Bold.ttf"; sourceTree = "<group>"; };
+		A200007C /* AtkinsonHyperlegibleMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "AtkinsonHyperlegibleMono-Regular.ttf"; sourceTree = "<group>"; };
+		A200007D /* AtkinsonHyperlegibleMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "AtkinsonHyperlegibleMono-Bold.ttf"; sourceTree = "<group>"; };
 		A2000080 /* SurfaceSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceSearchOverlay.swift; sourceTree = "<group>"; };
 		A2000082 /* TmuxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxModels.swift; sourceTree = "<group>"; };
 		A2000083 /* TmuxSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionManager.swift; sourceTree = "<group>"; };
@@ -429,6 +433,8 @@
 				A2000079 /* IBMPlexMono-Bold.ttf */,
 				A200007A /* Inconsolata-Regular.ttf */,
 				A200007B /* Inconsolata-Bold.ttf */,
+				A200007C /* AtkinsonHyperlegibleMono-Regular.ttf */,
+				A200007D /* AtkinsonHyperlegibleMono-Bold.ttf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -586,6 +592,8 @@
 				A1000079 /* IBMPlexMono-Bold.ttf in Resources */,
 				A100007A /* Inconsolata-Regular.ttf in Resources */,
 				A100007B /* Inconsolata-Bold.ttf in Resources */,
+				A100007C /* AtkinsonHyperlegibleMono-Regular.ttf in Resources */,
+				A100007D /* AtkinsonHyperlegibleMono-Bold.ttf in Resources */,
 				A1000061 /* themes in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
