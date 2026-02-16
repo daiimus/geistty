@@ -37,28 +37,26 @@ final class MockSSHSessionDelegate: SSHSessionDelegate {
     
     // MARK: - SSHSessionDelegate
     
-    nonisolated func sshSessionDidConnect(_ session: SSHSession) {
-        Task { @MainActor in
-            self.didConnectCalls.append(session)
-        }
+    // SSHSessionDelegate is not @MainActor, but all callers (SSHSession.handleReceivedData,
+    // TmuxConnectionLifecycleTests, etc.) run on @MainActor. Since MockSSHSessionDelegate
+    // is @MainActor, these calls execute synchronously — no Task hop needed.
+    // The previous nonisolated + Task pattern caused receivedDataCalls to be populated
+    // asynchronously, making ordering assertions unreliable.
+    
+    func sshSessionDidConnect(_ session: SSHSession) {
+        self.didConnectCalls.append(session)
     }
     
-    nonisolated func sshSession(_ session: SSHSession, didReceiveData data: Data) {
-        Task { @MainActor in
-            self.receivedDataCalls.append((session: session, data: data))
-        }
+    func sshSession(_ session: SSHSession, didReceiveData data: Data) {
+        self.receivedDataCalls.append((session: session, data: data))
     }
     
-    nonisolated func sshSession(_ session: SSHSession, didDisconnectWithError error: Error?) {
-        Task { @MainActor in
-            self.didDisconnectCalls.append((session: session, error: error))
-        }
+    func sshSession(_ session: SSHSession, didDisconnectWithError error: Error?) {
+        self.didDisconnectCalls.append((session: session, error: error))
     }
     
-    nonisolated func sshSession(_ session: SSHSession, healthDidChange health: ConnectionHealth) {
-        Task { @MainActor in
-            self.healthChangeCalls.append((session: session, health: health))
-        }
+    func sshSession(_ session: SSHSession, healthDidChange health: ConnectionHealth) {
+        self.healthChangeCalls.append((session: session, health: health))
     }
     
     // MARK: - Reset
