@@ -420,7 +420,7 @@ struct QuickConnectView: View {
             Section("Server") {
                 TextField("Host", text: $host)
                     .textContentType(.URL)
-                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                     .accessibilityIdentifier("HostField")
                 
@@ -432,7 +432,7 @@ struct QuickConnectView: View {
             Section {
                 TextField("Username", text: $username)
                     .textContentType(.username)
-                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
                     .accessibilityIdentifier("UsernameField")
                 
                 SecureField("Password", text: $password)

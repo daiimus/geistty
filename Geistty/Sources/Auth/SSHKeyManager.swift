@@ -409,8 +409,8 @@ class SSHKeyManager: ObservableObject {
                 type = detected
                 logger.info("📥 ✅ Detected key type: \(type.rawValue) (\(type.displayName))")
             } else {
-                logger.error("📥 ❌ Failed to detect OpenSSH key type! Defaulting to ed25519")
-                type = .ed25519
+                logger.error("📥 ❌ Failed to detect OpenSSH key type from binary content")
+                throw SSHKeyError.unsupportedKeyType
             }
         } else if pemString.contains("RSA PRIVATE KEY") {
             type = .rsa4096

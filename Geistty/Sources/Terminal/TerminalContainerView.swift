@@ -573,7 +573,6 @@ class RawTerminalUIViewController: UIViewController {
     
     // Window picker support (shown when multiple tmux windows exist)
     var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
-    private var windowPickerHeightConstraint: NSLayoutConstraint?
     var windowsObserver: AnyCancellable?
     var isShowingWindowPicker = false
     let windowPickerHeight: CGFloat = 36

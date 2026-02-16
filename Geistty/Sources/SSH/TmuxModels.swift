@@ -56,15 +56,9 @@ struct TmuxWindow: Identifiable, Equatable {
     /// Pane IDs in this window
     var paneIds: [String]
     
-    /// Currently active pane ID
-    var activePaneId: String?
-    
     /// Layout string (tmux layout format)
     /// Example: "a]be,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"
     var layout: String?
-    
-    /// Window flags (*, -, #, etc.)
-    var flags: String = ""
     
     init(id: String, index: Int, name: String, sessionId: String) {
         self.id = id
@@ -72,35 +66,6 @@ struct TmuxWindow: Identifiable, Equatable {
         self.name = name
         self.sessionId = sessionId
         self.paneIds = []
-    }
-}
-
-// MARK: - tmux Pane
-
-/// Represents a tmux pane within a window
-struct TmuxPane: Identifiable, Equatable {
-    /// Pane ID (e.g., "%0", "%1")
-    let id: String
-    
-    /// Window this pane belongs to
-    let windowId: String
-    
-    /// Pane dimensions
-    var width: Int
-    var height: Int
-    
-    /// Pane position within window
-    var positionX: Int = 0
-    var positionY: Int = 0
-    
-    /// Whether this is the active pane in its window
-    var isActive: Bool = false
-    
-    init(id: String, windowId: String, width: Int, height: Int) {
-        self.id = id
-        self.windowId = windowId
-        self.width = width
-        self.height = height
     }
 }
 
