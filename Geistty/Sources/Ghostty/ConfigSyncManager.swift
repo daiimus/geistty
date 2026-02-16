@@ -56,11 +56,14 @@ class ConfigSyncManager: ObservableObject {
             if let equalsIndex = trimmed.firstIndex(of: "=") {
                 let lineKey = trimmed[..<equalsIndex].trimmingCharacters(in: .whitespaces)
                 if lineKey == key {
-                    // Replace this line with new value
-                    let needsQuotes = value.contains(" ") || key == "font-family"
-                    let formattedValue = needsQuotes ? "\"\(value)\"" : value
-                    updatedLines.append("\(key) = \(formattedValue)")
-                    found = true
+                    if !found {
+                        // Replace the first occurrence with the new value
+                        let needsQuotes = value.contains(" ") || key == "font-family"
+                        let formattedValue = needsQuotes ? "\"\(value)\"" : value
+                        updatedLines.append("\(key) = \(formattedValue)")
+                        found = true
+                    }
+                    // Drop subsequent duplicates of the same key
                     continue
                 }
             }

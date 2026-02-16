@@ -1423,8 +1423,9 @@ extension Ghostty {
                     case "k":
                         // Cmd+K - Clear Screen (via Ghostty binding action)
                         if let surface = surface {
-                            _ = "clear_screen".withCString { cstr in
-                                ghostty_surface_binding_action(surface, cstr, 12)
+                            let action = "clear_screen"
+                            _ = action.withCString { cstr in
+                                ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
                             }
                         }
                         return
@@ -1634,6 +1635,10 @@ extension Ghostty {
         func close() {
             assert(Thread.isMainThread, "close() must be called on the main thread")
             guard let surface = surface else { return }
+            
+            // Invalidate the display link to break the retain cycle
+            // (CADisplayLink strongly retains its target)
+            stopScrollMomentum()
             
             // Clear callbacks to prevent invocations during/after free
             onWrite = nil

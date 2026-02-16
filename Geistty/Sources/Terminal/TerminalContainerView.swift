@@ -764,6 +764,14 @@ class RawTerminalUIViewController: UIViewController {
         
         // Update top constraint based on status bar visibility
         updateTopConstraint()
+        
+        // Refresh divider overlay positions after container bounds change
+        // (e.g., rotation, keyboard show/hide, multitasking resize)
+        if let overlay = dividerOverlayView,
+           let tmuxManager = viewModel?.tmuxManager {
+            let size = multiPaneHostingController?.view.bounds.size ?? .zero
+            overlay.updateDividers(from: tmuxManager.currentSplitTree, containerSize: size)
+        }
     }
     
     // MARK: - Surface Creation

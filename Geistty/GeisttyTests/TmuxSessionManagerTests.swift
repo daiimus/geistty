@@ -157,12 +157,32 @@ extension TmuxSessionManagerTests {
     @MainActor
     func testSelectWindowByIndexCommand() {
         let (mgr, log) = managerWithCommandLog()
-        // Input is 1-based (Ghostty Cmd+1), output is 0-based for tmux
-        mgr.selectWindowByIndex(1)
-        XCTAssertEqual(log.commands, ["select-window -t :0\n"])
 
+        // Populate windows via reconciliation so selectWindowByIndex can look them up
+        let layout0 = singlePaneLayout(paneId: 0)
+        let layout1 = singlePaneLayout(paneId: 1)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [
+                .init(id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                .init(id: 1, name: "vim", layout: layout1, focusedPaneId: -1)
+            ],
+            activeWindowId: 0,
+            paneIds: [0, 1]
+        ))
+        log.commands.removeAll()  // Clear any commands from reconciliation
+
+        // Input is 1-based (Ghostty Cmd+1), selects window by sorted position
+        mgr.selectWindowByIndex(1)
+        XCTAssertEqual(log.commands, ["select-window -t @0\n"])
+
+        mgr.selectWindowByIndex(2)
+        XCTAssertEqual(log.commands.last, "select-window -t @1\n")
+
+        // Out of range — no additional command
+        let countBefore = log.commands.count
         mgr.selectWindowByIndex(5)
-        XCTAssertEqual(log.commands.last, "select-window -t :4\n")
+        XCTAssertEqual(log.commands.count, countBefore,
+                       "Out-of-range index should not send a command")
     }
 
     @MainActor

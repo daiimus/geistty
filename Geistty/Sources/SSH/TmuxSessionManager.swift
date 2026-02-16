@@ -351,10 +351,9 @@ class TmuxSessionManager: ObservableObject {
                 logger.info("  Window \(windowId) '\(window.name)': \(tree.paneIds.count) panes, layout parsed OK")
             } catch {
                 logger.warning("  Window \(windowId): layout parse failed: \(error)")
-                // Keep any existing tree we had for this window
-                if let existingTree = windowSplitTrees[windowId] {
-                    newSplitTrees[windowId] = existingTree
-                }
+                // Don't keep stale trees — they would be inconsistent with the
+                // freshly-built newWindows dict. Omitting the tree causes the UI
+                // to fall back to a single-pane view for this window.
             }
         }
         
@@ -824,8 +823,13 @@ class TmuxSessionManager: ObservableObject {
     
     /// Navigate to window by index (1-based like Ghostty Cmd+1-8)
     func selectWindowByIndex(_ index: Int) {
-        // tmux uses 0-based indexing by default, but we accept 1-based from Ghostty shortcuts
-        sendCommandFireAndForget("select-window -t :\(index - 1)")
+        // Sort windows by their tmux index to map positional shortcuts correctly,
+        // regardless of the tmux base-index setting
+        let sortedWindows = windows.values.sorted { $0.index < $1.index }
+        let position = index - 1  // Cmd+1 = first window
+        guard position >= 0, position < sortedWindows.count else { return }
+        let window = sortedWindows[position]
+        sendCommandFireAndForget("select-window -t \(window.id)")
     }
     
     /// Navigate to next pane
