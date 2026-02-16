@@ -202,7 +202,12 @@ class SSHKeyManager: ObservableObject {
         let base64 = keyData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
         let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n\(base64)\n-----END OPENSSH PRIVATE KEY-----\n"
         
-        return pem.data(using: .utf8)!
+        guard let pemData = pem.data(using: .utf8) else {
+            // This should never happen — PEM contains only ASCII/base64 characters
+            logger.error("Failed to encode PEM as UTF-8 — returning empty data")
+            return Data()
+        }
+        return pemData
     }
     
     /// Append a uint32 in big-endian format.

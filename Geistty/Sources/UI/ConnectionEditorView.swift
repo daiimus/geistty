@@ -205,7 +205,7 @@ struct ConnectionEditorView: View {
     }
     
     private var isValid: Bool {
-        !name.isEmpty && !host.isEmpty && !username.isEmpty && (Int(port) ?? 0) > 0 &&
+        !name.isEmpty && !host.isEmpty && !username.isEmpty && (Int(port) ?? 0) > 0 && (Int(port) ?? 0) <= 65535 &&
         (authMethod == .password ? !password.isEmpty : true) &&
         (authMethod == .sshKey ? selectedKeyName != nil : true)
     }
