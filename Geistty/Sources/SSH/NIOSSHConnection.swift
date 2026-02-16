@@ -626,7 +626,13 @@ class NIOSSHConnection {
         channel = nil
         
         // Shutdown event loop
-        eventLoopGroup?.shutdownGracefully { _ in }
+        eventLoopGroup?.shutdownGracefully { [weak self] error in
+            if let error = error {
+                logger.warning("Event loop shutdown error: \(error.localizedDescription)")
+            }
+            // Ensure reference is dropped after shutdown completes
+            _ = self
+        }
         eventLoopGroup = nil
         
         state = .disconnected

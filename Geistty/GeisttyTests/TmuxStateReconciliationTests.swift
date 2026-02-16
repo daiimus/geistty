@@ -356,7 +356,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
     // MARK: - Invalid Layout
 
     @MainActor
-    func testInvalidLayoutStringPreservesExisting() {
+    func testInvalidLayoutStringDropsStaleTree() {
         let mgr = TmuxSessionManager()
         let goodLayout = singlePaneLayout(paneId: 0)
 
@@ -368,7 +368,6 @@ final class TmuxStateReconciliationTests: XCTestCase {
         ))
 
         XCTAssertFalse(mgr.currentSplitTree.isEmpty)
-        let firstTree = mgr.currentSplitTree
 
         // Second: invalid layout string
         _ = mgr.reconcileTmuxState(makeSnapshot(
@@ -377,9 +376,10 @@ final class TmuxStateReconciliationTests: XCTestCase {
             paneIds: [0]
         ))
 
-        // Should keep the previous tree for this window (fallback in reconcileTmuxState)
-        XCTAssertEqual(mgr.currentSplitTree.paneIds, firstTree.paneIds,
-                      "Invalid layout should preserve existing split tree")
+        // M15: stale trees are dropped on parse failure to avoid inconsistency
+        // with the freshly-built windows dict. UI falls back to single-pane view.
+        XCTAssertTrue(mgr.currentSplitTree.isEmpty,
+                      "Invalid layout should drop stale tree, not preserve it")
     }
 
     // MARK: - selectWindow() State Logic

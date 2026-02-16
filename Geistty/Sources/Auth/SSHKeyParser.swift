@@ -23,7 +23,7 @@ enum SSHKeyParseError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidKey(let msg): return "Invalid SSH key: \(msg)"
-        case .encryptedKeyNoPassphrase: return "Key is encrypted but no passphrase provided"
+        case .encryptedKeyNoPassphrase: return "Key is encrypted. Passphrase-protected keys are not yet supported. Use ssh-keygen -p to remove the passphrase, or generate an unencrypted key."
         case .unsupportedFormat(let format): return "Unsupported key format: \(format)"
         }
     }
@@ -204,7 +204,10 @@ enum SSHKeyParser {
         }
         let stringData = data.subdata(in: offset..<(offset + length))
         offset += length
-        return String(data: stringData, encoding: .utf8) ?? ""
+        guard let str = String(data: stringData, encoding: .utf8) else {
+            throw SSHKeyParseError.invalidKey("Invalid UTF-8 in string field")
+        }
+        return str
     }
     
     /// Read length-prefixed binary data

@@ -230,6 +230,7 @@ extension Color {
         let scanned = scanner.scanHexInt64(&int)
         
         let r, g, b: Double
+        var a: Double = 1.0
         
         // Validate: scanner must have consumed the full string and hex must be correct length
         guard scanned, scanner.isAtEnd else {
@@ -244,6 +245,7 @@ extension Color {
             g = Double((int >> 8) & 0xFF) / 255
             b = Double(int & 0xFF) / 255
         case 8: // ARGB
+            a = Double((int >> 24) & 0xFF) / 255
             r = Double((int >> 16) & 0xFF) / 255
             g = Double((int >> 8) & 0xFF) / 255
             b = Double(int & 0xFF) / 255
@@ -253,7 +255,7 @@ extension Color {
             b = 0
         }
         
-        self.init(red: r, green: g, blue: b)
+        self.init(red: r, green: g, blue: b, opacity: a)
     }
     
     /// Convert color to hex string "#RRGGBB"

@@ -159,9 +159,13 @@ class ConnectionProfileManager: ObservableObject {
     /// Storage keys
     private let localStorageKey = "connection_profiles"
     private let iCloudStorageKey = "connection_profiles"
+    private let deletedProfilesKey = "deleted_profile_ids"
     
     /// iCloud key-value store
     private let iCloudStore = NSUbiquitousKeyValueStore.default
+    
+    /// Tombstone set — profile IDs that were intentionally deleted
+    private var deletedProfileIds: Set<UUID> = []
     
     /// Cancellables for Combine
     private var cancellables = Set<AnyCancellable>()
@@ -169,6 +173,9 @@ class ConnectionProfileManager: ObservableObject {
     private init() {
         // Check if iCloud is available
         checkiCloudAvailability()
+        
+        // Load tombstones before profiles so merge can use them
+        loadDeletedProfileIds()
         
         // Load profiles
         loadProfiles()
@@ -245,6 +252,8 @@ class ConnectionProfileManager: ObservableObject {
     /// Delete a profile
     func deleteProfile(_ profile: ConnectionProfile) {
         profiles.removeAll { $0.id == profile.id }
+        deletedProfileIds.insert(profile.id)
+        saveDeletedProfileIds()
         saveProfiles()
     }
     
@@ -347,19 +356,50 @@ class ConnectionProfileManager: ObservableObject {
         }
     }
     
+    // MARK: - Tombstone Persistence
+    
+    private func loadDeletedProfileIds() {
+        // Load from both local and iCloud, merge
+        let localStrings = UserDefaults.standard.stringArray(forKey: deletedProfilesKey) ?? []
+        let iCloudStrings = iCloudStore.array(forKey: deletedProfilesKey) as? [String] ?? []
+        let all = Set(localStrings + iCloudStrings)
+        deletedProfileIds = Set(all.compactMap { UUID(uuidString: $0) })
+    }
+    
+    private func saveDeletedProfileIds() {
+        let strings = deletedProfileIds.map { $0.uuidString }
+        UserDefaults.standard.set(strings, forKey: deletedProfilesKey)
+        if iCloudSyncEnabled {
+            iCloudStore.set(strings, forKey: deletedProfilesKey)
+            iCloudStore.synchronize()
+        }
+    }
+    
     // MARK: - iCloud Merge
     
     /// Merge profiles from iCloud with local profiles
-    /// Uses "last modified wins" strategy based on lastConnectedAt and createdAt
+    /// Uses "last modified wins" strategy based on lastConnectedAt and createdAt.
+    /// Respects tombstones: profiles deleted locally are not resurrected from iCloud.
     private func mergeFromiCloud() {
         guard let data = iCloudStore.data(forKey: iCloudStorageKey),
               let iCloudProfiles = try? JSONDecoder().decode([ConnectionProfile].self, from: data) else {
             return
         }
         
-        var mergedProfiles = profiles
+        // Also load remote tombstones
+        let remoteTombstoneStrings = iCloudStore.array(forKey: deletedProfilesKey) as? [String] ?? []
+        let remoteTombstones = Set(remoteTombstoneStrings.compactMap { UUID(uuidString: $0) })
+        
+        // Merge remote tombstones into local set
+        deletedProfileIds.formUnion(remoteTombstones)
+        
+        // Remove locally-held profiles that were deleted on another device
+        var mergedProfiles = profiles.filter { !remoteTombstones.contains($0.id) }
         
         for iCloudProfile in iCloudProfiles {
+            // Skip profiles that were deleted locally
+            guard !deletedProfileIds.contains(iCloudProfile.id) else { continue }
+            
             if let localIndex = mergedProfiles.firstIndex(where: { $0.id == iCloudProfile.id }) {
                 // Profile exists locally - use the one with more recent activity
                 let localProfile = mergedProfiles[localIndex]
@@ -376,6 +416,7 @@ class ConnectionProfileManager: ObservableObject {
         }
         
         profiles = mergedProfiles
+        saveDeletedProfileIds()
         saveProfiles()
     }
     
