@@ -91,6 +91,7 @@
 		D1000031 /* MockSSHSessionDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000031 /* MockSSHSessionDelegate.swift */; };
 		D1000032 /* TmuxConnectionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000032 /* TmuxConnectionLifecycleTests.swift */; };
 		D1000033 /* TmuxDataFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000033 /* TmuxDataFlowTests.swift */; };
+		D1000034 /* TmuxSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000034 /* TmuxSessionManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -220,6 +221,7 @@
 		D2000031 /* MockSSHSessionDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSSHSessionDelegate.swift; sourceTree = "<group>"; };
 		D2000032 /* TmuxConnectionLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxConnectionLifecycleTests.swift; sourceTree = "<group>"; };
 		D2000033 /* TmuxDataFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxDataFlowTests.swift; sourceTree = "<group>"; };
+		D2000034 /* TmuxSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionManagerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -440,6 +442,7 @@
 				D2000031 /* MockSSHSessionDelegate.swift */,
 				D2000032 /* TmuxConnectionLifecycleTests.swift */,
 				D2000033 /* TmuxDataFlowTests.swift */,
+				D2000034 /* TmuxSessionManagerTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -671,6 +674,7 @@
 				D1000031 /* MockSSHSessionDelegate.swift in Sources */,
 				D1000032 /* TmuxConnectionLifecycleTests.swift in Sources */,
 				D1000033 /* TmuxDataFlowTests.swift in Sources */,
+				D1000034 /* TmuxSessionManagerTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};

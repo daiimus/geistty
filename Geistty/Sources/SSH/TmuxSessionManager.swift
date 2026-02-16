@@ -83,6 +83,11 @@ class TmuxSessionManager: ObservableObject {
     /// Test-only override for tmux C API queries. Set this to a MockTmuxSurface
     /// to test handleTmuxStateChanged() without a real Ghostty surface.
     var tmuxQuerySurfaceOverride: (any TmuxSurfaceProtocol)?
+    
+    /// Test-only: populate pendingOutput for testing pending output paths
+    func setPendingOutputForTesting(_ output: [String: [Data]]) {
+        pendingOutput = output
+    }
     #endif
     
     /// Cell size from the primary surface (for calculating terminal dimensions)
@@ -1075,6 +1080,8 @@ class TmuxSessionManager: ObservableObject {
         currentSession = nil
         isConnected = false
         connectionState = .disconnected
+        focusedPaneId = ""
+        focusedWindowId = ""
         
         // Reset resize tracking
         lastResizeCols = 0
