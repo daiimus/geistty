@@ -216,7 +216,7 @@ struct TmuxPaneSurfaceView: View {
             .id("\(paneId)-\(cols)x\(rows)")
             .overlay(
                 // Focus indicator border
-                RoundedRectangle(cornerRadius: 0)
+                Rectangle()
                     .stroke(isFocused ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 2)
             )
             .overlay(

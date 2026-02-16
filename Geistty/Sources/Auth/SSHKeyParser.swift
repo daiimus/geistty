@@ -15,12 +15,12 @@ import os.log
 private let logger = Logger(subsystem: "com.geistty", category: "SSHKeyParser")
 
 /// SSH key parsing errors
-public enum SSHKeyParseError: LocalizedError {
+enum SSHKeyParseError: LocalizedError {
     case invalidKey(String)
     case encryptedKeyNoPassphrase
     case unsupportedFormat(String)
     
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .invalidKey(let msg): return "Invalid SSH key: \(msg)"
         case .encryptedKeyNoPassphrase: return "Key is encrypted but no passphrase provided"
@@ -30,10 +30,10 @@ public enum SSHKeyParseError: LocalizedError {
 }
 
 /// Utility for parsing SSH private keys
-public enum SSHKeyParser {
+enum SSHKeyParser {
     
     /// Parse a private key from PEM data
-    public static func parsePrivateKey(_ data: Data, passphrase: String? = nil) throws -> NIOSSHPrivateKey {
+    static func parsePrivateKey(_ data: Data, passphrase: String? = nil) throws -> NIOSSHPrivateKey {
         logger.debug("[KeyParse] parsePrivateKey called with \(data.count) bytes")
         
         guard let pemString = String(data: data, encoding: .utf8) else {
