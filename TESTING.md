@@ -50,8 +50,8 @@ xcodebuild build \
 - Tests core logic without UI or network dependencies
 - Files in `GeisttyTests/`
 - Run with: `./ci.sh test`
-- **401 tests** across 20 test suites in 15 test files, all passing
-- No mocks — direct unit tests of real implementations
+- **421 tests** across 22 test suites in 17 test files, all passing
+- Mock-based tests for tmux lifecycle (MockTmuxSurface, MockSSHSessionDelegate)
 - Auth module tests use real Keychain on simulator (cleaned up in tearDown)
 
 ### GeisttyUITests (UI Tests)
@@ -71,6 +71,8 @@ xcodebuild build \
 | `TmuxLayoutTests.swift` | 32 | tmux layout string parsing, checksum calculation, error cases, convenience properties |
 | `FontMappingTests.swift` | 31 | Font name mapping between GUI display names and Ghostty/CoreText names |
 | `ConnectionProfileTests.swift` | 19 | SSH connection profile serialization, auth methods, display strings |
+| `TmuxConnectionLifecycleTests.swift` | 14 | tmux notification-driven lifecycle: state changes, pane activation, flush, exit/reactivate (uses MockTmuxSurface) |
+| `TmuxDataFlowTests.swift` | 6 | SSH data ingress: delegate forwarding, early buffering, delegate flush, discovery interception |
 
 ## Test Pattern
 

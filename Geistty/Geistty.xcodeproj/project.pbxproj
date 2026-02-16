@@ -33,6 +33,7 @@
 		A1000C02 /* Ghostty.App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C02 /* Ghostty.App.swift */; };
 		A1000C03 /* Ghostty.SurfaceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C03 /* Ghostty.SurfaceConfiguration.swift */; };
 		A1000C04 /* Ghostty.SearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C04 /* Ghostty.SearchState.swift */; };
+		A1000C05 /* TmuxSurfaceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C05 /* TmuxSurfaceProtocol.swift */; };
 		A1000012 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000013 /* GhosttyKit.xcframework */; };
 		A1000013 /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* GhosttyInput.swift */; };
 		A1000020 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* KeychainManager.swift */; };
@@ -86,6 +87,10 @@
 		D1000027 /* SSHKeyParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000027 /* SSHKeyParserTests.swift */; };
 		D1000028 /* SSHKeyManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000028 /* SSHKeyManagerTests.swift */; };
 		D1000029 /* KeychainManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000029 /* KeychainManagerTests.swift */; };
+		D1000030 /* MockTmuxSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000030 /* MockTmuxSurface.swift */; };
+		D1000031 /* MockSSHSessionDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000031 /* MockSSHSessionDelegate.swift */; };
+		D1000032 /* TmuxConnectionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000032 /* TmuxConnectionLifecycleTests.swift */; };
+		D1000033 /* TmuxDataFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000033 /* TmuxDataFlowTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -156,6 +161,7 @@
 		A2000C02 /* Ghostty.App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.App.swift; sourceTree = "<group>"; };
 		A2000C03 /* Ghostty.SurfaceConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.SurfaceConfiguration.swift; sourceTree = "<group>"; };
 		A2000C04 /* Ghostty.SearchState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ghostty.SearchState.swift; sourceTree = "<group>"; };
+		A2000C05 /* TmuxSurfaceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSurfaceProtocol.swift; sourceTree = "<group>"; };
 		A2000013 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		A2000014 /* GhosttyInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInput.swift; sourceTree = "<group>"; };
 		A2000020 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
@@ -210,6 +216,10 @@
 		D2000027 /* SSHKeyParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyParserTests.swift; sourceTree = "<group>"; };
 		D2000028 /* SSHKeyManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyManagerTests.swift; sourceTree = "<group>"; };
 		D2000029 /* KeychainManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManagerTests.swift; sourceTree = "<group>"; };
+		D2000030 /* MockTmuxSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTmuxSurface.swift; sourceTree = "<group>"; };
+		D2000031 /* MockSSHSessionDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSSHSessionDelegate.swift; sourceTree = "<group>"; };
+		D2000032 /* TmuxConnectionLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxConnectionLifecycleTests.swift; sourceTree = "<group>"; };
+		D2000033 /* TmuxDataFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxDataFlowTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -325,6 +335,7 @@
 				A2000C02 /* Ghostty.App.swift */,
 				A2000C03 /* Ghostty.SurfaceConfiguration.swift */,
 				A2000C04 /* Ghostty.SearchState.swift */,
+				A2000C05 /* TmuxSurfaceProtocol.swift */,
 				5ADFC7D999CE0A6CC53C7B39 /* ConfigSyncManager.swift */,
 				A20000A0 /* FontMapping.swift */,
 				A2000014 /* GhosttyInput.swift */,
@@ -425,6 +436,10 @@
 				D2000027 /* SSHKeyParserTests.swift */,
 				D2000028 /* SSHKeyManagerTests.swift */,
 				D2000029 /* KeychainManagerTests.swift */,
+				D2000030 /* MockTmuxSurface.swift */,
+				D2000031 /* MockSSHSessionDelegate.swift */,
+				D2000032 /* TmuxConnectionLifecycleTests.swift */,
+				D2000033 /* TmuxDataFlowTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -585,6 +600,7 @@
 				A1000C02 /* Ghostty.App.swift in Sources */,
 				A1000C03 /* Ghostty.SurfaceConfiguration.swift in Sources */,
 				A1000C04 /* Ghostty.SearchState.swift in Sources */,
+				A1000C05 /* TmuxSurfaceProtocol.swift in Sources */,
 				708E9BFAE5C4A9C65A1CC66F /* ConfigSyncManager.swift in Sources */,
 				A10000A0 /* FontMapping.swift in Sources */,
 				A1000013 /* GhosttyInput.swift in Sources */,
@@ -651,6 +667,10 @@
 				D1000027 /* SSHKeyParserTests.swift in Sources */,
 				D1000028 /* SSHKeyManagerTests.swift in Sources */,
 				D1000029 /* KeychainManagerTests.swift in Sources */,
+				D1000030 /* MockTmuxSurface.swift in Sources */,
+				D1000031 /* MockSSHSessionDelegate.swift in Sources */,
+				D1000032 /* TmuxConnectionLifecycleTests.swift in Sources */,
+				D1000033 /* TmuxDataFlowTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
