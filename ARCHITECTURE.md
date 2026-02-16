@@ -95,15 +95,15 @@ graph TB
 
 ## File Inventory
 
-40 Swift source files across 6 directories:
+43 Swift source files across 6 directories:
 
 | Directory | Files | Purpose |
 |-----------|-------|---------|
 | `App/` | `GeisttyApp.swift`, `ContentView.swift` | Entry point, root navigation, `AppState` |
 | `Auth/` | `ConnectionProfile.swift`, `CredentialProvider.swift`, `KeychainManager.swift`, `SSHKeyManager.swift`, `SSHKeyParser.swift` | SSH credentials, Keychain, key generation/parsing |
 | `Ghostty/` | `Ghostty.swift`, `Ghostty.App.swift`, `Ghostty.Config.swift`, `Ghostty.SearchState.swift`, `Ghostty.SurfaceConfiguration.swift`, `GhosttyInput.swift`, `FontMapping.swift`, `ConfigSyncManager.swift`, `SurfaceSearchOverlay.swift`, `TmuxSurfaceProtocol.swift` | C API bridge, keyboard input, config, search UI, tmux protocol abstraction |
-| `SSH/` | `NIOSSHConnection.swift`, `SSHSession.swift`, `TmuxSessionManager.swift`, `TmuxLayout.swift`, `TmuxSplitTree.swift`, `TmuxModels.swift`, `TmuxSessionNameResolver.swift` | SSH transport, tmux state management |
-| `Terminal/` | `RawTerminalUIViewController+Keyboard.swift`, `RawTerminalUIViewController+MenuBar.swift`, `RawTerminalUIViewController+Search.swift`, `RawTerminalUIViewController+Shortcuts.swift`, `RawTerminalUIViewController+Tmux.swift`, `RawTerminalUIViewController+WindowPicker.swift`, `TerminalContainerView.swift`, `TerminalToolbar.swift`, `TmuxMultiPaneView.swift`, `TmuxSplitView.swift`, `TmuxWindowPickerView.swift`, `Theme.swift` | Terminal UI, VC extensions, multi-pane layouts, theming |
+| `SSH/` | `NIOSSHConnection.swift`, `SSHSession.swift`, `TmuxSessionManager.swift`, `TmuxLayout.swift`, `TmuxSplitTree.swift`, `TmuxModels.swift`, `TmuxSessionNameResolver.swift`, `TmuxWireDiagnostics.swift` | SSH transport, tmux state management, wire diagnostics |
+| `Terminal/` | `RawTerminalUIViewController+Keyboard.swift`, `+MenuBar.swift`, `+Search.swift`, `+Shortcuts.swift`, `+Tmux.swift`, `+WindowPicker.swift`, `TerminalContainerView.swift`, `TerminalToolbar.swift`, `TmuxMultiPaneView.swift`, `TmuxSplitView.swift`, `TmuxWindowPickerView.swift`, `CommandPaletteView.swift`, `Theme.swift` | Terminal UI, VC extensions, multi-pane layouts, command palette, theming |
 | `UI/` | `ConnectionListView.swift`, `ConnectionEditorView.swift`, `SettingsView.swift`, `KeyTableIndicatorView.swift` | Connection management UI, settings |
 
 ---
@@ -112,7 +112,7 @@ graph TB
 
 Four files carry most of the weight. Everything else is supporting cast.
 
-### 1. `Ghostty.swift` (~2396 lines)
+### 1. `Ghostty.swift` (~2404 lines)
 
 SurfaceView — the UIView subclass that hosts Ghostty's Metal rendering. Handles:
 
@@ -129,7 +129,7 @@ SurfaceView — the UIView subclass that hosts Ghostty's Metal rendering. Handle
 
 Note: `Ghostty.App`, `Ghostty.Config`, `SearchState`, and `SurfaceConfiguration` were extracted into separate files (E1-E4 decomposition, Session 25) following upstream naming conventions.
 
-### 2. `SSHSession.swift` (~1149 lines)
+### 2. `SSHSession.swift` (~1208 lines)
 
 SSH connection lifecycle, tmux control mode entry, reconnection logic, and data routing. Key responsibilities:
 
@@ -139,7 +139,7 @@ SSH connection lifecycle, tmux control mode entry, reconnection logic, and data 
 - Forwards tmux events to `TmuxSessionManager`
 - Manages `isReconnecting` state and retry logic
 
-### 3. `TerminalContainerView.swift` (~912 lines)
+### 3. `TerminalContainerView.swift` (~958 lines)
 
 SwiftUI view + UIKit view controller bridge. The view controller (`RawTerminalUIViewController`) creates and owns the `SurfaceView`. The VC was decomposed into focused extensions:
 
@@ -152,7 +152,7 @@ SwiftUI view + UIKit view controller bridge. The view controller (`RawTerminalUI
 
 The SwiftUI wrapper handles toolbar, multi-pane vs single-pane transitions, and disconnect overlay.
 
-### 4. `TmuxSessionManager.swift` (~1137 lines)
+### 4. `TmuxSessionManager.swift` (~1140 lines)
 
 Tracks tmux windows, panes, and sessions. Manages the mapping between tmux pane IDs and Ghostty surfaces. Handles:
 
@@ -567,7 +567,7 @@ Our fork (`daiimus/ghostty`, branch `ios-external-backend`) adds or modifies the
 | 9 | `0a8c369` | tmux resize: data race fix, startup catch-up, pane terminal resize |
 | 10 | `216ff75` | Use-after-free fix in `renderer_state.terminal` after `syncLayouts` |
 
-Commits 11-12 (`fe750a2` persistent VT stream + `607a3c9` revert) cancel each other out.
+Commits 11-12 (`fe750a2` persistent VT stream + `607a3c9` revert) cancel each other out. The persistent VT parser approach was later re-implemented correctly with absorbing state reset — see [Known Issue #1 (RESOLVED)](#1-utf-8--escape-sequence-splitting-across-output--resolved).
 
 ---
 
@@ -601,7 +601,7 @@ A comparison of our patterns against upstream macOS Ghostty. These are not bugs 
 
 **Upstream:** macOS Ghostty keeps `SurfaceView` in a single file (`Ghostty.SurfaceView_AppKit.swift`), with separate files for `+Input`, `+Gestures`, etc.
 
-**Us:** `Ghostty.swift` is ~2396 lines with SurfaceView as the primary content. We extracted `App`, `Config`, `SearchState`, and `SurfaceConfiguration` into separate files (E1-E4), following upstream naming. We decided NOT to further split SurfaceView because upstream keeps theirs in a single file too.
+**Us:** `Ghostty.swift` is ~2404 lines with SurfaceView as the primary content. We extracted `App`, `Config`, `SearchState`, and `SurfaceConfiguration` into separate files (E1-E4), following upstream naming. We decided NOT to further split SurfaceView because upstream keeps theirs in a single file too.
 
 **Impact:** Low. Matches upstream pattern. The VC side was decomposed into 6 extension files for the same purpose.
 
@@ -635,13 +635,15 @@ A comparison of our patterns against upstream macOS Ghostty. These are not bugs 
 
 ### Minor Gaps
 
-#### 7. Logger Level Misuse
+#### 7. Logger Level Misuse — Partially Addressed
 
 **Upstream:** Uses `logger.warning` for unexpected-but-recoverable situations, `logger.critical` for fatal issues, `logger.debug` for diagnostic output.
 
-**Us:** Some SSH key parsing functions use `logger.error()` for what is actually debug-level diagnostic logging. `SSHSession.handleReceivedData()` hex-dumps every packet at `.info` level.
+**Us:** Some SSH key parsing functions used `logger.error()` for what was actually debug-level diagnostic logging. `SSHSession.handleReceivedData()` hex-dumps every packet at `.info` level.
 
-**Fix:** Audit all log calls. Demote diagnostics to `.debug`. Gate verbose hex logging behind a compile flag or `.debug` level.
+**Status:** The Session 57 code review (Phases B-D) fixed many Swift-side logger level misuses — key parsing diagnostics were demoted to `.debug`, and several error-level logs were reclassified. The hex-dump in `handleReceivedData()` remains at `.info` level (see Known Issue #3).
+
+**Remaining fix:** Gate verbose hex logging behind `.debug` level or a compile flag.
 
 #### 8. Custom Logger Struct
 
@@ -649,13 +651,13 @@ A comparison of our patterns against upstream macOS Ghostty. These are not bugs 
 
 **Fix:** Use `os.Logger` directly, consistent with the rest of the codebase.
 
-#### 9. Dead Code
+#### 9. Dead Code — Partially Addressed
 
-- `captureTmuxPane()` is a stub that always returns failure (from old architecture)
-- SFTP directory has 5 dormant files (File Provider was shelved to `archive/file-provider-jan-2026`)
+- `captureTmuxPane()` is a stub that always returns failure (documented in TODO.md Known Issue #5)
+- SFTP directory was removed (Phase D, Session 62); File Provider archived to `archive/file-provider-jan-2026`
 - `backgroundColor` in `Config` has a TODO and returns a hardcoded color
 
-**Fix:** Remove dead stubs. SFTP files could stay if we plan to revisit, but should be clearly marked.
+**Status:** SFTP dead code was cleaned up in Phase D. `captureTmuxPane()` remains as a documented stub — it would need a new command/response mechanism to implement properly.
 
 ### What We Got Right
 
@@ -675,19 +677,19 @@ Not everything is a gap. We follow several of Mitchell's patterns correctly:
 
 Ordered by severity:
 
-### 1. UTF-8 / Escape Sequence Splitting Across `%output`
+### 1. ~~UTF-8 / Escape Sequence Splitting Across `%output`~~ — RESOLVED
 
-tmux control mode splits output at arbitrary byte boundaries (confirmed from tmux source `control.c`). This can split multi-byte UTF-8 characters and escape sequences across separate `%output` messages. Currently, each `receivedOutput()` creates a fresh VT parser, so split sequences show as `?` or literal text.
+tmux control mode splits output at arbitrary byte boundaries (confirmed from tmux source `control.c`). This could split multi-byte UTF-8 characters and escape sequences across separate `%output` messages.
 
-We attempted a persistent VT stream fix (`fe750a2`) but it caused a freeze regression and was reverted. **Not confirmed as user-visible in normal usage** -- tmux's output buffering usually keeps sequences intact.
+**Fix (Sessions 54-57):** The VT parser in `viewer.zig` is now **persistent** across `%output` messages, so split escape sequences are reassembled correctly. DCS/OSC/APC absorbing states are reset at `%output` message boundaries to prevent the parser from getting permanently trapped in passthrough state (which caused a display freeze regression). The initial persistent parser attempt (`fe750a2`) caused the freeze; the final fix adds absorbing state reset + `vtStream()` swap and is committed and working.
 
 ### 2. SurfaceView in Single File
 
-`Ghostty.swift` is ~2396 lines — SurfaceView is the remaining large component after E1-E4 decomposition extracted App, Config, SearchState, and SurfaceConfiguration. This matches upstream Ghostty's pattern of keeping SurfaceView in a single file. The VC side was decomposed into 6 extension files.
+`Ghostty.swift` is ~2404 lines — SurfaceView is the remaining large component after E1-E4 decomposition extracted App, Config, SearchState, and SurfaceConfiguration. This matches upstream Ghostty's pattern of keeping SurfaceView in a single file. The VC side was decomposed into 6 extension files.
 
-### 3. Verbose Hex Logging in Production
+### 3. Verbose Hex Logging in Production — Partially Addressed
 
-`SSHSession.handleReceivedData()` hex-dumps every SSH packet at `.info` level. This hits disk on every byte received. Should be `.debug` or gated.
+`SSHSession.handleReceivedData()` hex-dumps every SSH packet at `.info` level. This hits disk on every byte received. The Session 57 code review fixed many other logger level misuses across the codebase, but this specific hex dump remains. Should be `.debug` or gated behind a compile flag.
 
 ### 4. `TMUX_STATE_CHANGED` Data
 
@@ -699,4 +701,4 @@ Two config sources. Boundary is undocumented.
 
 ### 6. `captureTmuxPane()` Stub
 
-Dead code that always returns failure. Leftover from the old gateway architecture.
+Dead code that always returns failure. Leftover from the old gateway architecture. See also TODO.md Known Issue #5.

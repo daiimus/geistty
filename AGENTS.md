@@ -64,9 +64,9 @@ Geistty/
 ├── Sources/
 │   ├── App/              # App entry point, main views (2 files)
 │   ├── Auth/             # SSH authentication, credentials, keychain (5 files)
-│   ├── Ghostty/          # Ghostty integration, terminal surface (9 files)
-│   ├── SSH/              # SSH connection management, tmux control mode (7 files)
-│   ├── Terminal/         # Terminal session, view models, tmux pane UI (12 files)
+│   ├── Ghostty/          # Ghostty integration, terminal surface (10 files)
+│   ├── SSH/              # SSH connection management, tmux control mode (8 files)
+│   ├── Terminal/         # Terminal session, view models, tmux pane UI (13 files)
 │   └── UI/               # Connection list/editor, settings (4 files)
 ├── Frameworks/
 │   └── GhosttyKit.xcframework/  # Ghostty static library
@@ -75,11 +75,11 @@ Geistty/
 └── Assets.xcassets/      # App icons, colors
 ```
 
-40 Swift source files across 6 directories.
+43 Swift source files across 6 directories.
 
 ## Key Files
 
-- `Sources/Ghostty/Ghostty.swift` - SurfaceView (~2396 lines): Metal rendering, keyboard input, gestures, write callback, tmux action notifications
+- `Sources/Ghostty/Ghostty.swift` - SurfaceView (~2404 lines): Metal rendering, keyboard input, gestures, write callback, tmux action notifications
 - `Sources/Ghostty/Ghostty.App.swift` - App lifecycle, runtime init, action callback dispatch
 - `Sources/Ghostty/Ghostty.Config.swift` - Config wrapper (create, load, finalize)
 - `Sources/Ghostty/Ghostty.SearchState.swift` - Search overlay state model
@@ -93,12 +93,14 @@ Geistty/
 - `Sources/Terminal/TmuxMultiPaneView.swift` - Multi-pane split rendering with divider dragging
 - `Sources/Terminal/TmuxSplitView.swift` - Recursive split tree rendering
 - `Sources/Terminal/TmuxWindowPickerView.swift` - tmux window tab bar
+- `Sources/Terminal/CommandPaletteView.swift` - Command palette (Cmd+Shift+P) with fuzzy search
 - `Sources/Terminal/KeyTableIndicatorView.swift` - Vim-style key table indicator
 - `Sources/SSH/NIOSSHConnection.swift` - SwiftNIO-SSH connection with Network.framework
 - `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux notification observer, data flow
 - `Sources/SSH/TmuxSessionManager.swift` - Multi-pane state management, surface ownership, layout reconciliation
 - `Sources/SSH/TmuxLayout.swift` - tmux layout string parser for split pane geometry
 - `Sources/SSH/TmuxSplitTree.swift` - Split tree data structure (zoom, equalize, queries)
+- `Sources/SSH/TmuxWireDiagnostics.swift` - Shadow parser for tmux wire protocol diagnostics
 - `Sources/Auth/ConnectionProfile.swift` - Saved connection profiles
 - `Sources/Auth/SSHKeyParser.swift` - SSH key format parsing (Ed25519, RSA, ECDSA)
 - `Sources/Auth/SSHKeyManager.swift` - Key generation, import, Keychain storage

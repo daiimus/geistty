@@ -87,7 +87,7 @@ Manual test matrix for device testing. Run through before each release.
 - [ ] Type query — highlights matches, shows count
 - [ ] Next/Previous — navigates between matches
 - [ ] Dismiss search bar — search clears
-- [ ] Search in tmux mode — uses capture-pane, shows "tmux" badge
+- [ ] Search in tmux mode — uses Ghostty's built-in search (note: `captureTmuxPane()` for tmux-specific search is stubbed/non-functional)
 - [ ] Alternate screen indicator — shows when in vim/tmux
 
 ---

@@ -98,7 +98,7 @@ SOFTWARE.
 
 ## Fonts
 
-All fonts included in Geistty are licensed under the **SIL Open Font License, Version 1.1**.
+All fonts included in Geistty are licensed under the **SIL Open Font License, Version 1.1**, except Hack which uses the **MIT License**.
 
 ### Departure Mono
 - **Copyright**: © 2022–2024 Helena Zhang
@@ -113,8 +113,10 @@ All fonts included in Geistty are licensed under the **SIL Open Font License, Ve
 - **Source**: https://github.com/tonsky/FiraCode
 
 ### Hack
+- **License**: MIT
 - **Copyright**: © 2018 Source Foundry Authors
 - **Source**: https://sourcefoundry.org/hack/
+- **License details**: https://github.com/source-foundry/Hack/blob/master/LICENSE.md
 
 ### Source Code Pro
 - **Copyright**: © 2010-2019 Adobe
@@ -229,7 +231,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 | Departure Mono | SIL OFL 1.1 |
 | JetBrains Mono | SIL OFL 1.1 |
 | Fira Code | SIL OFL 1.1 |
-| Hack | SIL OFL 1.1 |
+| Hack | MIT |
 | Source Code Pro | SIL OFL 1.1 |
 | IBM Plex Mono | SIL OFL 1.1 |
 | Inconsolata | SIL OFL 1.1 |

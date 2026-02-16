@@ -50,7 +50,7 @@ xcodebuild build \
 - Tests core logic without UI or network dependencies
 - Files in `GeisttyTests/`
 - Run with: `./ci.sh test`
-- **470 tests** across 18 test files, all passing
+- **550 tests** across 20 test files (22 including mocks), all passing
 - Mock-based tests for tmux lifecycle (`MockTmuxSurface`, `MockSSHSessionDelegate`)
 - Auth module tests use real Keychain on simulator (cleaned up in tearDown)
 
@@ -61,28 +61,30 @@ xcodebuild build \
 
 ## Test Files
 
-### Unit Tests (18 files, 470 tests)
+### Unit Tests (20 files + 2 mocks, 550 tests across 25 suites)
 
 | File | Tests | Purpose |
 |------|-------|---------|
-| `TmuxSplitTreeTests.swift` | 50 | Split tree structure: factory from layout, queries, zoom, equalize, ratio updates, Codable round-trip |
-| `TmuxSessionManagerTests.swift` | 42 | Command formatting, state transitions, handleTmuxStateChanged with mock surface, cleanup, zoom/equalize/resize, removeSurface |
+| `TmuxSplitTreeTests.swift` | 63 | Split tree structure: factory from layout, queries, zoom, equalize, ratio updates, Codable round-trip |
+| `TmuxWireDiagnosticsTests.swift` | 48 | Shadow parser for tmux control mode wire data, octal escaping, message parsing |
+| `TmuxSessionManagerTests.swift` | 45 | Command formatting, state transitions, handleTmuxStateChanged with mock surface, cleanup, zoom/equalize/resize, removeSurface |
 | `GhosttyInputTests.swift` | 44 | Hardware keyboard input handling, Ctrl+key combos, modifier processing |
+| `TmuxSessionNameResolverTests.swift` | 35 | Session discovery, name resolution |
+| `TmuxLayoutTests.swift` | 32 | tmux layout string parsing, checksum calculation, error cases, convenience properties |
 | `FontMappingTests.swift` | 31 | Font name mapping between GUI display names and Ghostty/CoreText names |
-| `TmuxLayoutTests.swift` | 28 | tmux layout string parsing, checksum calculation, error cases, convenience properties |
-| `TmuxSessionNameResolverTests.swift` | 24 | Session discovery, name resolution |
-| `TmuxViewerReadyTests.swift` | 22 | Viewer ready gating, write routing |
+| `CommandPaletteTests.swift` | 30 | Command palette search, filtering, action execution |
+| `TmuxViewerReadyTests.swift` | 29 | Viewer ready gating, write routing |
+| `TmuxStateReconciliationTests.swift` | 22 | reconcileTmuxState() pure logic, focused-pane-from-tmux vs fallback-to-first |
+| `SSHKeyParserTests.swift` | 20 | SSH key format parsing (Ed25519, RSA, ECDSA), PEM/OpenSSH formats, PKCS#8 |
 | `ConnectionProfileTests.swift` | 19 | SSH connection profile serialization, auth methods, display strings |
-| `TmuxStateReconciliationTests.swift` | 18 | reconcileTmuxState() pure logic, focused-pane-from-tmux vs fallback-to-first |
-| `TmuxModelsTests.swift` | 15 | tmux session/window/pane parsing, ID validation, numeric extraction, Equatable |
+| `ConfigSyncThemeTests.swift` | 19 | Config sync theme resolution and persistence |
+| `ConfigIntrospectionTests.swift` | 18 | ghostty_config_get() introspection for supported types |
+| `TmuxModelsTests.swift` | 14 | tmux session/window/pane parsing, ID validation, numeric extraction, Equatable |
 | `TmuxConnectionLifecycleTests.swift` | 14 | tmux notification-driven lifecycle: state changes, pane activation, flush, exit/reactivate (uses MockTmuxSurface + MockSSHSessionDelegate) |
-| `ConfigSyncThemeTests.swift` | varies | Config sync theme resolution and persistence |
-| `ConfigIntrospectionTests.swift` | varies | ghostty_config_get() introspection for supported types |
-| `ResizeTimingTests.swift` | varies | Terminal resize debouncing and timing |
-| `SSHKeyParserTests.swift` | varies | SSH key format parsing (Ed25519, RSA, ECDSA), PEM/OpenSSH formats, PKCS#8 |
-| `SSHKeyManagerTests.swift` | varies | Key generation, import, round-trip validation via real CryptoKit |
-| `KeychainManagerTests.swift` | varies | Keychain CRUD operations (real Keychain on simulator, cleaned up in tearDown) |
-| `TmuxDataFlowTests.swift` | 6 | SSH data ingress: delegate forwarding, early buffering, delegate flush, discovery interception |
+| `ResizeTimingTests.swift` | 14 | Terminal resize debouncing and timing |
+| `SSHKeyManagerTests.swift` | 11 | Key generation, import, round-trip validation via real CryptoKit |
+| `TmuxDataFlowTests.swift` | 10 | SSH data ingress: delegate forwarding, early buffering, delegate flush, discovery interception, DCS chunk boundary |
+| `KeychainManagerTests.swift` | 12 | Keychain CRUD operations (real Keychain on simulator, cleaned up in tearDown) — split across KeychainManagerPasswordTests (8), KeychainManagerSSHKeyTests (9), KeychainErrorTests (3), SSHKeyPairTests (4), SSHKeyErrorTests (2), SSHKeyTypeTests (6) |
 
 ### Mock Helpers (2 files)
 
@@ -104,16 +106,17 @@ xcodebuild build \
 
 | Test File | Tests | What It Covers |
 |-----------|-------|---------------|
-| TmuxLayoutTests | 28 | Layout parsing, checksum, errors |
-| TmuxModelsTests | 15 | TmuxId validation, model equality |
-| TmuxSessionNameResolverTests | 24 | Session discovery, name resolution |
-| TmuxSplitTreeTests | 50 | Tree ops, zoom, codable, queries |
-| TmuxStateReconciliationTests | 18 | reconcileTmuxState() pure logic (including 4 focused-pane tests) |
+| TmuxLayoutTests | 32 | Layout parsing, checksum, errors |
+| TmuxModelsTests | 14 | TmuxId validation, model equality |
+| TmuxSessionNameResolverTests | 35 | Session discovery, name resolution |
+| TmuxSplitTreeTests | 63 | Tree ops, zoom, codable, queries |
+| TmuxStateReconciliationTests | 22 | reconcileTmuxState() pure logic (including 4 focused-pane tests) |
 | TmuxConnectionLifecycleTests | 14 | Notification state machine |
-| TmuxDataFlowTests | 6 | SSH data ingress, buffering |
-| TmuxViewerReadyTests | 22 | Viewer ready gating, write routing |
-| TmuxSessionManagerTests | 42 | Command formatting, state transitions, handleTmuxStateChanged w/ mock, cleanup, zoom/equalize/resize, removeSurface |
-| **TOTAL tmux** | **219** | |
+| TmuxDataFlowTests | 10 | SSH data ingress, buffering, DCS chunk boundary |
+| TmuxViewerReadyTests | 29 | Viewer ready gating, write routing |
+| TmuxSessionManagerTests | 45 | Command formatting, state transitions, handleTmuxStateChanged w/ mock, cleanup, zoom/equalize/resize, removeSurface |
+| TmuxWireDiagnosticsTests | 48 | Shadow parser for tmux wire data |
+| **TOTAL tmux** | **312** | |
 
 ## Test Patterns
 
@@ -228,7 +231,7 @@ New test files must be added to `project.pbxproj`:
 - GeisttyTests group children entry
 - Test target Sources build phase entry
 
-Next available test IDs: `D2000035` / `D1000035`
+Next available test IDs: `D2000037` / `D1000037`
 
 ## Agent Development Notes
 
