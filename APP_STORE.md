@@ -43,7 +43,7 @@ PROFESSIONAL SSH CLIENT
 
 CUSTOMIZABLE EXPERIENCE
 • Multiple color themes (Dracula, Solarized, Nord, Tokyo Night, and more)
-• Choice of monospace fonts (Departure Mono, Menlo, Courier New)
+• 9 monospace fonts (Departure Mono, JetBrains Mono, Fira Code, Hack, Source Code Pro, IBM Plex Mono, Inconsolata, Menlo, Courier New)
 • Adjustable font sizes
 • Edit configuration directly in-app
 
@@ -185,7 +185,7 @@ Available in all territories (or select specific ones)
 - [ ] Privacy policy hosted and accessible
 - [ ] Support URL active
 - [ ] App tested on physical devices
-- [ ] Test on various iOS versions (iOS 15+)
+- [ ] Test on various iOS versions (iOS 17+)
 - [ ] Test on iPhone and iPad
 - [ ] Archive uploaded to App Store Connect
 - [ ] Metadata filled in App Store Connect

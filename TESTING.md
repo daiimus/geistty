@@ -50,8 +50,8 @@ xcodebuild build \
 - Tests core logic without UI or network dependencies
 - Files in `GeisttyTests/`
 - Run with: `./ci.sh test`
-- **421 tests** across 22 test suites in 17 test files, all passing
-- Mock-based tests for tmux lifecycle (MockTmuxSurface, MockSSHSessionDelegate)
+- **470 tests** across 18 test files, all passing
+- Mock-based tests for tmux lifecycle (`MockTmuxSurface`, `MockSSHSessionDelegate`)
 - Auth module tests use real Keychain on simulator (cleaned up in tearDown)
 
 ### GeisttyUITests (UI Tests)
@@ -61,22 +61,63 @@ xcodebuild build \
 
 ## Test Files
 
+### Unit Tests (18 files, 470 tests)
+
 | File | Tests | Purpose |
 |------|-------|---------|
-| `TmuxProtocolParserTests.swift` | 80 | tmux control mode protocol parsing: %output, %begin/%end, blocks, octal escapes, fragmented data |
-| `KittyKeyboardTranslatorTests.swift` | 64 | Kitty keyboard protocol → legacy terminal escape sequence translation |
-| `TmuxSplitTreeTests.swift` | 63 | Split tree structure: factory from layout, queries, zoom, equalize, ratio updates, Codable round-trip |
+| `TmuxSplitTreeTests.swift` | 50 | Split tree structure: factory from layout, queries, zoom, equalize, ratio updates, Codable round-trip |
+| `TmuxSessionManagerTests.swift` | 42 | Command formatting, state transitions, handleTmuxStateChanged with mock surface, cleanup, zoom/equalize/resize, removeSurface |
 | `GhosttyInputTests.swift` | 44 | Hardware keyboard input handling, Ctrl+key combos, modifier processing |
-| `TmuxModelsTests.swift` | 36 | tmux session/window/pane parsing, ID validation, numeric extraction, Equatable |
-| `TmuxLayoutTests.swift` | 32 | tmux layout string parsing, checksum calculation, error cases, convenience properties |
 | `FontMappingTests.swift` | 31 | Font name mapping between GUI display names and Ghostty/CoreText names |
+| `TmuxLayoutTests.swift` | 28 | tmux layout string parsing, checksum calculation, error cases, convenience properties |
+| `TmuxSessionNameResolverTests.swift` | 24 | Session discovery, name resolution |
+| `TmuxViewerReadyTests.swift` | 22 | Viewer ready gating, write routing |
 | `ConnectionProfileTests.swift` | 19 | SSH connection profile serialization, auth methods, display strings |
-| `TmuxConnectionLifecycleTests.swift` | 14 | tmux notification-driven lifecycle: state changes, pane activation, flush, exit/reactivate (uses MockTmuxSurface) |
+| `TmuxStateReconciliationTests.swift` | 18 | reconcileTmuxState() pure logic, focused-pane-from-tmux vs fallback-to-first |
+| `TmuxModelsTests.swift` | 15 | tmux session/window/pane parsing, ID validation, numeric extraction, Equatable |
+| `TmuxConnectionLifecycleTests.swift` | 14 | tmux notification-driven lifecycle: state changes, pane activation, flush, exit/reactivate (uses MockTmuxSurface + MockSSHSessionDelegate) |
+| `ConfigSyncThemeTests.swift` | varies | Config sync theme resolution and persistence |
+| `ConfigIntrospectionTests.swift` | varies | ghostty_config_get() introspection for supported types |
+| `ResizeTimingTests.swift` | varies | Terminal resize debouncing and timing |
+| `SSHKeyParserTests.swift` | varies | SSH key format parsing (Ed25519, RSA, ECDSA), PEM/OpenSSH formats, PKCS#8 |
+| `SSHKeyManagerTests.swift` | varies | Key generation, import, round-trip validation via real CryptoKit |
+| `KeychainManagerTests.swift` | varies | Keychain CRUD operations (real Keychain on simulator, cleaned up in tearDown) |
 | `TmuxDataFlowTests.swift` | 6 | SSH data ingress: delegate forwarding, early buffering, delegate flush, discovery interception |
 
-## Test Pattern
+### Mock Helpers (2 files)
 
-All tests follow the same pattern:
+| File | Purpose |
+|------|---------|
+| `MockTmuxSurface.swift` | Implements `TmuxSurfaceProtocol` with stubbed C API returns and call tracking |
+| `MockSSHSessionDelegate.swift` | Implements `SSHSessionDelegate` for lifecycle testing without real SSH |
+
+### UI Tests (4 files)
+
+| File | Purpose |
+|------|---------|
+| `GeisttyUITests.swift` | Basic app launch and navigation |
+| `ConnectedTests.swift` | Connected terminal state |
+| `TmuxPaneUITests.swift` | tmux pane interactions |
+| `TmuxSizingDebugTests.swift` | tmux pane sizing diagnostics |
+
+### tmux Test Coverage Summary
+
+| Test File | Tests | What It Covers |
+|-----------|-------|---------------|
+| TmuxLayoutTests | 28 | Layout parsing, checksum, errors |
+| TmuxModelsTests | 15 | TmuxId validation, model equality |
+| TmuxSessionNameResolverTests | 24 | Session discovery, name resolution |
+| TmuxSplitTreeTests | 50 | Tree ops, zoom, codable, queries |
+| TmuxStateReconciliationTests | 18 | reconcileTmuxState() pure logic (including 4 focused-pane tests) |
+| TmuxConnectionLifecycleTests | 14 | Notification state machine |
+| TmuxDataFlowTests | 6 | SSH data ingress, buffering |
+| TmuxViewerReadyTests | 22 | Viewer ready gating, write routing |
+| TmuxSessionManagerTests | 42 | Command formatting, state transitions, handleTmuxStateChanged w/ mock, cleanup, zoom/equalize/resize, removeSurface |
+| **TOTAL tmux** | **219** | |
+
+## Test Patterns
+
+### Standard Unit Test
 
 ```swift
 import XCTest
@@ -86,9 +127,34 @@ final class SomethingTests: XCTestCase {
     // Optional setUp with implicitly unwrapped optionals
     // // MARK: - sections to organize
     // Private helper methods in // MARK: - Helpers
-    // No mocks — direct unit tests of real implementations
 }
 ```
+
+### Mock-Based Test (tmux lifecycle)
+
+```swift
+import XCTest
+@testable import Geistty
+
+final class TmuxLifecycleTests: XCTestCase {
+    var mockSurface: MockTmuxSurface!
+    var mockDelegate: MockSSHSessionDelegate!
+
+    override func setUp() {
+        super.setUp()
+        mockSurface = MockTmuxSurface()
+        mockDelegate = MockSSHSessionDelegate()
+    }
+}
+```
+
+### Auth Module Tests (real Keychain)
+
+Auth tests (`KeychainManagerTests`, `SSHKeyManagerTests`) use the real iOS Keychain on the simulator. Each test cleans up its artifacts in `tearDown` to avoid polluting the Keychain.
+
+### Command Capture Pattern (TmuxSessionManagerTests)
+
+Uses a `CommandLog` reference type + `setupWithDirectWrite` closure to capture all commands sent without needing a real SSH connection. Tests verify exact command strings including `\n` termination.
 
 ## Running Tests
 
@@ -103,6 +169,9 @@ xcodebuild test -project Geistty.xcodeproj -scheme Geistty \
 
 # Full log available at
 cat /tmp/geistty_tests.log
+
+# Count passing tests from full log
+grep -c "passed on" /tmp/geistty_tests.log
 ```
 
 ## Device Testing
@@ -140,7 +209,7 @@ xcrun devicectl device process launch --device DEVICE_ID --console com.geistty.a
 
 | Device | UDID | CoreDevice UUID |
 |--------|------|-----------------|
-| ICarus (iPad Pro) | `00008103-001425D11153001E` | `4E8A6D04-FCF9-5BB5-BF57-22080EC6A31A` |
+| Icarus (iPad Pro) | `00008103-001425D11153001E` | `4E8A6D04-FCF9-5BB5-BF57-22080EC6A31A` |
 | Athena (iPhone) | `00008130-001049E23ED0001C` | `55CF3503-DC69-50E1-BC33-17A7DB9ECE9C` |
 
 ## Build Artifacts
@@ -151,6 +220,16 @@ xcrun devicectl device process launch --device DEVICE_ID --console com.geistty.a
 | `/tmp/geistty_build.log` | Full build log |
 | `/tmp/geistty_tests.log` | Full test log |
 
+## Adding New Test Files
+
+New test files must be added to `project.pbxproj`:
+- PBXBuildFile entry (build ID pattern: `D100003N`)
+- PBXFileReference entry (ref ID pattern: `D200003N`)
+- GeisttyTests group children entry
+- Test target Sources build phase entry
+
+Next available test IDs: `D2000035` / `D1000035`
+
 ## Agent Development Notes
 
 When working as a coding agent:
@@ -159,5 +238,5 @@ When working as a coding agent:
 2. **Run `./ci.sh test` after adding/modifying tests** to verify they pass
 3. **Check `/tmp/geistty_build.log` for full error details** if build fails
 4. **Use simulator builds** for quick iteration (no signing delays)
-5. **Device testing** requires user to verify behavior on ICarus/Athena
-6. **New test files** must be added to `project.pbxproj` (PBXBuildFile, PBXFileReference, GeisttyTests group, test target Sources build phase)
+5. **Device testing** requires user to verify behavior on Icarus/Athena
+6. **New test files** must be added to `project.pbxproj` (see Adding New Test Files above)

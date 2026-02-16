@@ -122,10 +122,15 @@ This document tracks the implementation status of Ghostty C APIs in Geistty.
 ### Surface APIs - tmux (iOS fork)
 | C API | Status | Swift Wrapper |
 |-------|--------|---------------|
-| `ghostty_surface_tmux_pane_count` | ✅ | `Surface.tmuxPaneCount()` |
-| `ghostty_surface_tmux_pane_ids` | ✅ | `Surface.tmuxPaneIds()` |
-| `ghostty_surface_tmux_set_active_pane` | ✅ | `Surface.tmuxSetActivePane(_:)` |
-| `ghostty_surface_tmux_reset_active_pane` | ✅ | `Surface.tmuxResetActivePane()` |
+| `ghostty_surface_tmux_pane_count` | ✅ | `SurfaceView.tmuxPaneCount()` |
+| `ghostty_surface_tmux_pane_ids` | ✅ | `SurfaceView.tmuxPaneIds()` |
+| `ghostty_surface_tmux_set_active_pane` | ✅ | `SurfaceView.tmuxSetActivePane(_:)` |
+| `ghostty_surface_tmux_reset_active_pane` | ✅ | `SurfaceView.tmuxResetActivePane()` |
+| `ghostty_surface_tmux_window_count` | ✅ | `SurfaceView.tmuxWindowCount()` |
+| `ghostty_surface_tmux_window_info` | ✅ | `SurfaceView.tmuxWindowInfo(at:)` |
+| `ghostty_surface_tmux_window_layout` | ✅ | `SurfaceView.tmuxWindowLayout(at:)` |
+| `ghostty_surface_tmux_active_window_id` | ✅ | `SurfaceView.tmuxActiveWindowId()` |
+| `ghostty_surface_tmux_window_focused_pane_id` | ✅ | `SurfaceView.tmuxWindowFocusedPaneId(at:)` |
 
 ### Surface APIs - Search
 | C API | Status | Swift Wrapper |
@@ -190,6 +195,8 @@ All action callbacks are handled in `App.action(_:target:action:)`:
 | `GHOSTTY_ACTION_SEARCH_SELECTED` | ✅ | Selected result index |
 | `GHOSTTY_ACTION_TMUX_STATE_CHANGED` | ✅ | tmux window/pane count changed |
 | `GHOSTTY_ACTION_TMUX_EXIT` | ✅ | tmux control mode exited |
+| `GHOSTTY_ACTION_TMUX_READY` | ✅ | tmux viewer ready (capture-pane complete) |
+| `GHOSTTY_ACTION_TOGGLE_BACKGROUND_OPACITY` | ✅ | Toggle background opacity |
 
 ## Helper Types
 
@@ -208,14 +215,16 @@ All Ghostty types have Swift equivalents:
 
 ## Files
 
-- `Ghostty.swift` - Core integration: SurfaceView, action callback dispatch
-- `Ghostty.App.swift` - App lifecycle, runtime init, config management
+- `Ghostty.swift` - SurfaceView: Metal rendering, keyboard input, gestures, write callback, tmux C API wrappers
+- `Ghostty.App.swift` - App lifecycle, runtime init, action callback dispatch (handles all actions above)
 - `Ghostty.Config.swift` - Config wrapper (create, load, finalize)
 - `Ghostty.SearchState.swift` - Search overlay state model
 - `Ghostty.SurfaceConfiguration.swift` - Surface init configuration
-- `GhosttyInput.swift` - UIKit key event translation → Ghostty input
-- `FontMapping.swift` - Font name translation (GUI names ↔ CoreText names)
-- `ConfigSyncManager.swift` - ghostty.conf ↔ Ghostty Config synchronization
+- `GhosttyInput.swift` - UIKit key event translation to Ghostty input
+- `FontMapping.swift` - Font name translation (GUI names <> CoreText names, 9 fonts)
+- `ConfigSyncManager.swift` - ghostty.conf <> Ghostty Config synchronization
+- `SurfaceSearchOverlay.swift` - Search bar UI overlay
+- `TmuxSurfaceProtocol.swift` - Protocol abstraction for tmux C API queries (enables mock testing)
 
 ## Usage Examples
 

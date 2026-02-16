@@ -51,7 +51,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 | Task | Effort | Notes |
 |------|--------|-------|
-| Split `TerminalContainerView.swift` (~2330 lines) | High | Extract toolbar (541-697), ViewModel (89-538), search overlay, tmux transitions, shortcuts into separate files |
+| ~~Split `TerminalContainerView.swift`~~ | **DONE** | Decomposed from ~2330 → ~912 lines via VC extensions (Keyboard, MenuBar, Search, Shortcuts, Tmux, WindowPicker). Completed Feb 2026. |
 | Split `TmuxSessionManager.swift` (~1550 lines) | High | Extract user actions/commands, surface management, split resize helpers. Deferred from Dec 2025 |
 | Migrate callback bridges to async/await in TmuxSessionManager | Medium | 6 closure-based callbacks from pre-Ghostty architecture. Working but tech debt |
 
@@ -201,16 +201,10 @@ Remaining:
 
 ### SFTP / Remote Files
 
-**Status:** Protocol layer implemented, File Provider archived (branch `archive/file-provider-jan-2026`).
+**Status:** Protocol layer archived (branch `archive/file-provider-jan-2026`). `Sources/SFTP/` directory removed Feb 2026; code archived in `docs/archive/DEAD_CODE_FEB_2026.swift`.
 See `FILE_PROVIDER_LEARNINGS.md` for post-mortem.
 
-SFTP code (`Sources/SFTP/`) is dormant but retained for future File Provider work:
-- `SFTPChannel.swift` — low-level SFTP protocol
-- `SFTPClient.swift` — high-level async API
-- `SFTPClientProtocol.swift` — protocol abstraction
-- `MockSFTPClient.swift` — mock for testing
-
-Future File Provider work:
+Future File Provider work (would require reimplementation):
 - [ ] Metadata cache (SQLite, like Blink Shell's WorkingSetDatabase)
 - [ ] Fast enumeration (return cached immediately, refresh async)
 - [ ] Background polling + `signalEnumerator()` for changes
