@@ -1483,6 +1483,12 @@ extension Ghostty {
                         // Cmd+- - Decrease Font Size
                         decreaseFontSize()
                         return
+                    case "p":
+                        // Cmd+Shift+P - Toggle Command Palette
+                        if hasShift {
+                            NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
+                            return
+                        }
                     case "c", "v", "a", "f", "g", "w", "n", ",":
                         // These are handled by SwiftUI menu system - let them pass through
                         // Copy, Paste, Select All, Find, Find Next, Disconnect, New Connection, Preferences

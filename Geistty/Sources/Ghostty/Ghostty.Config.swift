@@ -88,6 +88,17 @@ extension Ghostty {
             return v
         }
         
+        /// Command palette entries from Ghostty config.
+        /// Returns ~70+ default commands; callers should filter with `.isSupported`.
+        var commandPaletteEntries: [Ghostty.Command] {
+            var v: ghostty_config_command_list_s = .init()
+            let key = "command-palette-entry"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return [] }
+            guard v.len > 0 else { return [] }
+            let buffer = UnsafeBufferPointer(start: v.commands, count: v.len)
+            return buffer.map { Ghostty.Command(cValue: $0) }
+        }
+        
         // NOTE: theme is a ?Theme struct (light/dark pair) in Ghostty's Zig config.
         // ghostty_config_get() has no handler for Theme (no cval(), not packed).
         // Theme name must be read from the config file directly.

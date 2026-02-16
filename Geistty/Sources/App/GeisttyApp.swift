@@ -131,6 +131,13 @@ struct GeisttyApp: App {
                 
                 Divider()
                 
+                Button("Command Palette") {
+                    NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                
+                Divider()
+                
                 Button("Toggle Background Transparency") {
                     NotificationCenter.default.post(name: .toggleBackgroundOpacity, object: nil)
                 }
@@ -247,6 +254,7 @@ extension Notification.Name {
     
     // Appearance
     static let toggleBackgroundOpacity = Notification.Name("toggleBackgroundOpacity")
+    static let toggleCommandPalette = Notification.Name("toggleCommandPalette")
     
     // tmux control mode (from Ghostty)
     static let tmuxStateChanged = Notification.Name("tmuxStateChanged")

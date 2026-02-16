@@ -81,6 +81,11 @@ extension RawTerminalUIViewController {
             self?.toggleBackgroundOpacity()
         })
         
+        // Command palette
+        menuBarObservers.append(nc.addObserver(forName: .toggleCommandPalette, object: nil, queue: .main) { [weak self] _ in
+            self?.toggleCommandPalette()
+        })
+        
         // Connection management
         menuBarObservers.append(nc.addObserver(forName: .terminalDisconnect, object: nil, queue: .main) { [weak self] _ in
             self?.handleBackButton()
@@ -156,6 +161,7 @@ extension RawTerminalUIViewController {
         Cmd+-        Decrease Font Size
         Cmd+Up       Jump to Previous Prompt
         Cmd+Down     Jump to Next Prompt
+        Cmd+Shift+P  Command Palette
         Cmd+W        Disconnect
         
         Ctrl+C       Interrupt (SIGINT)
@@ -182,5 +188,81 @@ extension RawTerminalUIViewController {
         // Do NOT post .terminalDisconnect here — this method IS the handler for that
         // notification (line 79), so re-posting would cause an infinite loop.
         viewModel?.disconnect()
+    }
+    
+    // MARK: - Command Palette
+    
+    func toggleCommandPalette() {
+        // If already showing, dismiss it
+        if commandPaletteHostingController != nil {
+            removeCommandPalette()
+            return
+        }
+        
+        // Get command entries from Ghostty config
+        guard let config = ghosttyApp?.config else {
+            logger.warning("Command palette: no config available")
+            return
+        }
+        let commands = config.commandPaletteEntries
+        guard !commands.isEmpty else {
+            logger.warning("Command palette: no command entries available")
+            return
+        }
+        
+        // Create the command palette view with a binding
+        // We use a class wrapper to give SwiftUI a mutable binding
+        let state = CommandPaletteState()
+        state.isPresented = true
+        
+        let paletteView = CommandPaletteWrapper(
+            state: state,
+            commands: commands,
+            onAction: { [weak self] actionStr in
+                self?.executeCommandPaletteAction(actionStr)
+            },
+            onDismiss: { [weak self] in
+                self?.removeCommandPalette()
+                // Return focus to terminal
+                self?.surfaceView?.becomeFirstResponder()
+            }
+        )
+        
+        let hostingController = UIHostingController(rootView: AnyView(paletteView))
+        hostingController.view.backgroundColor = .clear
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        
+        addChild(hostingController)
+        view.addSubview(hostingController.view)
+        hostingController.didMove(toParent: self)
+        
+        NSLayoutConstraint.activate([
+            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        
+        commandPaletteHostingController = hostingController
+        logger.info("Command palette shown with \(commands.count) entries")
+    }
+    
+    func removeCommandPalette() {
+        guard let hc = commandPaletteHostingController else { return }
+        hc.willMove(toParent: nil)
+        hc.view.removeFromSuperview()
+        hc.removeFromParent()
+        commandPaletteHostingController = nil
+    }
+    
+    private func executeCommandPaletteAction(_ actionStr: String) {
+        guard let surface = surfaceView?.surface else {
+            logger.warning("Command palette: no surface to execute action on")
+            return
+        }
+        actionStr.withCString { cstr in
+            ghostty_surface_binding_action(surface, cstr, UInt(actionStr.utf8.count))
+        }
+        logger.info("Command palette executed: \(actionStr)")
     }
 }
