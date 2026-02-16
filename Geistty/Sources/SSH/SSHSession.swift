@@ -148,6 +148,23 @@ class SSHSession: ObservableObject, Identifiable {
         }
     }
     
+    /// Protocol-typed accessor for the tmux surface.
+    /// In production, returns `ghosttySurface`. In tests, returns `tmuxSurfaceOverride`
+    /// (a MockTmuxSurface) if set. This enables testing activateFirstTmuxPane(),
+    /// flushPendingInput(), and notification handlers without a real GhosttyKit surface.
+    var tmuxSurface: (any TmuxSurfaceProtocol)? {
+        #if DEBUG
+        if let override = tmuxSurfaceOverride { return override }
+        #endif
+        return ghosttySurface
+    }
+    
+    #if DEBUG
+    /// Test-only override for the tmux surface. Set this to a MockTmuxSurface
+    /// to test lifecycle methods without a real Ghostty surface.
+    var tmuxSurfaceOverride: (any TmuxSurfaceProtocol)?
+    #endif
+    
     /// Whether we've successfully activated a tmux pane for rendering.
     /// Prevents redundant activation calls on subsequent state changes.
     private(set) var tmuxPaneActivated: Bool = false
@@ -452,7 +469,7 @@ class SSHSession: ObservableObject, Identifiable {
         
         for data in pendingInputQueue {
             // Try to route through Ghostty for proper send-keys wrapping
-            if let text = String(data: data, encoding: .utf8), let surface = ghosttySurface {
+            if let text = String(data: data, encoding: .utf8), let surface = tmuxSurface {
                 surface.sendText(text)
             } else {
                 // Non-text data or no surface — write directly (best effort)
@@ -479,8 +496,8 @@ class SSHSession: ObservableObject, Identifiable {
             return
         }
         
-        guard let surface = ghosttySurface else {
-            logger.info("activateFirstTmuxPane: ghosttySurface is nil, will retry when set")
+        guard let surface = tmuxSurface else {
+            logger.info("activateFirstTmuxPane: tmuxSurface is nil, will retry when set")
             return
         }
         
@@ -1034,6 +1051,41 @@ class SSHSession: ObservableObject, Identifiable {
     /// Set connection health for testing. Only available in DEBUG builds.
     func setConnectionHealthForTesting(_ health: ConnectionHealth) {
         connectionHealth = health
+    }
+    
+    /// Set viewer ready state for testing. Only available in DEBUG builds.
+    func setViewerReadyForTesting(_ ready: Bool) {
+        viewerReady = ready
+    }
+    
+    /// Set tmux pane activated for testing. Only available in DEBUG builds.
+    func setTmuxPaneActivatedForTesting(_ activated: Bool) {
+        tmuxPaneActivated = activated
+    }
+    
+    /// Set up tmux session manager for testing. Only available in DEBUG builds.
+    /// This calls the real setupTmuxSessionManager() which creates a TmuxSessionManager
+    /// and registers notification observers.
+    func setupTmuxForTesting() {
+        tmuxMode = .controlMode
+        useTmux = true
+        setupTmuxSessionManager()
+    }
+    
+    /// Simulate received data for testing. Only available in DEBUG builds.
+    /// Calls handleReceivedData() which is normally fileprivate.
+    func simulateReceivedDataForTesting(_ data: Data) {
+        handleReceivedData(data)
+    }
+    
+    /// Get the pending input queue for testing verification.
+    var pendingInputQueueForTesting: [Data] {
+        pendingInputQueue
+    }
+    
+    /// Get the early receive buffer for testing verification.
+    var earlyReceiveBufferForTesting: [Data] {
+        earlyReceiveBuffer
     }
     #endif
 }

@@ -1861,13 +1861,9 @@ extension Ghostty {
             return Int(ghostty_surface_tmux_window_count(surface))
         }
         
-        /// Info about a tmux window returned from the C API
-        struct TmuxWindowInfo {
-            let id: Int
-            let width: Int
-            let height: Int
-            let name: String
-        }
+        /// Info about a tmux window returned from the C API.
+        /// Uses the top-level TmuxWindowInfo struct (defined in TmuxSurfaceProtocol.swift)
+        /// to decouple data from the UIView class and enable protocol conformance.
         
         /// Get info about a tmux window by index.
         /// Returns nil only if index is out of bounds or not in tmux mode.
@@ -2395,5 +2391,11 @@ extension Ghostty.SurfaceView: UITextInputTraits {
         set { _smartInsertDeleteType = newValue }
     }
 }
+
+// MARK: - TmuxSurfaceProtocol Conformance
+
+/// SurfaceView already implements all required methods — this declares the conformance.
+/// See TmuxSurfaceProtocol.swift for the protocol definition.
+extension Ghostty.SurfaceView: TmuxSurfaceProtocol {}
 
 // MARK: - Errors & SearchState → Ghostty.SearchState.swift

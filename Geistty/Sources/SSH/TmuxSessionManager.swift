@@ -70,6 +70,21 @@ class TmuxSessionManager: ObservableObject {
     /// This is always kept alive even when in multi-pane mode
     @Published private(set) var primarySurface: Ghostty.SurfaceView?
     
+    /// Protocol-typed accessor for tmux C API queries.
+    /// In production, returns `primarySurface`. In tests, returns `tmuxQuerySurfaceOverride`.
+    var tmuxQuerySurface: (any TmuxSurfaceProtocol)? {
+        #if DEBUG
+        if let override = tmuxQuerySurfaceOverride { return override }
+        #endif
+        return primarySurface
+    }
+    
+    #if DEBUG
+    /// Test-only override for tmux C API queries. Set this to a MockTmuxSurface
+    /// to test handleTmuxStateChanged() without a real Ghostty surface.
+    var tmuxQuerySurfaceOverride: (any TmuxSurfaceProtocol)?
+    #endif
+    
     /// Cell size from the primary surface (for calculating terminal dimensions)
     /// This is updated when the surface reports its cell size
     @Published private(set) var primaryCellSize: CGSize = .zero
@@ -224,8 +239,8 @@ class TmuxSessionManager: ObservableObject {
     /// Queries the new window C API to populate the windows dict, parse layouts
     /// into split trees, set the active window, and reconcile pane surfaces.
     func handleTmuxStateChanged(windowCount: Int, paneCount: Int) {
-        guard let surface = primarySurface else {
-            logger.warning("handleTmuxStateChanged: no primarySurface, cannot query C API")
+        guard let surface = tmuxQuerySurface else {
+            logger.warning("handleTmuxStateChanged: no tmuxQuerySurface, cannot query C API")
             return
         }
         
