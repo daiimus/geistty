@@ -371,14 +371,31 @@ class GhosttyPaneSurfaceContainerView: UIView {
     
     var onTap: (() -> Void)?
     
+    /// Tap gesture recognizer for focus change (H11 fix).
+    /// Replaces hitTest override which fired onTap for every touch including scrolls.
+    private lazy var tapGesture: UITapGestureRecognizer = {
+        let gesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        // Don't prevent other gestures (scroll, pan) from recognizing
+        gesture.cancelsTouchesInView = false
+        return gesture
+    }()
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
+        addGestureRecognizer(tapGesture)
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         clipsToBounds = true
+        addGestureRecognizer(tapGesture)
+    }
+    
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        if gesture.state == .ended {
+            onTap?()
+        }
     }
     
     override func layoutSubviews() {
@@ -437,21 +454,9 @@ class GhosttyPaneSurfaceContainerView: UIView {
         }
     }
     
-    // Override hitTest to trigger focus change whenever this pane is touched
-    // This fires before the touch is delivered, so we can update focus immediately
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hitView = super.hitTest(point, with: event)
-        
-        // If the touch is within our bounds, trigger focus change
-        if hitView != nil {
-            // Use async to avoid re-entrancy issues during hit testing
-            DispatchQueue.main.async { [weak self] in
-                self?.onTap?()
-            }
-        }
-        
-        return hitView
-    }
+    // hitTest is no longer overridden for focus change (H11 fix).
+    // The UITapGestureRecognizer above handles focus changes correctly
+    // without triggering on scroll/pan gestures.
 }
 
 // MARK: - UIKit Integration

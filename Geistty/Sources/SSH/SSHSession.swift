@@ -208,6 +208,9 @@ class SSHSession: ObservableObject, Identifiable {
     }
     private var sessionDiscoveryState: SessionDiscoveryState = .idle
     
+    /// Timer for session discovery timeout (H6 fix)
+    private var sessionDiscoveryTimer: Task<Void, Never>?
+    
     // Queue of input data waiting to be sent once control mode activates
     // This prevents input from going to tmux's command prompt before the shell is ready
     private(set) var pendingInputQueue: [Data] = []
@@ -382,6 +385,12 @@ class SSHSession: ObservableObject, Identifiable {
     /// Register for Ghostty's tmux state notifications.
     /// TMUX_STATE_CHANGED fires when the tmux viewer activates or pane state changes.
     /// TMUX_EXIT fires when the tmux control mode session ends.
+    /// TMUX_READY fires when the viewer's startup command queue drains.
+    ///
+    /// H8 fix: Notifications are posted with the surface as `object`. We observe
+    /// with `object: nil` (since ghosttySurface may not be set yet) but filter
+    /// in the handler body to only process notifications for our surface.
+    /// This prevents cross-window interference on multi-window iPad.
     private func observeTmuxNotifications() {
         // Remove any existing observers first (idempotent)
         removeTmuxNotificationObservers()
@@ -392,6 +401,13 @@ class SSHSession: ObservableObject, Identifiable {
             queue: .main
         ) { [weak self] notification in
             guard let self = self else {
+                return
+            }
+            
+            // H8: Only process notifications for our surface (multi-window safety)
+            if let notifSurface = notification.object as? Ghostty.SurfaceView,
+               let ourSurface = self.ghosttySurface,
+               notifSurface !== ourSurface {
                 return
             }
             
@@ -430,6 +446,13 @@ class SSHSession: ObservableObject, Identifiable {
         ) { [weak self] notification in
             guard let self = self else { return }
             
+            // H8: Only process notifications for our surface (multi-window safety)
+            if let notifSurface = notification.object as? Ghostty.SurfaceView,
+               let ourSurface = self.ghosttySurface,
+               notifSurface !== ourSurface {
+                return
+            }
+            
             logger.info("tmux control mode exited via TMUX_EXIT")
             self.controlModeState = .inactive
             self.tmuxPaneActivated = false
@@ -444,6 +467,13 @@ class SSHSession: ObservableObject, Identifiable {
             queue: .main
         ) { [weak self] notification in
             guard let self = self else { return }
+            
+            // H8: Only process notifications for our surface (multi-window safety)
+            if let notifSurface = notification.object as? Ghostty.SurfaceView,
+               let ourSurface = self.ghosttySurface,
+               notifSurface !== ourSurface {
+                return
+            }
             
             logger.info("tmux viewer startup complete (TMUX_READY), safe to send user input")
             self.viewerReady = true
@@ -611,6 +641,20 @@ class SSHSession: ObservableObject, Identifiable {
         let query = TmuxSessionNameResolver.queryCommand
         if let data = query.data(using: .utf8) {
             writeControlCommand(data)
+        }
+        
+        // H6 fix: Start a timeout — if sentinel never arrives within 5 seconds,
+        // fall back to default session name to prevent hanging indefinitely
+        sessionDiscoveryTimer?.cancel()
+        sessionDiscoveryTimer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            guard let self = self else { return }
+            if case .querying = self.sessionDiscoveryState {
+                logger.warning("Session discovery timed out after 5s, falling back to default name")
+                self.sessionDiscoveryState = .idle
+                self.sendTmuxAttachCommand(sessionName: "\(TmuxSessionNameResolver.prefix)1")
+            }
         }
     }
     
@@ -833,19 +877,24 @@ class SSHSession: ObservableObject, Identifiable {
         activeTmuxPaneId = nil
         viewerReady = false
         sessionDiscoveryState = .idle
+        sessionDiscoveryTimer?.cancel()
+        sessionDiscoveryTimer = nil
         pendingInputQueue.removeAll()
         removeTmuxNotificationObservers()
         
-        // Tear down serial write queue
+        // Send clean detach before tearing down, so tmux session survives
+        // on the server and can be reattached later (like iTerm2's behavior).
+        // H5 fix: detach MUST happen before write queue teardown, otherwise
+        // the detach command will never be sent.
+        tmuxSessionManager?.detach()
+        
+        // Tear down serial write queue (after detach has been queued)
+        // finish() will cause the consumer to drain remaining items including detach
+        writeContinuation?.finish()
         writeConsumerTask?.cancel()
         writeConsumerTask = nil
-        writeContinuation?.finish()
         writeContinuation = nil
         writeStream = nil
-        
-        // Send clean detach before tearing down, so tmux session survives
-        // on the server and can be reattached later (like iTerm2's behavior)
-        tmuxSessionManager?.detach()
         
         tmuxSessionManager?.cleanup()
         tmuxSessionManager = nil
@@ -1010,6 +1059,8 @@ class SSHSession: ObservableObject, Identifiable {
                     
                     // Done with discovery
                     sessionDiscoveryState = .idle
+                    sessionDiscoveryTimer?.cancel()
+                    sessionDiscoveryTimer = nil
                     
                     // Now send the actual tmux attach command
                     sendTmuxAttachCommand(sessionName: resolvedName)
