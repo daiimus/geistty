@@ -1936,6 +1936,15 @@ extension Ghostty {
             return Int(ghostty_surface_tmux_active_window_id(surface))
         }
         
+        /// Get the focused pane ID for a tmux window by index.
+        /// This is the pane tmux considers focused (from %window-pane-changed),
+        /// not the apprt-set active pane used for input routing.
+        /// Returns -1 if index out of bounds or no focus known.
+        func tmuxWindowFocusedPaneId(at index: Int) -> Int {
+            guard let surface = surface else { return -1 }
+            return Int(ghostty_surface_tmux_window_focused_pane_id(surface, index))
+        }
+        
         // MARK: - Search
         
         /// Start a search (opens UI, Ghostty will callback with START_SEARCH action)

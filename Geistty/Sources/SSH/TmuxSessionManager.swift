@@ -228,6 +228,8 @@ class TmuxSessionManager: ObservableObject {
             let id: Int
             let name: String
             let layout: String?
+            /// Pane that tmux considers focused in this window (-1 if unknown)
+            let focusedPaneId: Int
         }
         let windows: [WindowInfo]
         /// Active window ID from the tmux server, or -1 if none
@@ -264,7 +266,8 @@ class TmuxSessionManager: ObservableObject {
                 TmuxStateSnapshot.WindowInfo(
                     id: info.id,
                     name: info.name,
-                    layout: surface.getTmuxWindowLayout(at: index)
+                    layout: surface.getTmuxWindowLayout(at: index),
+                    focusedPaneId: surface.tmuxWindowFocusedPaneId(at: index)
                 )
             },
             activeWindowId: activeWindowId,
@@ -383,15 +386,36 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // --- 7. Update focused pane ---
-        // If the focused window changed, update focusedPaneId to the first pane of the new window
+        // Use tmux's reported focused pane for the active window if available.
+        // Falls back to first pane in the split tree if tmux hasn't sent a
+        // %window-pane-changed yet (focusedPaneId == -1 in the snapshot).
         if focusedWindowId != previousFocusedWindowId || focusedPaneId.isEmpty {
-            if let tree = windowSplitTrees[focusedWindowId],
-               let firstPaneId = tree.paneIds.first {
-                let newFocusedPaneId = "%\(firstPaneId)"
-                if focusedPaneId != newFocusedPaneId {
-                    focusedPaneId = newFocusedPaneId
-                    logger.info("  Focused pane set to \(focusedPaneId) (from window \(focusedWindowId))")
+            // Look up the tmux-reported focused pane for the focused window
+            let tmuxFocusedPane: Int? = {
+                guard !focusedWindowId.isEmpty else { return nil }
+                // Find the snapshot entry for our focused window
+                for winInfo in snapshot.windows {
+                    if "@\(winInfo.id)" == focusedWindowId && winInfo.focusedPaneId >= 0 {
+                        return winInfo.focusedPaneId
+                    }
                 }
+                return nil
+            }()
+            
+            let newFocusedPaneId: String? = if let tmuxPane = tmuxFocusedPane {
+                // tmux told us which pane is focused — use it
+                "%\(tmuxPane)"
+            } else if let tree = windowSplitTrees[focusedWindowId],
+                      let firstPaneId = tree.paneIds.first {
+                // No focus info from tmux — fall back to first pane
+                "%\(firstPaneId)"
+            } else {
+                nil
+            }
+            
+            if let newFocusedPaneId, focusedPaneId != newFocusedPaneId {
+                focusedPaneId = newFocusedPaneId
+                logger.info("  Focused pane set to \(focusedPaneId) (from window \(focusedWindowId))")
             }
         }
         
@@ -755,10 +779,20 @@ class TmuxSessionManager: ObservableObject {
                 }
             }
             
-            // Update focused pane to first pane in this window
-            if let firstPaneId = tree.paneIds.first {
+            // Update focused pane: prefer tmux's reported focus for this window,
+            // fall back to first pane if no focus info available
+            let focusPaneId: Int? = {
+                guard let window = windows[windowId],
+                      let surface = tmuxQuerySurface else { return nil }
+                let paneId = surface.tmuxWindowFocusedPaneId(at: window.index)
+                return paneId >= 0 ? paneId : nil
+            }()
+            
+            if let focusPaneId {
+                focusedPaneId = "%\(focusPaneId)"
+                primarySurface?.setActiveTmuxPane(focusPaneId)
+            } else if let firstPaneId = tree.paneIds.first {
                 focusedPaneId = "%\(firstPaneId)"
-                // Swap the Ghostty renderer to show this pane's terminal
                 primarySurface?.setActiveTmuxPane(firstPaneId)
             }
         } else {

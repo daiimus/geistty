@@ -396,7 +396,7 @@ extension TmuxSessionManagerTests {
         // Set up some state via reconciliation
         let layout = singlePaneLayout(paneId: 0)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -430,7 +430,7 @@ extension TmuxSessionManagerTests {
         let mgr = TmuxSessionManager()
         let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -450,7 +450,7 @@ extension TmuxSessionManagerTests {
         let mgr = TmuxSessionManager()
         let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -467,7 +467,7 @@ extension TmuxSessionManagerTests {
         let mgr = TmuxSessionManager()
         let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -488,7 +488,7 @@ extension TmuxSessionManagerTests {
         let (mgr, log) = managerWithCommandLog()
         let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -503,7 +503,7 @@ extension TmuxSessionManagerTests {
         let (mgr, log) = managerWithCommandLog()
         let layout = verticalSplitLayout(paneA: 0, paneB: 1)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -518,7 +518,7 @@ extension TmuxSessionManagerTests {
         let (mgr, log) = managerWithCommandLog()
         let layout = singlePaneLayout(paneId: 0)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -561,7 +561,7 @@ extension TmuxSessionManagerTests {
         let mgr = TmuxSessionManager()
         let layout = singlePaneLayout(paneId: 5)
         _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
-            windows: [.init(id: 0, name: "bash", layout: layout)],
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [5]
         ))

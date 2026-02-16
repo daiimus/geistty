@@ -1213,6 +1213,11 @@ size_t ghostty_surface_tmux_window_layout(
 
 // Get the active tmux window ID. Returns -1 if not in tmux mode or none set.
 ssize_t ghostty_surface_tmux_active_window_id(ghostty_surface_t);
+
+// Get the focused pane ID for a tmux window by index (from %window-pane-changed).
+// This is the pane tmux considers focused, not the apprt-set active pane.
+// Returns -1 if not in tmux mode, index out of bounds, or no focus known.
+ssize_t ghostty_surface_tmux_window_focused_pane_id(ghostty_surface_t, size_t index);
 #endif
 
 ghostty_inspector_t ghostty_surface_inspector(ghostty_surface_t);

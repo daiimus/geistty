@@ -57,6 +57,11 @@ protocol TmuxSurfaceProtocol: AnyObject {
     /// Active tmux window ID (-1 if none)
     var tmuxActiveWindowId: Int { get }
     
+    /// Focused pane ID for a window by index (from tmux's %window-pane-changed).
+    /// This is the pane tmux considers focused, not the apprt-set active pane.
+    /// Returns -1 if index out of bounds or no focus known.
+    func tmuxWindowFocusedPaneId(at index: Int) -> Int
+    
     // MARK: - Input
     
     /// Send text input (routed through Ghostty for send-keys wrapping in tmux mode)
