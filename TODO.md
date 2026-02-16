@@ -17,6 +17,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 | 2 | IOSurfaceLayer size mismatch during rapid resize | Low | Cosmetic — `surface is wrong size for layer, discarding`. Resize debouncing could be tighter. |
 | 3 | NoHomeDir warning from Ghostty config | Low | Harmless on iOS — Ghostty looks for `~/.config/ghostty/` |
 | 4 | Scroll sensitivity not configurable | Low | Adaptive velocity works but some users may want tuning |
+| 5 | `captureTmuxPane()` for search is stubbed | Low | Relied on old gateway command/response pattern. Use Ghostty's built-in search instead. |
 
 ### Multi-Pane Dimension Bug
 
@@ -104,6 +105,12 @@ All removed code archived in `docs/archive/DEAD_CODE_FEB_2026.swift`.
 | Cleanup | Font mapping consolidation (FontMapping.swift), SF Mono default fix | Feb 2026 |
 | Refactor | ControlModeState enum (replaced controlModeActive/controlModeDataRouting booleans) | Feb 2026 |
 | Cleanup | Dead code audit complete — ~900 lines removed, Ghostty delegation fixes, SET_TITLE wired | Feb 2026 |
+| Feature | Command palette (Cmd+Shift+P) with search, 30 tests | Feb 2026 |
+| Feature | Jump to Prompt implementation | Feb 2026 |
+| Fix | tmux DCS passthrough display freeze — persistent VT parser + absorbing state reset in viewer.zig | Feb 2026 |
+| Fix | 6-agent code review (63 findings): Phase A Critical (C1-C8), Phase B High (H3-H13), Phase C Medium (M1-M20), Phase D Low (L3-L19) — all complete | Feb 2026 |
+| Infra | TmuxWireDiagnostics shadow parser for tmux control mode debugging (48 tests) | Feb 2026 |
+| Testing | Test suite expanded from 470 to 550 tests across 25 suites | Feb 2026 |
 
 ---
 
@@ -217,10 +224,10 @@ Future File Provider work (would require reimplementation):
 
 ### Developer Features
 
+- [x] Command palette (Cmd+Shift+P) — **DONE** (Session 46, 30 tests)
 - [ ] Clickable URLs (open in browser)
 - [ ] Clickable file paths (quick actions)
 - [ ] Error line detection (jump to file:line from stack traces)
-- [ ] Command palette (Cmd+Shift+P)
 - [ ] Session recording (save terminal to file)
 - [ ] Clipboard history
 
@@ -287,6 +294,8 @@ When ready to remove verbose debug logging from the Ghostty fork:
 - [ ] `src/apprt/embedded.zig` — Remove verbose search debug logging
 - [ ] `src/global.zig` — Review debug logging settings for lib mode
 - [ ] Rebuild GhosttyKit xcframework after cleanup
+
+> **Note:** Swift-side logger level misuse (SSH key parsing at `.error`, hex-dump at `.info`) was largely addressed in the Session 57 code review (Phase B/C fixes). Some verbose logging remains gated behind `.debug` level.
 
 ---
 

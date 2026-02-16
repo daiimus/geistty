@@ -151,7 +151,7 @@ xcrun devicectl device process launch --device <device-uuid> \
 ### Run tests
 
 ```bash
-# Swift tests (470 tests)
+# Swift tests (550 tests)
 cd path/to/geistty/Geistty && ./ci.sh test
 
 # Zig tests (External backend + tmux viewer)
@@ -178,8 +178,8 @@ geistty/
 │       ├── SSH/             # NIOSSHConnection, SSHSession, TmuxSessionManager
 │       ├── Terminal/        # TerminalContainerView, VC extensions, multi-pane views, themes
 │       └── UI/              # Connection list, editor, settings
-├── GeisttyTests/            # 470 unit tests (18 files + 2 mocks)
-└── GeisttyUITests/          # 4 UI test files
+├── GeisttyTests/            # 550 unit tests (20 files + 2 mocks)
+└── GeisttyUITests/          # 4 UI test files + 2 config files
 ```
 
 ## Dependencies

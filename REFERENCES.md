@@ -64,7 +64,7 @@ ghostty-org/ghostty/
 │   ├── apprt/embedded.zig               # Embedded app runtime
 │   ├── termio/Termio.zig                # Terminal I/O abstraction
 │   ├── termio/External.zig              # External backend (used by iOS)
-│   └── viewer.zig                       # tmux control mode viewer
+│   └── terminal/tmux/viewer.zig         # tmux control mode viewer
 └── macos/Sources/
     ├── Ghostty/
     │   └── SurfaceView_UIKit.swift      # UIKit surface view

@@ -225,6 +225,7 @@ All Ghostty types have Swift equivalents:
 - `ConfigSyncManager.swift` - ghostty.conf <> Ghostty Config synchronization
 - `SurfaceSearchOverlay.swift` - Search bar UI overlay
 - `TmuxSurfaceProtocol.swift` - Protocol abstraction for tmux C API queries (enables mock testing)
+- `CommandPaletteView.swift` - Command palette UI (Cmd+Shift+P) — uses `ghostty_surface_commands` and `ghostty_surface_binding_action`
 
 ## Usage Examples
 
