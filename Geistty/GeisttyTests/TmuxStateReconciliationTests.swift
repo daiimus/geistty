@@ -44,12 +44,12 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
     /// Build a TmuxStateSnapshot with the given windows and pane IDs.
     private func makeSnapshot(
-        windows: [(id: Int, name: String, layout: String?)],
+        windows: [(id: Int, name: String, layout: String?, focusedPaneId: Int)],
         activeWindowId: Int = -1,
         paneIds: [Int] = []
     ) -> TmuxSessionManager.TmuxStateSnapshot {
         return TmuxSessionManager.TmuxStateSnapshot(
-            windows: windows.map { .init(id: $0.id, name: $0.name, layout: $0.layout) },
+            windows: windows.map { .init(id: $0.id, name: $0.name, layout: $0.layout, focusedPaneId: $0.focusedPaneId) },
             activeWindowId: activeWindowId,
             paneIds: paneIds
         )
@@ -62,7 +62,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let mgr = TmuxSessionManager()
         let layout = singlePaneLayout(paneId: 0)
         let snapshot = makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         )
@@ -95,7 +95,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let mgr = TmuxSessionManager()
         let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
         let snapshot = makeSnapshot(
-            windows: [(id: 0, name: "vim", layout: layout)],
+            windows: [(id: 0, name: "vim", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         )
@@ -123,8 +123,8 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout1 = singlePaneLayout(paneId: 1)
         let snapshot = makeSnapshot(
             windows: [
-                (id: 0, name: "bash", layout: layout0),
-                (id: 1, name: "vim", layout: layout1),
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
             ],
             activeWindowId: 1,
             paneIds: [0, 1]
@@ -154,7 +154,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let mgr = TmuxSessionManager()
         let layout = singlePaneLayout(paneId: 5)
         let snapshot = makeSnapshot(
-            windows: [(id: 3, name: "zsh", layout: layout)],
+            windows: [(id: 3, name: "zsh", layout: layout, focusedPaneId: -1)],
             activeWindowId: -1,  // No active window
             paneIds: [5]
         )
@@ -172,7 +172,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let mgr = TmuxSessionManager()
         let layout = singlePaneLayout(paneId: 0)
         let snapshot = makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 99,  // Non-existent window
             paneIds: [0]
         )
@@ -206,7 +206,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
     func testWindowWithNoLayout() {
         let mgr = TmuxSessionManager()
         let snapshot = makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: nil)],
+            windows: [(id: 0, name: "bash", layout: nil, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         )
@@ -236,8 +236,8 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout1 = singlePaneLayout(paneId: 1)
         _ = mgr.reconcileTmuxState(makeSnapshot(
             windows: [
-                (id: 0, name: "bash", layout: layout0),
-                (id: 1, name: "vim", layout: layout1),
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
             ],
             activeWindowId: 0,
             paneIds: [0, 1]
@@ -249,8 +249,8 @@ final class TmuxStateReconciliationTests: XCTestCase {
         // Second reconciliation: active window changes to @1
         let activePaneId = mgr.reconcileTmuxState(makeSnapshot(
             windows: [
-                (id: 0, name: "bash", layout: layout0),
-                (id: 1, name: "vim", layout: layout1),
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
             ],
             activeWindowId: 1,
             paneIds: [0, 1]
@@ -269,7 +269,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
         // First reconciliation
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -282,7 +282,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
         // Second reconciliation: same window still active
         let activePaneId = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -300,7 +300,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
         // Start with one window
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout0)],
+            windows: [(id: 0, name: "bash", layout: layout0, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -311,8 +311,8 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout1 = singlePaneLayout(paneId: 1)
         _ = mgr.reconcileTmuxState(makeSnapshot(
             windows: [
-                (id: 0, name: "bash", layout: layout0),
-                (id: 1, name: "vim", layout: layout1),
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
             ],
             activeWindowId: 0,
             paneIds: [0, 1]
@@ -332,8 +332,8 @@ final class TmuxStateReconciliationTests: XCTestCase {
         // Start with two windows
         _ = mgr.reconcileTmuxState(makeSnapshot(
             windows: [
-                (id: 0, name: "bash", layout: layout0),
-                (id: 1, name: "vim", layout: layout1),
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
             ],
             activeWindowId: 1,
             paneIds: [0, 1]
@@ -343,7 +343,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
         // Window @1 removed, active becomes @0
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout0)],
+            windows: [(id: 0, name: "bash", layout: layout0, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -362,7 +362,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
         // First: valid layout
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: goodLayout)],
+            windows: [(id: 0, name: "bash", layout: goodLayout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -372,7 +372,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
         // Second: invalid layout string
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: "garbage")],
+            windows: [(id: 0, name: "bash", layout: "garbage", focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -393,8 +393,8 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout1 = singlePaneLayout(paneId: 1)
         _ = mgr.reconcileTmuxState(makeSnapshot(
             windows: [
-                (id: 0, name: "bash", layout: layout0),
-                (id: 1, name: "vim", layout: layout1),
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
             ],
             activeWindowId: 0,
             paneIds: [0, 1]
@@ -417,7 +417,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout = singlePaneLayout(paneId: 0)
 
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -439,7 +439,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
 
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0, 1]
         ))
@@ -456,7 +456,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout = singlePaneLayout(paneId: 0)
 
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [0]
         ))
@@ -479,9 +479,9 @@ final class TmuxStateReconciliationTests: XCTestCase {
 
         _ = mgr.reconcileTmuxState(makeSnapshot(
             windows: [
-                (id: 5, name: "first", layout: layout0),
-                (id: 3, name: "second", layout: layout1),
-                (id: 7, name: "third", layout: layout2),
+                (id: 5, name: "first", layout: layout0, focusedPaneId: -1),
+                (id: 3, name: "second", layout: layout1, focusedPaneId: -1),
+                (id: 7, name: "third", layout: layout2, focusedPaneId: -1),
             ],
             activeWindowId: 3,
             paneIds: [0, 1, 2]
@@ -501,7 +501,7 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let layout = horizontalSplitLayout(paneA: 3, paneB: 7)
 
         _ = mgr.reconcileTmuxState(makeSnapshot(
-            windows: [(id: 0, name: "bash", layout: layout)],
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
             activeWindowId: 0,
             paneIds: [3, 7]
         ))
@@ -510,5 +510,110 @@ final class TmuxStateReconciliationTests: XCTestCase {
         let paneIds = mgr.windows["@0"]?.paneIds ?? []
         XCTAssertEqual(Set(paneIds), Set(["%3", "%7"]),
                       "Pane IDs should be back-filled from layout tree")
+    }
+
+    // MARK: - Focused Pane from tmux (%window-pane-changed)
+
+    @MainActor
+    func testFocusedPaneFromTmuxUsedInsteadOfFirst() {
+        let mgr = TmuxSessionManager()
+        let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
+        // tmux reports pane 1 is focused (via %window-pane-changed)
+        let snapshot = makeSnapshot(
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: 1)],
+            activeWindowId: 0,
+            paneIds: [0, 1]
+        )
+
+        let activePaneId = mgr.reconcileTmuxState(snapshot)
+
+        // Should use tmux's reported focused pane (1), not first pane (0)
+        XCTAssertEqual(mgr.focusedPaneId, "%1",
+                      "Should use tmux-reported focused pane, not first pane")
+        XCTAssertEqual(activePaneId, 1)
+    }
+
+    @MainActor
+    func testFocusedPaneUnknownFallsBackToFirstPane() {
+        let mgr = TmuxSessionManager()
+        let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
+        // tmux hasn't sent %window-pane-changed yet (-1 = unknown)
+        let snapshot = makeSnapshot(
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [0, 1]
+        )
+
+        let activePaneId = mgr.reconcileTmuxState(snapshot)
+
+        // Should fall back to first pane since no focus info
+        XCTAssertEqual(mgr.focusedPaneId, "%0",
+                      "Should fall back to first pane when tmux focus unknown")
+        XCTAssertEqual(activePaneId, 0)
+    }
+
+    @MainActor
+    func testFocusedPaneFromTmuxOnWindowSwitch() {
+        let mgr = TmuxSessionManager()
+        let layout0 = horizontalSplitLayout(paneA: 0, paneB: 1)
+        let layout1 = horizontalSplitLayout(paneA: 2, paneB: 3)
+
+        // First reconciliation: window @0 active, tmux focus on pane 1
+        _ = mgr.reconcileTmuxState(makeSnapshot(
+            windows: [
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: 1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: 3),
+            ],
+            activeWindowId: 0,
+            paneIds: [0, 1, 2, 3]
+        ))
+
+        XCTAssertEqual(mgr.focusedPaneId, "%1")
+
+        // Second reconciliation: window @1 becomes active, tmux reports pane 3 focused
+        let activePaneId = mgr.reconcileTmuxState(makeSnapshot(
+            windows: [
+                (id: 0, name: "bash", layout: layout0, focusedPaneId: 1),
+                (id: 1, name: "vim", layout: layout1, focusedPaneId: 3),
+            ],
+            activeWindowId: 1,
+            paneIds: [0, 1, 2, 3]
+        ))
+
+        // Should use tmux's reported focused pane for window @1 (pane 3)
+        XCTAssertEqual(mgr.focusedPaneId, "%3",
+                      "On window switch, should use tmux-reported focused pane for new window")
+        XCTAssertEqual(activePaneId, 3)
+    }
+
+    @MainActor
+    func testFocusedPanePreservedWhenWindowUnchangedWithTmuxFocus() {
+        let mgr = TmuxSessionManager()
+        let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
+
+        // First reconciliation: tmux says pane 1 is focused
+        _ = mgr.reconcileTmuxState(makeSnapshot(
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: 1)],
+            activeWindowId: 0,
+            paneIds: [0, 1]
+        ))
+
+        XCTAssertEqual(mgr.focusedPaneId, "%1")
+
+        // User clicks on pane 0 (local focus change, not via tmux)
+        mgr.setFocusedPane("%0")
+        XCTAssertEqual(mgr.focusedPaneId, "%0")
+
+        // Second reconciliation: same window, tmux still reports pane 1
+        let activePaneId = mgr.reconcileTmuxState(makeSnapshot(
+            windows: [(id: 0, name: "bash", layout: layout, focusedPaneId: 1)],
+            activeWindowId: 0,
+            paneIds: [0, 1]
+        ))
+
+        // focusedPaneId should NOT change because window didn't change
+        XCTAssertEqual(mgr.focusedPaneId, "%0",
+                      "User's local focus should be preserved when window doesn't change")
+        XCTAssertEqual(activePaneId, 0)
     }
 }

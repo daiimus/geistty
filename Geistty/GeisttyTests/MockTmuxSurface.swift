@@ -51,6 +51,10 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
     /// Value returned by `tmuxActiveWindowId`
     var stubbedActiveWindowId: Int = -1
     
+    /// Values returned by `tmuxWindowFocusedPaneId(at:)`, indexed by position.
+    /// Returns -1 for out-of-bounds indices.
+    var stubbedWindowFocusedPaneIds: [Int] = []
+    
     // MARK: - Call Tracking
     
     /// Pane IDs passed to `setActiveTmuxPane(_:)`, in order
@@ -67,6 +71,9 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
     
     /// Indices passed to `getTmuxWindowLayout(at:)`, in order
     var getTmuxWindowLayoutCalls: [Int] = []
+    
+    /// Indices passed to `tmuxWindowFocusedPaneId(at:)`, in order
+    var tmuxWindowFocusedPaneIdCalls: [Int] = []
     
     // MARK: - TmuxSurfaceProtocol
     
@@ -104,6 +111,12 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
         stubbedActiveWindowId
     }
     
+    func tmuxWindowFocusedPaneId(at index: Int) -> Int {
+        tmuxWindowFocusedPaneIdCalls.append(index)
+        guard index < stubbedWindowFocusedPaneIds.count else { return -1 }
+        return stubbedWindowFocusedPaneIds[index]
+    }
+    
     func sendText(_ text: String) {
         sendTextCalls.append(text)
     }
@@ -117,5 +130,6 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
         getTmuxPaneIdsCallCount = 0
         getAllTmuxWindowsCallCount = 0
         getTmuxWindowLayoutCalls.removeAll()
+        tmuxWindowFocusedPaneIdCalls.removeAll()
     }
 }
