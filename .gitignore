@@ -63,6 +63,7 @@ iOSInjectionProject/
 *.p12
 *.pfx
 *.cer
+*.mobileprovision
 id_rsa
 id_rsa.*
 id_ed25519

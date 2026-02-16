@@ -425,6 +425,7 @@ struct ConnectionSheet: View {
                     .frame(maxWidth: .infinity)
                 }
                 
+                #if DEBUG
                 Section("Test Servers") {
                     Button("Use test.rebex.net") {
                         connectionInfo.host = "test.rebex.net"
@@ -442,6 +443,7 @@ struct ConnectionSheet: View {
                     }
                     .foregroundColor(.blue)
                 }
+                #endif
             }
             .navigationTitle("New Connection")
             .navigationBarTitleDisplayMode(.inline)

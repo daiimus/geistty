@@ -6,7 +6,7 @@
 echo "📦 To add the UI test target:"
 echo ""
 echo "1. Open Xcode:"
-echo "   open /Users/daiimus/Projects/Repositories/geistty/Geistty/Geistty.xcodeproj"
+echo "   open Geistty.xcodeproj"
 echo ""
 echo "2. In Xcode:"
 echo "   - File → New → Target..."

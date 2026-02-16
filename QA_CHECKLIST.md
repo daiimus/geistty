@@ -2,7 +2,7 @@
 
 Manual test matrix for device testing. Run through before each release.
 
-**Test Device:** ICarus (iPad Pro) — `00008103-001425D11153001E`
+**Test Device:** ICarus (iPad Pro) — `<YOUR-DEVICE-UDID>`
 **Connectivity:** USB, LAN, or Tailscale to Mac test server (localhost)
 
 ---

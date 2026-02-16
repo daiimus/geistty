@@ -277,7 +277,7 @@ show_help() {
     echo ""
     echo "Examples:"
     echo "  $0 build                              # Build for simulator"
-    echo "  $0 install 00008103-001425D11153001E  # Install on specific device"
+    echo "  $0 install <YOUR-DEVICE-UDID>  # Install on specific device"
     echo "  $0 all                                # Full CI run"
 }
 
