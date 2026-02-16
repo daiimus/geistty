@@ -150,6 +150,18 @@ struct GeisttyApp: App {
                 
                 Divider()
                 
+                Button("Jump to Previous Prompt") {
+                    NotificationCenter.default.post(name: .terminalJumpToPromptUp, object: nil)
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .shift])
+                
+                Button("Jump to Next Prompt") {
+                    NotificationCenter.default.post(name: .terminalJumpToPromptDown, object: nil)
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .shift])
+                
+                Divider()
+                
                 Button("Reload Configuration") {
                     NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
                 }
@@ -209,6 +221,8 @@ extension Notification.Name {
     static let terminalIncreaseFontSize = Notification.Name("terminalIncreaseFontSize")
     static let terminalDecreaseFontSize = Notification.Name("terminalDecreaseFontSize")
     static let terminalResetFontSize = Notification.Name("terminalResetFontSize")
+    static let terminalJumpToPromptUp = Notification.Name("terminalJumpToPromptUp")
+    static let terminalJumpToPromptDown = Notification.Name("terminalJumpToPromptDown")
     static let terminalDisconnect = Notification.Name("terminalDisconnect")
     static let terminalSelectAll = Notification.Name("terminalSelectAll")
     static let terminalCopy = Notification.Name("terminalCopy")
