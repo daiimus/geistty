@@ -1218,6 +1218,15 @@ ssize_t ghostty_surface_tmux_active_window_id(ghostty_surface_t);
 // This is the pane tmux considers focused, not the apprt-set active pane.
 // Returns -1 if not in tmux mode, index out of bounds, or no focus known.
 ssize_t ghostty_surface_tmux_window_focused_pane_id(ghostty_surface_t, size_t index);
+
+// Bind a target surface's renderer to a tmux pane terminal owned by a source
+// surface's tmux viewer. The target will render the pane content and stay in
+// sync when the source's pane map is rebuilt. Returns true on success.
+bool ghostty_surface_tmux_attach_to_pane(ghostty_surface_t target, ghostty_surface_t source, size_t pane_id);
+
+// Detach a target surface from its tmux pane binding. Restores the original
+// mutex and terminal pointer. No-op if not attached.
+void ghostty_surface_tmux_detach_pane(ghostty_surface_t target);
 #endif
 
 ghostty_inspector_t ghostty_surface_inspector(ghostty_surface_t);

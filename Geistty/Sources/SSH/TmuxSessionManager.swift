@@ -208,6 +208,8 @@ class TmuxSessionManager: ObservableObject {
         // CRITICAL: Clear surface state to ensure fresh surfaces on reconnect
         // Old surfaces may be in bad state and won't properly report cell size
         for (paneId, surface) in paneSurfaces {
+            // Detach from tmux pane binding before cleanup
+            surface.detachTmuxPane()
             // Clear callbacks to break retain cycles
             surface.onResize = nil
             surface.onCellSizeChanged = nil
@@ -497,11 +499,27 @@ class TmuxSessionManager: ObservableObject {
             assignPrimarySurface(surface, forPaneId: paneId)
         }
         
+        // Bind this surface's renderer to the pane terminal in the tmux viewer.
+        // The primarySurface (adopted from the direct surface) owns the tmux viewer —
+        // it is the "source" surface. Factory-created surfaces for OTHER panes
+        // become observers that render from the viewer's per-pane Terminal instances.
+        // Skip binding for the primarySurface itself — its renderer is already
+        // managed by setActiveTmuxPane() (it owns the viewer).
+        if let source = primarySurface, surface !== source,
+           let numericId = Int(paneId.dropFirst()) {  // "%3" -> 3
+            let attached = surface.attachToTmuxPane(source: source, paneId: numericId)
+            if !attached {
+                logger.warning("Failed to attach surface for pane \(paneId) to tmux viewer")
+            }
+        }
+        
         logger.info("Created Ghostty surface for pane \(paneId)")
         
-        // Flush any output that was buffered before this surface existed
+        // Flush any output that was buffered before this surface existed.
+        // With the tmux pane binding in place, the surface renders directly from
+        // the viewer's pane terminal — pending output flush is a no-op safety net.
         if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
-            logger.info("🔄 Flushing \(pending.count) buffered output chunks to new surface for pane \(paneId)")
+            logger.info("Flushing \(pending.count) buffered output chunks to new surface for pane \(paneId)")
             for data in pending {
                 surface.feedData(data)
             }
@@ -669,6 +687,11 @@ class TmuxSessionManager: ObservableObject {
         }
         
         if let surface = paneSurfaces.removeValue(forKey: paneId) {
+            // Detach from tmux pane binding before cleanup.
+            // This restores the surface's original mutex/terminal and
+            // unregisters it from the viewer's observer list.
+            surface.detachTmuxPane()
+            
             // Clean up surface callbacks to break retain cycles
             surface.onResize = nil
             surface.onCellSizeChanged = nil
