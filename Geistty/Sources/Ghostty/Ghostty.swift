@@ -1857,6 +1857,36 @@ extension Ghostty {
             ghostty_surface_tmux_reset_active_pane(surface)
         }
         
+        // MARK: - tmux Multi-Pane Binding
+        
+        /// Bind this surface's renderer to a tmux pane terminal owned by
+        /// a source surface's tmux viewer. After attachment, this surface
+        /// renders the pane's content using the source's shared mutex.
+        ///
+        /// - Parameters:
+        ///   - source: The primary surface whose tmux viewer owns the pane.
+        ///   - paneId: The numeric tmux pane ID to bind to.
+        /// - Returns: `true` if binding succeeded.
+        @discardableResult
+        func attachToTmuxPane(source: SurfaceView, paneId: Int) -> Bool {
+            guard let targetSurface = surface,
+                  let sourceSurface = source.surface else {
+                logger.warning("attachToTmuxPane: surface(s) nil")
+                return false
+            }
+            let result = ghostty_surface_tmux_attach_to_pane(targetSurface, sourceSurface, paneId)
+            logger.debug("attachToTmuxPane(pane=\(paneId)): result=\(result)")
+            return result
+        }
+        
+        /// Detach this surface from its tmux pane binding. Restores the
+        /// original mutex and terminal pointer. No-op if not attached.
+        func detachTmuxPane() {
+            guard let surface = surface else { return }
+            ghostty_surface_tmux_detach_pane(surface)
+            logger.debug("detachTmuxPane: complete")
+        }
+        
         // MARK: - tmux Window API
         
         /// Get the number of tmux windows (0 if not in tmux mode)
