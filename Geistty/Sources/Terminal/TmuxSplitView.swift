@@ -332,7 +332,13 @@ private struct TmuxSplitNodeView<PaneContent: View>: View {
 
 // MARK: - ZoomablePane
 
-/// A wrapper view that adds double-tap zoom gesture to a pane
+/// A wrapper view for pane content.
+///
+/// Previously added `.contentShape(Rectangle()).onTapGesture(count: 2)` for zoom,
+/// but that SwiftUI gesture layer intercepted ALL touches before they reached the
+/// UIKit SurfaceView below (via UIViewRepresentable), completely blocking the
+/// SurfaceView's tap gesture recognizer. The double-tap zoom gesture is now handled
+/// at the UIKit level in GhosttyPaneSurfaceContainerView (Fix I, session 95).
 private struct ZoomablePane<Content: View>: View {
     let paneId: Int
     let onToggleZoom: (Int) -> Void
@@ -346,10 +352,6 @@ private struct ZoomablePane<Content: View>: View {
     
     var body: some View {
         content
-            .contentShape(Rectangle())  // Make entire pane tappable
-            .onTapGesture(count: 2) {
-                onToggleZoom(paneId)
-            }
             .accessibilityAction(named: "Toggle zoom") {
                 onToggleZoom(paneId)
             }

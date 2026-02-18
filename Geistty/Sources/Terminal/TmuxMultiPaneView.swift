@@ -34,6 +34,13 @@ struct TmuxMultiPaneView: View {
     /// Track last sent dimensions to avoid redundant resize commands
     @State private var lastSentSize: CGSize = .zero
     
+    /// Track last sent cols/rows to deduplicate at the character grid level.
+    /// Pixel-level dedup (lastSentSize) can miss cases where floating-point
+    /// geometry changes produce the same cols/rows. This prevents sending
+    /// redundant "refresh-client -C" commands that differ only in sub-cell pixels.
+    @State private var lastSentCols: Int = 0
+    @State private var lastSentRows: Int = 0
+    
     /// Debounce task for divider resize sync
     @State private var resizeSyncTask: Task<Void, Never>?
     
@@ -71,7 +78,8 @@ struct TmuxMultiPaneView: View {
                         cols: cols,
                         rows: rows,
                         sessionManager: sessionManager,
-                        shortcutDelegate: shortcutDelegate
+                        shortcutDelegate: shortcutDelegate,
+                        onToggleZoom: { sessionManager.toggleZoom(paneId: paneId) }
                     )
                     .accessibilityIdentifier("TerminalPane-\(paneId)")
                 }
@@ -82,9 +90,11 @@ struct TmuxMultiPaneView: View {
             }
             .onChange(of: sessionManager.currentSplitTree.paneIds.count) { _, _ in
                 // When pane count changes (split/close), re-send dimensions
-                // Reset lastSentSize to force a resize command even if geometry didn't change
+                // Reset lastSent to force a resize command even if geometry didn't change
                 logger.info("📐 Pane count changed, forcing resize")
                 lastSentSize = .zero  // Force resize to be sent
+                lastSentCols = 0
+                lastSentRows = 0
                 handleSizeChange(geometry.size)
             }
             .onChange(of: sessionManager.primaryCellSize) { _, newCellSize in
@@ -99,6 +109,8 @@ struct TmuxMultiPaneView: View {
                 if isConnected {
                     logger.info("📐 Session (re)connected, forcing resize")
                     lastSentSize = .zero  // Force resize to be sent
+                    lastSentCols = 0
+                    lastSentRows = 0
                     // Delay slightly to ensure tmux is ready to receive commands
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         handleSizeChange(geometry.size)
@@ -155,11 +167,21 @@ struct TmuxMultiPaneView: View {
             return
         }
         
+        // Character-grid-level dedup: skip if the calculated cols/rows are identical
+        // to what we last sent. This prevents redundant "refresh-client -C" when
+        // floating-point pixel geometry changes but the character grid is the same.
+        guard cols != lastSentCols || rows != lastSentRows else {
+            logger.debug("📐 Skipping - same grid dimensions \(cols)x\(rows)")
+            return
+        }
+        
         logger.info("📐 Multi-pane geometry: \(Int(size.width))x\(Int(size.height))px -> \(cols)x\(rows) cells (cell: \(Int(cellSize.width))x\(Int(cellSize.height)))")
         logger.info("📐 Current split tree before resize: panes=\(sessionManager.currentSplitTree.paneIds), isSplit=\(sessionManager.currentSplitTree.isSplit)")
         
-        // Update tracked size
+        // Update tracked size at both pixel and grid levels
         lastSentSize = size
+        lastSentCols = cols
+        lastSentRows = rows
         
         // Send resize to tmux - this triggers refresh-client -C
         logger.info("📐 🚀 SENDING refresh-client -C \(cols),\(rows)")
@@ -181,10 +203,23 @@ struct TmuxPaneSurfaceView: View {
     let rows: Int
     @ObservedObject var sessionManager: TmuxSessionManager
     weak var shortcutDelegate: Ghostty.ShortcutDelegate?
+    /// Called when the pane is double-tapped (toggle zoom).
+    /// Moved from SwiftUI ZoomablePane to UIKit container (Fix I, session 95).
+    var onToggleZoom: (() -> Void)?
     
     /// Whether this pane is currently focused
     private var isFocused: Bool {
         sessionManager.focusedPaneId == "%\(paneId)"
+    }
+    
+    /// Whether this surface is the primary (owns the tmux viewer).
+    /// The primary surface must NOT have setExactGridSize() called on it
+    /// because that flows through ghostty_surface_set_size → Zig Termio.resize()
+    /// → "refresh-client -C" with the PANE's dimensions, conflicting with the
+    /// correct container-wide resize from TmuxMultiPaneView.handleSizeChange().
+    private var isPrimarySurface: Bool {
+        guard let surface = sessionManager.getSurface(forNumericId: paneId) else { return false }
+        return surface === sessionManager.primarySurface
     }
     
     /// Whether the connection is lost
@@ -207,13 +242,21 @@ struct TmuxPaneSurfaceView: View {
                 cols: cols,
                 rows: rows,
                 isFocused: isFocused,
+                isPrimarySurface: isPrimarySurface,
+                primarySurface: sessionManager.primarySurface,
                 shortcutDelegate: shortcutDelegate,
                 onTap: {
                     selectPane()
-                }
+                },
+                onDoubleTap: onToggleZoom
             )
-            // Use ID that includes dimensions to force SwiftUI to recognize dimension changes
-            .id("\(paneId)-\(cols)x\(rows)")
+            // Stable identity per pane — dimension changes are handled by updateUIView.
+            // IMPORTANT: Do NOT include cols/rows in .id(). That causes SwiftUI to
+            // destroy + recreate the UIViewRepresentable on every layout change,
+            // re-parenting the surface, which fires didMoveToWindow → sizeDidChange
+            // → ghostty_surface_set_size → Zig Termio.resize → "refresh-client -C"
+            // with pane dimensions, creating a resize oscillation loop.
+            .id("\(paneId)")
             .overlay(
                 // Focus indicator border
                 Rectangle()
@@ -255,21 +298,50 @@ struct TmuxPaneSurfaceView: View {
 ///
 /// This wrapper accepts the tmux-reported character dimensions (cols/rows)
 /// and constrains the surface to match exactly when cell sizes are available.
+///
+/// **Input routing in multi-pane mode:**
+/// Only the primary surface (which owns the tmux viewer) should be firstResponder.
+/// All keyboard input must flow through the primary's Zig `Termio.queueWrite()`,
+/// which wraps keystrokes in `send-keys -H -t %N` for the active pane.
+/// Observer surfaces bypass this wrapping — their `Termio` has no tmux viewer,
+/// so raw bytes would be sent to the SSH channel as tmux commands (broken).
+///
+/// When an observer pane is tapped, we call `selectPane()` (which sets the
+/// active pane on the primary via `setActiveTmuxPane`), then ensure the
+/// primary surface keeps/regains firstResponder.
 struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
     let surface: Ghostty.SurfaceView
     let cols: Int
     let rows: Int
     let isFocused: Bool
+    /// When true, this surface owns the tmux viewer and must NOT have
+    /// setExactGridSize() called — that would trigger Zig-side
+    /// "refresh-client -C" with pane dimensions, causing a resize storm.
+    let isPrimarySurface: Bool
+    /// The primary surface that owns the tmux viewer. In multi-pane mode,
+    /// this surface must always be firstResponder so keyboard input flows
+    /// through its tmux-aware Termio (send-keys wrapping).
+    weak var primarySurface: Ghostty.SurfaceView?
     weak var shortcutDelegate: Ghostty.ShortcutDelegate?
     let onTap: () -> Void
+    /// Called when the pane is double-tapped (toggle zoom).
+    /// Moved from SwiftUI ZoomablePane to UIKit container (Fix I, session 95).
+    var onDoubleTap: (() -> Void)?
     
     func makeUIView(context: Context) -> GhosttyPaneSurfaceContainerView {
-        logger.info("📐 GhosttyPaneSurfaceWrapper makeUIView: cols=\(cols), rows=\(rows)")
+        logger.info("📐 GhosttyPaneSurfaceWrapper makeUIView: cols=\(cols), rows=\(rows), isPrimary=\(isPrimarySurface)")
         let container = GhosttyPaneSurfaceContainerView()
+        container.skipGridSizeUpdate = isPrimarySurface
         container.surface = surface
         container.targetCols = cols
         container.targetRows = rows
         container.onTap = onTap
+        container.onDoubleTap = onDoubleTap
+        // Wire the surface's onPaneTap so observer taps trigger pane selection.
+        // UIKit's gesture recognizer mutual exclusion prevents the container's
+        // tap gesture from firing when the child SurfaceView's tap gesture
+        // recognizes first. This callback bridges that gap.
+        surface.onPaneTap = onTap
         // Set shortcut delegate for keyboard shortcuts
         surface.shortcutDelegate = shortcutDelegate
         return container
@@ -281,6 +353,9 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
             logger.info("📐 GhosttyPaneSurfaceWrapper updating pane dimensions: \(container.targetCols)x\(container.targetRows) -> \(cols)x\(rows)")
         }
         
+        // Update primary surface flag (can change if primary is reassigned)
+        container.skipGridSizeUpdate = isPrimarySurface
+        
         // Update target dimensions if changed
         container.targetCols = cols
         container.targetRows = rows
@@ -288,14 +363,28 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
         // Ensure shortcut delegate is set (may change between updates)
         surface.shortcutDelegate = shortcutDelegate
         
-        // Update focus state
-        if isFocused && !surface.isFirstResponder {
-            surface.focusDidChange(true)
-            _ = surface.becomeFirstResponder()
-        } else if !isFocused && surface.isFirstResponder {
-            surface.focusDidChange(false)
-            _ = surface.resignFirstResponder()
+        // Keep double-tap callback in sync
+        container.onDoubleTap = onDoubleTap
+        
+        // Input routing: only the primary surface should be firstResponder.
+        // Observer surfaces must NOT become firstResponder because their Zig
+        // Termio doesn't have a tmux viewer — keystrokes would bypass
+        // send-keys wrapping and arrive as raw bytes on the tmux control channel.
+        if isFocused {
+            if let primary = primarySurface {
+                // Always route keyboard input through the primary surface.
+                // This ensures Termio.queueWrite() wraps in send-keys.
+                if !primary.isFirstResponder {
+                    _ = primary.becomeFirstResponder()
+                }
+            } else if isPrimarySurface && !surface.isFirstResponder {
+                // Fallback: if no primarySurface ref, handle self (primary only)
+                _ = surface.becomeFirstResponder()
+            }
         }
+        // NOTE: We intentionally do NOT call resignFirstResponder on the primary
+        // when another pane gains focus. The primary must stay firstResponder
+        // at all times in multi-pane mode.
     }
 }
 
@@ -325,6 +414,27 @@ class GhosttyPaneSurfaceContainerView: UIView {
         }
     }
     
+    /// When true, skip calling setExactGridSize() on the surface.
+    ///
+    /// This is set for the PRIMARY surface in multi-pane tmux mode.
+    /// The primary surface's Zig Termio owns the tmux viewer, so calling
+    /// ghostty_surface_set_size() (via setExactGridSize) triggers
+    /// Termio.resize() → "refresh-client -C {pane_cols}x{pane_rows}",
+    /// sending PANE dimensions to tmux. This conflicts with the correct
+    /// CONTAINER-wide "refresh-client -C" from TmuxMultiPaneView.handleSizeChange(),
+    /// creating a resize storm that interleaves %layout-change with capture-pane
+    /// and ultimately triggers a Zig PANIC.
+    ///
+    /// Instead, the primary surface gets usesExactGridSize=true (suppresses
+    /// layoutSubviews auto-resize) and relies on updateSublayerFrames() to
+    /// match its Metal layer to the SwiftUI frame. The renderer reads from
+    /// the viewer's per-pane Terminal (via tmux_pane_binding), not the
+    /// surface's own terminal grid, so the grid size mismatch is harmless.
+    ///
+    /// Observer surfaces (non-primary) don't have this problem because their
+    /// Termio has no tmux_viewer — Termio.resize() skips "refresh-client -C".
+    var skipGridSizeUpdate: Bool = false
+    
     /// Track last successfully applied grid size to avoid redundant updates
     private var lastAppliedCols: Int = 0
     private var lastAppliedRows: Int = 0
@@ -343,6 +453,13 @@ class GhosttyPaneSurfaceContainerView: UIView {
                 // Remove from any previous superview and ensure it's visible
                 surface.removeFromSuperview()
                 surface.isHidden = false
+                
+                // For the primary surface, suppress layoutSubviews auto-resize
+                // immediately. This prevents sizeDidChange → ghostty_surface_set_size
+                // → Zig Termio.resize → "refresh-client -C" with pane dimensions.
+                if skipGridSizeUpdate {
+                    surface.usesExactGridSize = true
+                }
                 
                 // Fill the container - exact size is handled by setExactGridSize
                 surface.translatesAutoresizingMaskIntoConstraints = false
@@ -371,6 +488,10 @@ class GhosttyPaneSurfaceContainerView: UIView {
     
     var onTap: (() -> Void)?
     
+    /// Called when the pane is double-tapped (toggle zoom).
+    /// Moved from SwiftUI ZoomablePane to UIKit container (Fix I, session 95).
+    var onDoubleTap: (() -> Void)?
+    
     /// Tap gesture recognizer for focus change (H11 fix).
     /// Replaces hitTest override which fired onTap for every touch including scrolls.
     private lazy var tapGesture: UITapGestureRecognizer = {
@@ -380,21 +501,54 @@ class GhosttyPaneSurfaceContainerView: UIView {
         return gesture
     }()
     
+    /// Double-tap gesture recognizer for pane zoom toggle (Fix I, session 95).
+    /// Previously this was a SwiftUI `.onTapGesture(count: 2)` on ZoomablePane,
+    /// but that installed a gesture at the SwiftUI hosting level which intercepted
+    /// ALL touches via `.contentShape(Rectangle())`, preventing the UIKit SurfaceView's
+    /// gesture recognizers from ever firing.
+    private lazy var doubleTapGesture: UITapGestureRecognizer = {
+        let gesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        gesture.numberOfTapsRequired = 2
+        gesture.cancelsTouchesInView = false
+        return gesture
+    }()
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
         addGestureRecognizer(tapGesture)
+        addGestureRecognizer(doubleTapGesture)
+        // NOTE: We intentionally do NOT use tapGesture.require(toFail: doubleTapGesture).
+        // That would add ~300ms delay to single taps while waiting for the double-tap
+        // to fail, making pane selection feel sluggish. Instead, both fire independently:
+        // single-tap instantly selects the pane, double-tap toggles zoom. On a double-tap,
+        // the single-tap also fires (selectPane is idempotent, so this is harmless).
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         clipsToBounds = true
         addGestureRecognizer(tapGesture)
+        addGestureRecognizer(doubleTapGesture)
     }
     
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         if gesture.state == .ended {
-            onTap?()
+            if let onTap = onTap {
+                logger.info("[ContainerView.handleTap] container tap recognized, calling onTap")
+                onTap()
+            } else {
+                logger.warning("[ContainerView.handleTap] container tap recognized but onTap is nil")
+            }
+        }
+    }
+    
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        if gesture.state == .ended {
+            if let onDoubleTap = onDoubleTap {
+                logger.info("[ContainerView.handleDoubleTap] container double-tap recognized, toggling zoom")
+                onDoubleTap()
+            }
         }
     }
     
@@ -412,6 +566,27 @@ class GhosttyPaneSurfaceContainerView: UIView {
               bounds.width > 10,  // Ensure we have valid container bounds
               bounds.height > 10 else {
             logger.debug("📐 updateGridSize skipped: surface=\(surface != nil), cols=\(targetCols), rows=\(targetRows), bounds=\(bounds)")
+            return
+        }
+        
+        // For the primary surface, DON'T call setExactGridSize().
+        // setExactGridSize → ghostty_surface_set_size → Zig Termio.resize()
+        // → "refresh-client -C {pane_cols}x{pane_rows}" — this sends PANE
+        // dimensions to tmux, conflicting with the correct container-wide
+        // "refresh-client -C" from TmuxMultiPaneView.handleSizeChange().
+        //
+        // The primary surface already has usesExactGridSize=true (set in the
+        // surface didSet above), which suppresses layoutSubviews auto-resize.
+        // Its Metal layer frame is managed by updateSublayerFrames(). The
+        // renderer reads from the viewer's per-pane Terminal (via
+        // tmux_pane_binding), so the surface's own grid size is irrelevant.
+        if skipGridSizeUpdate {
+            // Still mark as "applied" to avoid redundant log spam
+            if targetCols != lastAppliedCols || targetRows != lastAppliedRows {
+                logger.info("📐 updateGridSize: SKIPPING setExactGridSize for primary surface (\(targetCols)x\(targetRows)) — resize storm prevention")
+                lastAppliedCols = targetCols
+                lastAppliedRows = targetRows
+            }
             return
         }
         
