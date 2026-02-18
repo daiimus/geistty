@@ -49,14 +49,20 @@ extension RawTerminalUIViewController {
             return surface
         }
         
-        // Input handler wires surface.onWrite through SSHSession
-        // In native Ghostty tmux mode, keystrokes on stdin go directly to the active pane.
-        // onWrite arrives on main thread (C callback dispatches via DispatchQueue.main.async)
-        let inputHandler: (Ghostty.SurfaceView, String) -> Void = { [weak self] surface, paneId in
+        // Input handler wires surface.onWrite through SSHSession.
+        // In native Ghostty tmux mode, the Zig-side viewer.sendKeys() uses
+        // active_pane_id (set by selectPane → setActiveTmuxPane) to route
+        // keystrokes to the correct pane. The onWrite callback just needs
+        // to forward the data to SSH — focus tracking is handled by
+        // selectPane() when the user taps a pane.
+        //
+        // IMPORTANT: Do NOT call setFocusedPane(paneId) here. The paneId
+        // captured in this closure is static (wired at surface creation).
+        // In multi-pane mode the primary surface handles ALL input and
+        // the captured paneId would always be the primary's initial pane,
+        // overwriting whatever selectPane() set.
+        let inputHandler: (Ghostty.SurfaceView, String) -> Void = { [weak self] surface, _ in
             surface.onWrite = { [weak self] data in
-                // Track which pane has focus locally
-                self?.viewModel?.tmuxManager?.setFocusedPane(paneId)
-                // Write directly — Ghostty's tmux viewer routes to the active pane
                 self?.viewModel?.sendInput(data)
             }
         }

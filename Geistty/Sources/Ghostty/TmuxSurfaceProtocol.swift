@@ -39,9 +39,17 @@ protocol TmuxSurfaceProtocol: AnyObject {
     /// IDs of all tmux panes
     func getTmuxPaneIds() -> [Int]
     
-    /// Set which tmux pane the renderer displays. Returns true on success.
+    /// Set which tmux pane the renderer displays AND routes input to.
+    /// Swaps renderer_state.terminal to the pane's terminal.
+    /// Returns true on success.
     @discardableResult
     func setActiveTmuxPane(_ paneId: Int) -> Bool
+    
+    /// Set which tmux pane receives input (send-keys) WITHOUT swapping the renderer.
+    /// Used in multi-surface mode where each pane has its own observer surface.
+    /// Returns true on success.
+    @discardableResult
+    func setActiveTmuxPaneInputOnly(_ paneId: Int) -> Bool
     
     // MARK: - Window Queries
     

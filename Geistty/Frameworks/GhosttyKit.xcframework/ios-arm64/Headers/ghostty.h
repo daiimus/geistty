@@ -1181,9 +1181,14 @@ size_t ghostty_surface_tmux_pane_ids(ghostty_surface_t,
                                      size_t* out_ids,
                                      size_t max_count);
 
-// Set which tmux pane this surface renders.
+// Set which tmux pane this surface renders AND routes input to.
 // Returns true if successful, false if pane_id not found or not in tmux mode.
 bool ghostty_surface_tmux_set_active_pane(ghostty_surface_t, size_t pane_id);
+
+// Set which tmux pane receives input (send-keys) WITHOUT swapping the renderer.
+// Used in multi-surface mode where each pane has its own rendering surface.
+// Returns true if successful, false if pane_id not found or not in tmux mode.
+bool ghostty_surface_tmux_set_active_pane_input_only(ghostty_surface_t, size_t pane_id);
 
 // Reset to render the main terminal (not a tmux pane).
 void ghostty_surface_tmux_reset_active_pane(ghostty_surface_t);

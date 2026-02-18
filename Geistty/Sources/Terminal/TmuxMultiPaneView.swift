@@ -243,7 +243,6 @@ struct TmuxPaneSurfaceView: View {
                 rows: rows,
                 isFocused: isFocused,
                 isPrimarySurface: isPrimarySurface,
-                primarySurface: sessionManager.primarySurface,
                 shortcutDelegate: shortcutDelegate,
                 onTap: {
                     selectPane()
@@ -318,10 +317,6 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
     /// setExactGridSize() called — that would trigger Zig-side
     /// "refresh-client -C" with pane dimensions, causing a resize storm.
     let isPrimarySurface: Bool
-    /// The primary surface that owns the tmux viewer. In multi-pane mode,
-    /// this surface must always be firstResponder so keyboard input flows
-    /// through its tmux-aware Termio (send-keys wrapping).
-    weak var primarySurface: Ghostty.SurfaceView?
     weak var shortcutDelegate: Ghostty.ShortcutDelegate?
     let onTap: () -> Void
     /// Called when the pane is double-tapped (toggle zoom).
@@ -335,12 +330,10 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
         container.surface = surface
         container.targetCols = cols
         container.targetRows = rows
-        container.onTap = onTap
         container.onDoubleTap = onDoubleTap
         // Wire the surface's onPaneTap so observer taps trigger pane selection.
-        // UIKit's gesture recognizer mutual exclusion prevents the container's
-        // tap gesture from firing when the child SurfaceView's tap gesture
-        // recognizes first. This callback bridges that gap.
+        // The SurfaceView's handleTap() checks isMultiPaneObserver and calls
+        // this callback instead of becoming firstResponder.
         surface.onPaneTap = onTap
         // Set shortcut delegate for keyboard shortcuts
         surface.shortcutDelegate = shortcutDelegate
@@ -366,25 +359,11 @@ struct GhosttyPaneSurfaceWrapper: UIViewRepresentable {
         // Keep double-tap callback in sync
         container.onDoubleTap = onDoubleTap
         
-        // Input routing: only the primary surface should be firstResponder.
-        // Observer surfaces must NOT become firstResponder because their Zig
-        // Termio doesn't have a tmux viewer — keystrokes would bypass
-        // send-keys wrapping and arrive as raw bytes on the tmux control channel.
-        if isFocused {
-            if let primary = primarySurface {
-                // Always route keyboard input through the primary surface.
-                // This ensures Termio.queueWrite() wraps in send-keys.
-                if !primary.isFirstResponder {
-                    _ = primary.becomeFirstResponder()
-                }
-            } else if isPrimarySurface && !surface.isFirstResponder {
-                // Fallback: if no primarySurface ref, handle self (primary only)
-                _ = surface.becomeFirstResponder()
-            }
+        // Ensure the primary surface has keyboard focus. Observers have
+        // canBecomeFirstResponder=false, so they can never steal it.
+        if isFocused && !surface.isFirstResponder {
+            _ = surface.becomeFirstResponder()
         }
-        // NOTE: We intentionally do NOT call resignFirstResponder on the primary
-        // when another pane gains focus. The primary must stay firstResponder
-        // at all times in multi-pane mode.
     }
 }
 
@@ -486,20 +465,9 @@ class GhosttyPaneSurfaceContainerView: UIView {
         }
     }
     
-    var onTap: (() -> Void)?
-    
     /// Called when the pane is double-tapped (toggle zoom).
     /// Moved from SwiftUI ZoomablePane to UIKit container (Fix I, session 95).
     var onDoubleTap: (() -> Void)?
-    
-    /// Tap gesture recognizer for focus change (H11 fix).
-    /// Replaces hitTest override which fired onTap for every touch including scrolls.
-    private lazy var tapGesture: UITapGestureRecognizer = {
-        let gesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-        // Don't prevent other gestures (scroll, pan) from recognizing
-        gesture.cancelsTouchesInView = false
-        return gesture
-    }()
     
     /// Double-tap gesture recognizer for pane zoom toggle (Fix I, session 95).
     /// Previously this was a SwiftUI `.onTapGesture(count: 2)` on ZoomablePane,
@@ -516,31 +484,13 @@ class GhosttyPaneSurfaceContainerView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
-        addGestureRecognizer(tapGesture)
         addGestureRecognizer(doubleTapGesture)
-        // NOTE: We intentionally do NOT use tapGesture.require(toFail: doubleTapGesture).
-        // That would add ~300ms delay to single taps while waiting for the double-tap
-        // to fail, making pane selection feel sluggish. Instead, both fire independently:
-        // single-tap instantly selects the pane, double-tap toggles zoom. On a double-tap,
-        // the single-tap also fires (selectPane is idempotent, so this is harmless).
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         clipsToBounds = true
-        addGestureRecognizer(tapGesture)
         addGestureRecognizer(doubleTapGesture)
-    }
-    
-    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        if gesture.state == .ended {
-            if let onTap = onTap {
-                logger.info("[ContainerView.handleTap] container tap recognized, calling onTap")
-                onTap()
-            } else {
-                logger.warning("[ContainerView.handleTap] container tap recognized but onTap is nil")
-            }
-        }
     }
     
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {

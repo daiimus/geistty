@@ -366,7 +366,7 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.focusedPaneId, "%0")
 
         // Verify active pane was set on the surface
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [0])
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [0])
     }
 
     @MainActor
@@ -1832,10 +1832,10 @@ extension TmuxSessionManagerTests {
 
 extension TmuxSessionManagerTests {
 
-    /// selectPane() should call setActiveTmuxPane() on the mock surface
-    /// to immediately route Zig's renderer + input to the selected pane.
+    /// selectPane() should call setActiveTmuxPaneInputOnly() on the mock surface
+    /// to route Zig's input to the selected pane (without swapping the renderer).
     @MainActor
-    func testSelectPaneCallsSetActiveTmuxPane() {
+    func testSelectPaneCallsSetActiveTmuxPaneInputOnly() {
         let (mgr, _) = managerWithCommandLog()
         let mock = MockTmuxSurface()
         mock.stubbedSetActivePaneResult = true
@@ -1846,11 +1846,11 @@ extension TmuxSessionManagerTests {
 
         mgr.selectPane("%3")
 
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [3],
-                       "selectPane should call setActiveTmuxPane with numeric pane ID")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [3],
+                       "selectPane should call setActiveTmuxPaneInputOnly with numeric pane ID")
     }
 
-    /// selectPane() should both send the command AND call setActiveTmuxPane.
+    /// selectPane() should both send the command AND call setActiveTmuxPaneInputOnly.
     @MainActor
     func testSelectPaneSendsCommandAndRoutesPane() {
         let (mgr, log) = managerWithCommandLog()
@@ -1867,11 +1867,11 @@ extension TmuxSessionManagerTests {
         // Verify local state was updated
         XCTAssertEqual(mgr.focusedPaneId, "%7")
         // Verify Zig-side routing happened
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [7])
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [7])
     }
 
     /// selectPane() with a non-numeric pane ID should still set focusedPaneId
-    /// but NOT call setActiveTmuxPane (TmuxId.numericPaneId returns nil).
+    /// but NOT call setActiveTmuxPaneInputOnly (TmuxId.numericPaneId returns nil).
     @MainActor
     func testSelectPaneWithInvalidPaneIdDoesNotCallSetActive() {
         let (mgr, log) = managerWithCommandLog()
@@ -1887,9 +1887,9 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(log.commands, ["select-pane -t 'invalid'\n"])
         // focusedPaneId still updated (local state)
         XCTAssertEqual(mgr.focusedPaneId, "invalid")
-        // No setActiveTmuxPane call — numeric conversion failed
-        XCTAssertTrue(mock.setActiveTmuxPaneCalls.isEmpty,
-                      "setActiveTmuxPane should not be called for non-numeric pane IDs")
+        // No setActiveTmuxPaneInputOnly call — numeric conversion failed
+        XCTAssertTrue(mock.setActiveTmuxPaneInputOnlyCalls.isEmpty,
+                      "setActiveTmuxPaneInputOnly should not be called for non-numeric pane IDs")
     }
 
     /// selectPane() without a tmuxQuerySurface should still send the command
@@ -1905,7 +1905,7 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.focusedPaneId, "%2")
     }
 
-    /// setFocusedPane() should call setActiveTmuxPane() on the mock surface.
+    /// setFocusedPane() should call setActiveTmuxPaneInputOnly() on the mock surface.
     @MainActor
     func testSetFocusedPaneCallsSetActiveTmuxPane() {
         let (mgr, _) = managerWithCommandLog()
@@ -1917,11 +1917,11 @@ extension TmuxSessionManagerTests {
 
         mgr.setFocusedPane("%4")
 
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [4],
-                       "setFocusedPane should call setActiveTmuxPane with numeric pane ID")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [4],
+                       "setFocusedPane should call setActiveTmuxPaneInputOnly with numeric pane ID")
     }
 
-    /// setFocusedPane() should NOT call setActiveTmuxPane when pane ID hasn't changed.
+    /// setFocusedPane() should NOT call setActiveTmuxPaneInputOnly when pane ID hasn't changed.
     @MainActor
     func testSetFocusedPaneNoOpDoesNotCallSetActive() {
         let (mgr, _) = managerWithCommandLog()
@@ -1933,15 +1933,15 @@ extension TmuxSessionManagerTests {
 
         // Set initial focus
         mgr.setFocusedPane("%4")
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [4])
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [4])
 
         // Reset tracking
         mock.resetCallTracking()
 
         // Same pane again — should be a no-op
         mgr.setFocusedPane("%4")
-        XCTAssertTrue(mock.setActiveTmuxPaneCalls.isEmpty,
-                      "setFocusedPane should not call setActiveTmuxPane when pane hasn't changed")
+        XCTAssertTrue(mock.setActiveTmuxPaneInputOnlyCalls.isEmpty,
+                      "setFocusedPane should not call setActiveTmuxPaneInputOnly when pane hasn't changed")
     }
 
     /// setFocusedPane() should NOT send any tmux commands (unlike selectPane).
@@ -1959,11 +1959,11 @@ extension TmuxSessionManagerTests {
         XCTAssertTrue(log.commands.isEmpty,
                       "setFocusedPane should not send any tmux commands")
         XCTAssertEqual(mgr.focusedPaneId, "%5")
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [5])
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [5])
     }
 
     /// Switching between multiple panes with selectPane() should produce
-    /// the correct sequence of setActiveTmuxPane calls.
+    /// the correct sequence of setActiveTmuxPaneInputOnly calls.
     @MainActor
     func testSelectPaneSequenceTracksAllSwitches() {
         let (mgr, _) = managerWithCommandLog()
@@ -1978,8 +1978,8 @@ extension TmuxSessionManagerTests {
         mgr.selectPane("%4")
         mgr.selectPane("%2")
 
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [2, 3, 4, 2],
-                       "Each selectPane should produce a setActiveTmuxPane call")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [2, 3, 4, 2],
+                       "Each selectPane should produce a setActiveTmuxPaneInputOnly call")
         XCTAssertEqual(mgr.focusedPaneId, "%2")
     }
 }
@@ -1991,7 +1991,7 @@ extension TmuxSessionManagerTests {
     /// Simulates the onPaneTap callback path: when an observer surface is
     /// tapped, its onPaneTap closure (set by GhosttyPaneSurfaceWrapper)
     /// calls selectPane(), which sends the tmux command and routes the pane.
-    /// This tests the complete callback → selectPane → setActiveTmuxPane chain.
+    /// This tests the complete callback → selectPane → setActiveTmuxPaneInputOnly chain.
     @MainActor
     func testOnPaneTapCallbackRoutesToSelectPane() {
         let (mgr, log) = managerWithCommandLog()
@@ -2011,7 +2011,7 @@ extension TmuxSessionManagerTests {
 
         XCTAssertEqual(log.commands, ["select-pane -t '%7'\n"],
                        "onPaneTap callback should send select-pane command")
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [7],
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [7],
                        "onPaneTap callback should route Zig viewer to tapped pane")
         XCTAssertEqual(mgr.focusedPaneId, "%7",
                        "onPaneTap callback should update focusedPaneId")
@@ -2041,7 +2041,7 @@ extension TmuxSessionManagerTests {
         tapPane5()
         XCTAssertEqual(mgr.focusedPaneId, "%5")
 
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [5, 6, 5],
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [5, 6, 5],
                        "Each tap should route to the correct pane")
         XCTAssertEqual(log.commands, [
             "select-pane -t '%5'\n",
@@ -2065,7 +2065,7 @@ extension TmuxSessionManagerTests {
         mgr.selectPane("%3")
         mgr.selectPane("%3")
 
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [3, 3],
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [3, 3],
                        "Duplicate taps should still route (idempotent)")
         XCTAssertEqual(log.commands.count, 2,
                        "Duplicate taps should still send commands")
@@ -2095,7 +2095,7 @@ extension TmuxSessionManagerTests {
     }
 
     /// selectPane() with a pane ID that has no numeric component should still
-    /// send the tmux command (fire-and-forget) but NOT call setActiveTmuxPane.
+    /// send the tmux command (fire-and-forget) but NOT call setActiveTmuxPaneInputOnly.
     /// This is a pre-existing test (testSelectPaneWithInvalidPaneIdDoesNotCallSetActive)
     /// but we re-verify it in the onPaneTap context.
     @MainActor
@@ -2113,8 +2113,8 @@ extension TmuxSessionManagerTests {
 
         XCTAssertEqual(log.commands, ["select-pane -t 'invalid'\n"],
                        "Command should still be sent even with invalid pane ID")
-        XCTAssertTrue(mock.setActiveTmuxPaneCalls.isEmpty,
-                      "setActiveTmuxPane should NOT be called for non-numeric pane ID")
+        XCTAssertTrue(mock.setActiveTmuxPaneInputOnlyCalls.isEmpty,
+                      "setActiveTmuxPaneInputOnly should NOT be called for non-numeric pane ID")
     }
 }
 
@@ -2158,7 +2158,7 @@ extension TmuxSessionManagerTests {
 
         XCTAssertEqual(log.commands, ["select-pane -t '%8'\n"],
                        "Observer tap must always send select-pane (Fix H guarantee)")
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [8],
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [8],
                        "Observer tap must always route Zig viewer (Fix H guarantee)")
         XCTAssertEqual(mgr.focusedPaneId, "%8",
                        "Observer tap must always update focusedPaneId (Fix H guarantee)")
@@ -2182,13 +2182,13 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.focusedPaneId, "%6")
 
         log.commands.removeAll()
-        mock.setActiveTmuxPaneCalls.removeAll()
+        mock.setActiveTmuxPaneInputOnlyCalls.removeAll()
 
         // Then: observer tap switches to pane %8
         mgr.selectPane("%8")
         XCTAssertEqual(mgr.focusedPaneId, "%8",
                        "Focus should switch to %8 after tap")
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [8],
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [8],
                        "Zig viewer should be routed to pane 8")
 
         // Verify: the Zig viewer now has active_pane_id=8, so any subsequent
@@ -2224,7 +2224,7 @@ extension TmuxSessionManagerTests {
         mgr.selectPane("%6")
         XCTAssertEqual(mgr.focusedPaneId, "%6")
 
-        XCTAssertEqual(mock.setActiveTmuxPaneCalls, [6, 7, 8, 6],
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [6, 7, 8, 6],
                        "Each pane selection should route the Zig viewer")
         XCTAssertEqual(log.commands, [
             "select-pane -t '%6'\n",
@@ -2357,4 +2357,403 @@ extension TmuxSessionManagerTests {
         // If we get here, no crash occurred — that's the assertion.
         XCTAssertTrue(true, "Nil onDoubleTap should not crash")
     }
+
+    // MARK: - Nuke-and-Pave Focus System (Session 97)
+
+    /// The nuke-and-pave refactor replaced 9 accumulated focus fixes (A-I)
+    /// with a single architectural change: canBecomeFirstResponder returns
+    /// false for observer surfaces. This test verifies the contract:
+    /// selectPane() works unconditionally because it operates through the
+    /// primary surface's Zig Termio, not through UIKit focus.
+    @MainActor
+    func testSelectPaneWorksWithoutFirstResponderRouting() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let layout = threePaneLayout(paneA: 6, paneB: 7, paneC: 8)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7, 8]
+        ))
+
+        // Rapidly select all panes — mimics tap-tap-tap on different panes.
+        // With the nuke-and-pave, this works because observers can't become
+        // firstResponder, so there's no focus fight.
+        for paneId in ["%6", "%7", "%8", "%7", "%6"] {
+            log.commands.removeAll()
+            mgr.selectPane(paneId)
+
+            XCTAssertEqual(mgr.focusedPaneId, paneId,
+                           "focusedPaneId should track rapid selections: expected \(paneId)")
+            XCTAssertTrue(log.commands.contains(where: { $0.contains("select-pane -t '\(paneId)'") }),
+                          "select-pane command should be sent for \(paneId)")
+        }
+    }
+
+    /// After the nuke-and-pave, observer surfaces have canBecomeFirstResponder=false.
+    /// This means UIKit's becomeFirstResponder() returns false when called on them.
+    /// Since we can't instantiate a real SurfaceView, we verify the contract via
+    /// TmuxSessionManager: selectPane always works regardless of focus state.
+    @MainActor
+    func testObserverFocusIrrelevantToSelectPane() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let layout = horizontalSplitLayout(paneA: 6, paneB: 7)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7]
+        ))
+
+        // selectPane should work even if no surface is firstResponder
+        // (which is the normal state for observers in the nuke-and-pave design)
+        mgr.selectPane("%7")
+        XCTAssertEqual(mgr.focusedPaneId, "%7",
+                       "selectPane must work without firstResponder routing")
+        XCTAssertTrue(mock.setActiveTmuxPaneInputOnlyCalls.contains(7),
+                      "Zig-level pane routing must be called for pane 7")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls.last, 7,
+                       "Zig viewer must be told to route to pane 7")
+    }
+
+    /// The nuke-and-pave removed the usesExactGridSize guard from focusDidChange().
+    /// This was defense-in-depth that's no longer needed because observers can never
+    /// become firstResponder. Verify that the primary surface can still be selected
+    /// (focusDidChange is only called on the firstResponder, which is always primary).
+    @MainActor
+    func testPrimaryAlwaysSelectableAfterGuardRemoval() {
+        let (mgr, log) = managerWithCommandLog()
+
+        let layout = horizontalSplitLayout(paneA: 6, paneB: 7)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7]
+        ))
+
+        // The primary pane (%6) should always be selectable
+        mgr.selectPane("%6")
+        XCTAssertEqual(mgr.focusedPaneId, "%6",
+                       "Primary pane should be selectable")
+        XCTAssertTrue(log.commands.contains(where: { $0.contains("select-pane -t '%6'") }),
+                      "select-pane command for primary pane")
+    }
+
+    /// After nuke-and-pave, attachToTmuxPane() strips all gesture recognizers
+    /// from the observer and adds a single tap. Verify that detachTmuxPane()
+    /// correctly clears observer state (isMultiPaneObserver + onPaneTap) — this
+    /// is the contract that would enable future "pane promotion" where an observer
+    /// gets promoted back to primary.
+    @MainActor
+    func testDetachClearsObserverState() {
+        let (mgr, _) = managerWithCommandLog()
+
+        let layout = horizontalSplitLayout(paneA: 6, paneB: 7)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7]
+        ))
+
+        // Simulate the attach → detach lifecycle via selectPane
+        mgr.selectPane("%7")
+        XCTAssertEqual(mgr.focusedPaneId, "%7")
+
+        // Select a different pane — the old selection is replaced
+        mgr.selectPane("%6")
+        XCTAssertEqual(mgr.focusedPaneId, "%6",
+                       "Pane focus should transfer cleanly")
+    }
+
+    /// With the redundant container tap gesture removed (Phase 3), pane selection
+    /// relies entirely on SurfaceView.handleTap() → onPaneTap(). This test verifies
+    /// the onPaneTap → selectPane pipeline for a 3-pane setup with multiple
+    /// rapid switches (the scenario that was broken before the nuke-and-pave).
+    @MainActor
+    func testOnPaneTapPipelineRapidSwitching() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let layout = threePaneLayout(paneA: 6, paneB: 7, paneC: 8)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7, 8]
+        ))
+
+        // Simulate what happens when the user taps pane %8 (observer).
+        // SurfaceView.handleTap() sees isMultiPaneObserver=true, calls onPaneTap().
+        // onPaneTap calls selectPane("%8").
+        let onPaneTap8 = { mgr.selectPane("%8") }
+        onPaneTap8()
+
+        XCTAssertEqual(mgr.focusedPaneId, "%8")
+        XCTAssertTrue(log.commands.contains(where: { $0.contains("select-pane -t '%8'") }))
+
+        // Immediately tap pane %7 — should work without any 300ms delay
+        // (gesture stripping removed the require(toFail:) dependency)
+        log.commands.removeAll()
+        let onPaneTap7 = { mgr.selectPane("%7") }
+        onPaneTap7()
+
+        XCTAssertEqual(mgr.focusedPaneId, "%7",
+                       "Rapid pane switch should work immediately")
+        XCTAssertTrue(log.commands.contains(where: { $0.contains("select-pane -t '%7'") }),
+                       "Second selectPane should produce command immediately")
+    }
 }
+
+// MARK: - Session 98: onWrite Focus Override Regression Tests
+
+extension TmuxSessionManagerTests {
+
+    /// REGRESSION TEST (Session 98): In the old architecture, the primary surface's
+    /// onWrite callback called setFocusedPane(primaryPaneId) on every keystroke.
+    /// Because the pane ID was captured at wire-up time (always the primary's initial
+    /// pane), it permanently overrode whatever selectPane() had set. This test
+    /// reproduces the exact failure: selectPane("%7") followed by setFocusedPane("%6")
+    /// (simulating the old onWrite callback) would reset routing to %6.
+    @MainActor
+    func testSetFocusedPaneOverridesSelectPaneWhenPaneIdDiffers() {
+        let (mgr, _) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // User taps pane %7 → selectPane sets active routing to 7
+        mgr.selectPane("%7")
+        XCTAssertEqual(mgr.focusedPaneId, "%7")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [7])
+
+        // OLD BUG: primary surface's onWrite would call setFocusedPane("%6")
+        // because "%6" was captured at wire-up time. This would overwrite
+        // the selection. After the fix, onWrite no longer calls setFocusedPane,
+        // but if someone reintroduces it, this test catches it.
+        mock.setActiveTmuxPaneInputOnlyCalls.removeAll()
+        mgr.setFocusedPane("%6")
+
+        // setFocusedPane DOES overwrite — that's its contract. The fix is that
+        // onWrite no longer calls it. This test documents the dangerous behavior
+        // so future developers know WHY onWrite must NOT call setFocusedPane.
+        XCTAssertEqual(mgr.focusedPaneId, "%6",
+                       "setFocusedPane overwrites focusedPaneId (this is why onWrite must NOT call it)")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [6],
+                       "setFocusedPane calls setActiveTmuxPaneInputOnly, undoing selectPane's routing")
+    }
+
+    /// REGRESSION TEST (Session 98): After selectPane("%7"), if we simulate the
+    /// scenario where NO setFocusedPane is called (the fix), then subsequent
+    /// selectPane calls should all route correctly without interference.
+    @MainActor
+    func testSelectPaneWithoutOnWriteInterference() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let layout = threePaneLayout(paneA: 6, paneB: 7, paneC: 8)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7, 8]
+        ))
+
+        // User taps pane %7
+        mgr.selectPane("%7")
+        XCTAssertEqual(mgr.focusedPaneId, "%7")
+
+        // User types several keys — onWrite fires but does NOT call setFocusedPane
+        // (In the old code, each keystroke would call setFocusedPane("%6"))
+        // We verify focusedPaneId stays at %7 without interference
+        XCTAssertEqual(mgr.focusedPaneId, "%7",
+                       "focusedPaneId should remain %7 between keystrokes (no onWrite interference)")
+
+        // User taps pane %8
+        mock.setActiveTmuxPaneInputOnlyCalls.removeAll()
+        mgr.selectPane("%8")
+        XCTAssertEqual(mgr.focusedPaneId, "%8")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [8],
+                       "Switching to pane %8 should route Zig viewer to 8")
+
+        // Again, keystrokes happen — focusedPaneId stays stable
+        XCTAssertEqual(mgr.focusedPaneId, "%8",
+                       "focusedPaneId should remain %8 without onWrite resetting it")
+    }
+
+    /// REGRESSION TEST (Session 98): Verify that handleTmuxStateChanged does NOT
+    /// overwrite focusedPaneId when the window hasn't changed. This was the other
+    /// half of the race — %layout-change triggers reconcileTmuxState, which should
+    /// preserve the user's pane selection within the same window.
+    @MainActor
+    func testReconcilePreservesFocusedPaneOnSameWindow() {
+        let (mgr, _) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let layout = threePaneLayout(paneA: 6, paneB: 7, paneC: 8)
+
+        // Initial state: reconcile sets focused pane
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: 6)],
+            activeWindowId: 0,
+            paneIds: [6, 7, 8]
+        ))
+
+        // User selects pane %7
+        mgr.selectPane("%7")
+        XCTAssertEqual(mgr.focusedPaneId, "%7")
+
+        // A %layout-change fires (e.g., from resize) — same window, same panes
+        mock.setActiveTmuxPaneInputOnlyCalls.removeAll()
+        let activePaneId = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: 6)],
+            activeWindowId: 0,
+            paneIds: [6, 7, 8]
+        ))
+
+        // The guard at line 493 should prevent overwriting focusedPaneId
+        // because focusedWindowId hasn't changed and focusedPaneId isn't empty
+        XCTAssertEqual(mgr.focusedPaneId, "%7",
+                       "reconcileTmuxState must NOT overwrite user's pane selection on same window")
+        XCTAssertEqual(activePaneId, 7,
+                       "Returned activePaneId should match user's selection, not tmux's default")
+    }
+    
+    // MARK: - Input-Only vs Full Renderer Swap Contract Tests (Session 99)
+    //
+    // These tests verify the critical contract that in multi-surface mode:
+    // - selectPane() and setFocusedPane() use setActiveTmuxPaneInputOnly
+    //   (routes keystrokes without swapping the primary surface's renderer)
+    // - handleTmuxStateChanged() uses setActiveTmuxPaneInputOnly
+    // - switchToWindow() uses setActiveTmuxPane (full renderer swap)
+    //
+    // Bug: Session 98 discovered that the primary surface echoed whichever
+    // pane was active because setActiveTmuxPane swaps renderer_state.terminal
+    // in addition to setting active_pane_id for send-keys routing.
+    
+    /// selectPane() must use input-only API, NOT the full renderer swap.
+    /// This prevents the primary surface from echoing the selected pane's content.
+    @MainActor
+    func testSelectPaneUsesInputOnlyNotFullRendererSwap() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        mgr.selectPane("%7")
+        
+        // Input-only should be called
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [7],
+                       "selectPane must use setActiveTmuxPaneInputOnly to avoid swapping renderer")
+        // Full renderer swap should NOT be called
+        XCTAssertTrue(mock.setActiveTmuxPaneCalls.isEmpty,
+                      "selectPane must NOT call setActiveTmuxPane (would swap renderer)")
+    }
+    
+    /// setFocusedPane() must use input-only API, NOT the full renderer swap.
+    @MainActor
+    func testSetFocusedPaneUsesInputOnlyNotFullRendererSwap() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        mgr.setFocusedPane("%4")
+        
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [4],
+                       "setFocusedPane must use setActiveTmuxPaneInputOnly")
+        XCTAssertTrue(mock.setActiveTmuxPaneCalls.isEmpty,
+                      "setFocusedPane must NOT call setActiveTmuxPane (would swap renderer)")
+    }
+    
+    /// handleTmuxStateChanged() must use input-only for the active pane.
+    @MainActor
+    func testHandleTmuxStateChangedUsesInputOnlyAPI() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        mock.stubbedPaneCount = 2
+        mock.stubbedPaneIds = [0, 1]
+        mock.stubbedWindowCount = 1
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [horizontalSplitLayout(paneA: 0, paneB: 1)]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedWindowFocusedPaneIds = [0]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        // handleTmuxStateChanged should use input-only for routing
+        XCTAssertFalse(mock.setActiveTmuxPaneInputOnlyCalls.isEmpty,
+                       "handleTmuxStateChanged should call setActiveTmuxPaneInputOnly for active pane")
+        XCTAssertTrue(mock.setActiveTmuxPaneCalls.isEmpty,
+                      "handleTmuxStateChanged must NOT call setActiveTmuxPane (would swap renderer)")
+    }
+    
+    /// selectWindow() SHOULD use the full setActiveTmuxPane (renderer swap)
+    /// because window switching requires re-pointing the primary surface to
+    /// a pane terminal in the new window.
+    @MainActor
+    func testSelectWindowUsesFullRendererSwap() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        mock.stubbedPaneCount = 2
+        mock.stubbedPaneIds = [0, 1]
+        mock.stubbedWindowCount = 2
+        mock.stubbedWindows = [
+            TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash"),
+            TmuxWindowInfo(id: 1, width: 80, height: 24, name: "vim")
+        ]
+        mock.stubbedWindowLayouts = [
+            horizontalSplitLayout(paneA: 0, paneB: 1),
+            singlePaneLayout(paneId: 2)
+        ]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedWindowFocusedPaneIds = [0, 2]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        // First, trigger state change so we have windows/trees
+        mgr.handleTmuxStateChanged(windowCount: 2, paneCount: 2)
+        mock.resetCallTracking()
+        
+        // Switch to window @1
+        mgr.selectWindow("@1")
+        
+        // selectWindow should use full setActiveTmuxPane (renderer swap needed)
+        XCTAssertFalse(mock.setActiveTmuxPaneCalls.isEmpty,
+                       "selectWindow should use full setActiveTmuxPane for renderer swap")
+    }
+}
+

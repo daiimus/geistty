@@ -403,9 +403,9 @@ class TmuxSessionManager: ObservableObject {
             removeSurface(for: paneId, paneActuallyClosed: true)
         }
         
-        // Set active pane on the Ghostty surface for rendering
+        // Set active pane for input routing only — observers handle rendering
         if let numericPaneId = activePaneId {
-            surface.setActiveTmuxPane(numericPaneId)
+            surface.setActiveTmuxPaneInputOnly(numericPaneId)
         }
         
         logger.info("handleTmuxStateChanged complete: focusedWindow=\(focusedWindowId), focusedPane=\(focusedPaneId), windows=\(windows.count), splitTrees=\(windowSplitTrees.count)")
@@ -1055,24 +1055,25 @@ class TmuxSessionManager: ObservableObject {
         sendCommandFireAndForget("select-pane -t '\(paneId)'")
         focusedPaneId = paneId
         
-        // Swap the Ghostty renderer + input routing to this pane.
-        // Without this, setActiveTmuxPane only fires on the first keystroke
-        // (via setFocusedPane from onWrite), leaving the renderer pointing
-        // at the old pane until the user types.
+        // Route input (send-keys) to this pane WITHOUT swapping the renderer.
+        // In multi-surface mode, each pane has its own observer surface for
+        // rendering — the primary surface should keep showing its own pane.
         if let numericPaneId = TmuxId.numericPaneId(paneId) {
-            tmuxQuerySurface?.setActiveTmuxPane(numericPaneId)
+            tmuxQuerySurface?.setActiveTmuxPaneInputOnly(numericPaneId)
         }
     }
     
     /// Update focused pane locally without sending a tmux command.
-    /// Used for input-based focus tracking (when user types in a pane).
+    /// Used by handleTmuxStateChanged when the tmux server reports a different
+    /// focused pane (e.g. after window switch). Unlike selectPane(), this does
+    /// NOT send `select-pane` to tmux.
     func setFocusedPane(_ paneId: String) {
         if focusedPaneId != paneId {
             logger.info("🎯 Focus changed to pane \(paneId)")
             focusedPaneId = paneId
-            // Swap the Ghostty renderer to show this pane's terminal
+            // Route input to this pane — do NOT swap the renderer (observers handle that)
             if let numericPaneId = TmuxId.numericPaneId(paneId) {
-                tmuxQuerySurface?.setActiveTmuxPane(numericPaneId)
+                tmuxQuerySurface?.setActiveTmuxPaneInputOnly(numericPaneId)
             }
         }
     }
