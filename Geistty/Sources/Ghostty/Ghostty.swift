@@ -143,6 +143,23 @@ extension Ghostty {
         /// in multi-pane tmux layouts where each pane has a fixed character size.
         var usesExactGridSize: Bool = false
         
+        /// When true, this surface is an observer in multi-pane tmux mode.
+        /// Observer surfaces must NOT become firstResponder — their Zig Termio
+        /// has tmux_active=false, so keystrokes would bypass send-keys wrapping
+        /// and arrive as raw bytes on the tmux control channel.
+        /// Set to true by attachToTmuxPane().
+        var isMultiPaneObserver: Bool = false
+        
+        /// Callback invoked when an observer surface is tapped in multi-pane mode.
+        /// UIKit's gesture recognizer mutual exclusion prevents a parent view's tap
+        /// gesture from firing when a child view's tap gesture recognizes first (the
+        /// child wins, the parent is automatically failed). Since SurfaceView has its
+        /// own tap gesture, the container's tap gesture (which calls selectPane())
+        /// never fires. This callback bridges that gap: the surface's handleTap()
+        /// calls it for observers, routing the tap to the container's pane selection
+        /// logic without requiring gesture recognizer coexistence.
+        var onPaneTap: (() -> Void)?
+        
         /// Active key table name - when non-nil, a key table is active (vim-style modal keys)
         @Published var activeKeyTable: String? = nil
         
@@ -535,6 +552,11 @@ extension Ghostty {
             // Only restore if we're in a window and were previously first responder
             // or if the user had the keyboard visible
             guard window != nil else { return }
+            
+            // Observer surfaces must never become firstResponder — their Zig
+            // Termio has tmux_active=false, so keystrokes would bypass send-keys
+            // wrapping. Only the primary surface should restore focus.
+            guard !isMultiPaneObserver else { return }
             
             // Use a slight delay to ensure the app is fully active
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
@@ -964,6 +986,29 @@ extension Ghostty {
         }
         
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            // Observer surfaces in multi-pane tmux mode: ALWAYS route to pane
+            // selection. This MUST come before the justFinishedSelecting and
+            // isMomentumScrolling guards because mouse/trackpad clicks set
+            // justFinishedSelecting via touchesEnded (isMouseSelecting path)
+            // before the tap gesture recognizer fires (~200-300ms delay).
+            // Without this early return, pane switching is completely blocked
+            // for mouse/trackpad users.
+            //
+            // Observer surfaces must NOT become firstResponder — their Zig
+            // Termio has tmux_active=false, so keystrokes would bypass
+            // send-keys wrapping and arrive as raw bytes on the tmux control
+            // channel. The onPaneTap callback routes to selectPane(), which
+            // sets the active pane on the primary surface instead.
+            if isMultiPaneObserver {
+                if let onPaneTap = onPaneTap {
+                    Ghostty.logger.info("[handleTap] observer pane tapped, calling onPaneTap")
+                    onPaneTap()
+                } else {
+                    Ghostty.logger.warning("[handleTap] observer pane tapped but onPaneTap is nil — pane selection will not work")
+                }
+                return
+            }
+            
             // Don't process tap if we just finished selecting (prevents clearing selection)
             if justFinishedSelecting {
                 justFinishedSelecting = false
@@ -1776,6 +1821,17 @@ extension Ghostty {
         func focusDidChange(_ focused: Bool) {
             guard let surface = surface else { return }
             self.hasFocusState = focused
+            
+            // In multi-pane tmux mode, the primary surface must always appear
+            // "focused" to Zig's renderer thread. When unfocused, the renderer
+            // downgrades QoS and (on iOS, with no display link) may stop drawing
+            // entirely — causing the surface to go black. Since the primary is
+            // always firstResponder in multi-pane mode (Fix B), this guard is
+            // defense in depth against system-initiated resignFirstResponder.
+            if !focused && usesExactGridSize {
+                return
+            }
+            
             ghostty_surface_set_focus(surface, focused)
             
             if focused {
@@ -1875,6 +1931,9 @@ extension Ghostty {
                 return false
             }
             let result = ghostty_surface_tmux_attach_to_pane(targetSurface, sourceSurface, paneId)
+            if result {
+                isMultiPaneObserver = true
+            }
             logger.debug("attachToTmuxPane(pane=\(paneId)): result=\(result)")
             return result
         }
@@ -1884,6 +1943,8 @@ extension Ghostty {
         func detachTmuxPane() {
             guard let surface = surface else { return }
             ghostty_surface_tmux_detach_pane(surface)
+            isMultiPaneObserver = false
+            onPaneTap = nil
             logger.debug("detachTmuxPane: complete")
         }
         
@@ -2320,11 +2381,25 @@ extension Ghostty {
         
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            sizeDidChange(frame.size)
+            // Only auto-resize if not using explicit grid sizing (tmux multi-pane mode).
+            // In exact grid mode, the container controls sizing via setExactGridSize().
+            // Without this guard, re-parenting the surface (e.g. SwiftUI view identity
+            // change) triggers sizeDidChange → ghostty_surface_set_size → Zig Termio.resize
+            // → "refresh-client -C" with pane dimensions, creating a resize oscillation.
+            if !usesExactGridSize {
+                sizeDidChange(frame.size)
+            } else {
+                updateSublayerFrames()
+            }
             
             // Focus management: request keyboard focus when added to window
             // Use RunLoop to ensure view is fully laid out first
-            if window != nil {
+            //
+            // Observer surfaces in multi-pane tmux mode must NOT auto-focus.
+            // Their Zig Termio has tmux_active=false — keystrokes would bypass
+            // send-keys wrapping and arrive as raw bytes on the control channel.
+            // The primary surface always owns keyboard focus in multi-pane mode.
+            if window != nil && !isMultiPaneObserver {
                 RunLoop.main.perform { [weak self] in
                     guard let self = self, self.window != nil else { return }
                     // Only become first responder if we're visible and in the window
@@ -2332,7 +2407,7 @@ extension Ghostty {
                         _ = self.becomeFirstResponder()
                     }
                 }
-            } else {
+            } else if window == nil {
                 // Resign when removed from window to clean up keyboard
                 if self.isFirstResponder {
                     _ = self.resignFirstResponder()

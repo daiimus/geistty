@@ -207,6 +207,13 @@ extension RawTerminalUIViewController {
             multiPaneTopConstraint = nil
             multiPaneBottomConstraint = nil
         }
+        
+        // Clear the exact-grid-size suppression on the primary surface.
+        // In multi-pane mode, usesExactGridSize=true prevents Zig-side
+        // "refresh-client -C" with pane dimensions. Clear it so the surface
+        // can auto-resize normally when re-added to the single-pane view.
+        viewModel?.tmuxManager?.primarySurface?.clearExactGridSize()
+        
         isMultiPaneMode = false
         logger.info("🔄 ✅ Cleaned up multi-pane mode")
     }
@@ -338,8 +345,18 @@ extension RawTerminalUIViewController {
         
         logger.info("🔄 Surface frame after layout: \(primarySurface.frame)")
         
+        // CRITICAL: Clear the exact-grid-size suppression that was set during
+        // multi-pane mode. In multi-pane mode, the primary surface has
+        // usesExactGridSize=true to prevent Zig-side "refresh-client -C" with
+        // pane dimensions. Now that we're back in single-pane mode, the surface
+        // should auto-resize normally from layoutSubviews.
+        primarySurface.clearExactGridSize()
+        
         // CRITICAL: Notify surface of its new size after re-parenting
         // The surface needs to know its size changed to update its Metal rendering
+        // NOTE: clearExactGridSize() above calls sizeDidChange internally,
+        // but we call it again here explicitly to ensure the correct frame is used
+        // after the layout pass.
         primarySurface.sizeDidChange(primarySurface.frame.size)
         
         // Restore focus

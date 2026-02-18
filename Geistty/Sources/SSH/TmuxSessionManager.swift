@@ -66,8 +66,10 @@ class TmuxSessionManager: ObservableObject {
     /// TmuxSessionManager owns ALL surfaces - views just display them
     private(set) var paneSurfaces: [String: Ghostty.SurfaceView] = [:]
     
-    /// The primary surface for the initial pane (%0)
-    /// This is always kept alive even when in multi-pane mode
+    /// The primary surface that owns the tmux viewer (C-side state).
+    /// Adopted from the direct surface at connection time. Initially stored
+    /// WITHOUT a paneSurfaces entry (pane ID unknown); registered under its
+    /// real pane ID when handleTmuxStateChanged provides real pane IDs.
     @Published private(set) var primarySurface: Ghostty.SurfaceView?
     
     /// Protocol-typed accessor for tmux C API queries.
@@ -88,6 +90,16 @@ class TmuxSessionManager: ObservableObject {
     func setPendingOutputForTesting(_ output: [String: [Data]]) {
         pendingOutput = output
     }
+    
+    /// Test-only: read the set of pane IDs deferred because factory wasn't ready
+    var pendingSurfaceCreationForTesting: Set<String> {
+        pendingSurfaceCreation
+    }
+    
+    /// Test-only: read the commands queued while viewer was not ready
+    var pendingCommandsForTesting: [String] {
+        pendingCommands
+    }
     #endif
     
     /// Cell size from the primary surface (for calculating terminal dimensions)
@@ -104,6 +116,12 @@ class TmuxSessionManager: ObservableObject {
     /// Surface creation factory (injected before activation)
     /// This creates Ghostty surfaces with proper configuration
     private var surfaceFactory: ((String) -> Ghostty.SurfaceView?)?
+    
+    /// Pane IDs that need surfaces but couldn't be created because the factory
+    /// wasn't configured yet. Drained by `configureSurfaceManagement()` once the
+    /// factory becomes available. This handles the race where `handleTmuxStateChanged`
+    /// fires before the Combine `$isConnected` sink configures the factory.
+    private var pendingSurfaceCreation: Set<String> = []
     
     /// Callback to wire up surface input to SSH
     /// Called after surface is created to connect onWrite
@@ -125,6 +143,23 @@ class TmuxSessionManager: ObservableObject {
     
     /// Write function to send data to SSH
     private var writeToSSH: ((String) -> Void)?
+    
+    // MARK: - Viewer Ready Gating
+    
+    /// Whether the Ghostty tmux viewer's startup command queue has drained.
+    /// Until this is true, ALL Swift-side commands (refresh-client, select-pane,
+    /// etc.) are queued rather than sent — sending them would interleave bytes
+    /// on the SSH channel with the viewer's capture-pane commands, corrupting
+    /// the tmux control mode protocol and causing %exit.
+    ///
+    /// Starts as `true` (no viewer, no gating needed). Set to `false` by
+    /// `controlModeActivated()` when the viewer begins its startup sequence,
+    /// then set back to `true` by `viewerBecameReady()` once `TMUX_READY` fires.
+    private(set) var viewerReady: Bool = true
+    
+    /// Commands queued while the viewer's startup sequence is in progress.
+    /// Flushed in order when `viewerBecameReady()` is called.
+    private var pendingCommands: [String] = []
     
     // MARK: - Initialization
     
@@ -149,9 +184,21 @@ class TmuxSessionManager: ObservableObject {
     /// Send a fire-and-forget command (no response expected).
     /// In native Ghostty tmux mode, all commands are fire-and-forget
     /// because Ghostty's viewer consumes the %begin/%end responses.
+    ///
+    /// IMPORTANT: If the viewer's startup command queue hasn't drained yet
+    /// (`viewerReady == false`), the command is queued and flushed later.
+    /// Sending commands to tmux during viewer startup would interleave
+    /// bytes on the SSH channel with the viewer's capture-pane commands,
+    /// corrupting the control mode protocol.
     private func sendCommandFireAndForget(_ command: String) {
         guard let write = writeToSSH else {
             logger.warning("Cannot send command - no write function available")
+            return
+        }
+        
+        guard viewerReady else {
+            logger.info("Queuing command (viewer not ready): \(command)")
+            pendingCommands.append(command)
             return
         }
         
@@ -172,6 +219,11 @@ class TmuxSessionManager: ObservableObject {
         resizeDebounceTask = nil
         
         logger.info("Control mode activated, resize state reset")
+        
+        // Reset viewer ready state — the viewer's command queue hasn't drained yet.
+        // All sendCommandFireAndForget calls will be queued until viewerBecameReady().
+        viewerReady = false
+        pendingCommands.removeAll()
         
         // NOTE: Do NOT send any commands here (e.g. refresh-client).
         // Ghostty's viewer.zig handles all startup commands (display-message,
@@ -195,29 +247,65 @@ class TmuxSessionManager: ObservableObject {
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
         
-        // Clear output buffers
+        // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
+        pendingSurfaceCreation.removeAll()
         
-        // Cancel debounce tasks to prevent crashes after cleanup
-        resizeDebounceTask?.cancel()
-        resizeDebounceTask = nil
-        lastResizeCols = 0
-        lastResizeRows = 0
-        lastRefreshSize = nil
+        // Reset viewer ready state and discard queued commands
+        viewerReady = false
+        pendingCommands.removeAll()
         
         // CRITICAL: Clear surface state to ensure fresh surfaces on reconnect
         // Old surfaces may be in bad state and won't properly report cell size
+        //
+        // NOTE: We call close() WITHOUT calling detachTmuxPane() first.
+        // Surface.deinit (called by close → ghostty_surface_free) already
+        // handles tmux_pane_binding restoration internally: it restores the
+        // original mutex, restores the original terminal pointer, and
+        // unregisters from the viewer's observer list.
+        //
+        // Calling detachTmuxPane() during teardown is DANGEROUS because it
+        // chases binding.source.io.terminal_stream.handler — dereferencing
+        // through the source surface's IO subsystem. If the source is mid-
+        // teardown or the viewer is defunct, this pointer chase can hit freed
+        // memory → SIGSEGV (see Geistty-2026-02-17-211930.ips).
         for (paneId, surface) in paneSurfaces {
-            // Detach from tmux pane binding before cleanup
-            surface.detachTmuxPane()
-            // Clear callbacks to break retain cycles
-            surface.onResize = nil
-            surface.onCellSizeChanged = nil
-            logger.debug("Cleaned up surface for pane \(paneId)")
+            surface.close()
+            logger.debug("Closed surface for pane \(paneId)")
         }
         paneSurfaces.removeAll()
         primarySurface = nil
         primaryCellSize = .zero
+    }
+    
+    /// Called when the Ghostty tmux viewer's startup command queue has fully drained.
+    /// After this point, Swift-side commands (refresh-client, select-pane, etc.) are
+    /// safe to send — they won't interleave with viewer commands on the SSH channel.
+    func viewerBecameReady() {
+        guard !viewerReady else {
+            logger.debug("viewerBecameReady called but already ready, ignoring")
+            return
+        }
+        
+        viewerReady = true
+        
+        // Flush any commands that were queued during viewer startup
+        if !pendingCommands.isEmpty {
+            logger.info("Viewer ready — flushing \(pendingCommands.count) queued commands")
+            guard let write = writeToSSH else {
+                logger.warning("Cannot flush queued commands - no write function available")
+                pendingCommands.removeAll()
+                return
+            }
+            
+            for command in pendingCommands {
+                logger.info("  Sending queued command: \(command)")
+                write("\(command)\n")
+            }
+            pendingCommands.removeAll()
+        } else {
+            logger.info("Viewer ready — no queued commands to flush")
+        }
     }
     
     // MARK: - Notification Handling
@@ -282,11 +370,23 @@ class TmuxSessionManager: ObservableObject {
         // --- Surface reconciliation (requires real Ghostty surface) ---
         let allActivePaneIds = Set(paneIds.map { "%\($0)" })
         
-        // Create surfaces for new panes
-        for paneId in allActivePaneIds {
+        // Create surfaces for new panes.
+        // If the factory isn't configured yet (race: Combine sink hasn't fired),
+        // record the pane IDs so configureSurfaceManagement() can create them later.
+        // IMPORTANT: Sort so the lowest-numbered pane gets processed first.
+        // When an adopted primarySurface exists but isn't registered yet,
+        // getSurfaceOrCreate() assigns it to the FIRST pane that needs a surface.
+        // Sorting ensures this is deterministic (lowest pane ID = first/focused pane).
+        for paneId in allActivePaneIds.sorted() {
             if paneSurfaces[paneId] == nil {
                 logger.info("  Creating surface for new pane \(paneId)")
-                _ = getSurfaceOrCreate(for: paneId)
+                if let _ = getSurfaceOrCreate(for: paneId) {
+                    // Surface created successfully
+                } else if surfaceFactory == nil {
+                    // Factory not yet configured — defer creation
+                    logger.info("  Deferring surface creation for \(paneId) (factory not configured)")
+                    pendingSurfaceCreation.insert(paneId)
+                }
             }
         }
         
@@ -434,6 +534,35 @@ class TmuxSessionManager: ObservableObject {
             return existing
         }
         
+        // Check if the adopted primarySurface hasn't been registered yet.
+        // This is the normal path after adoptExistingSurface(): the primary surface
+        // exists but is not in paneSurfaces because we didn't know the real pane ID.
+        // The FIRST pane to request a surface gets the adopted primary (it owns the
+        // tmux viewer and must be the "source" for observer bindings).
+        if let primary = primarySurface, !paneSurfaces.values.contains(where: { $0 === primary }) {
+            // primarySurface exists but isn't registered under any pane ID — adopt it
+            paneSurfaces[paneId] = primary
+            
+            // Re-wire the input handler with the real pane ID
+            if let inputHandler = surfaceInputHandler {
+                inputHandler(primary, paneId)
+            }
+            
+            logger.info("Registered adopted primarySurface under real pane ID \(paneId)")
+            
+            // Flush any pending output for this pane (primary owns the viewer,
+            // so feedData goes to the right terminal)
+            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+                logger.info("Flushing \(pending.count) buffered output chunks to adopted surface for pane \(paneId)")
+                for data in pending {
+                    primary.feedData(data)
+                }
+                primary.setNeedsDisplay()
+            }
+            
+            return primary
+        }
+        
         // Try to create new surface if factory is available
         guard let factory = surfaceFactory else {
             return nil
@@ -505,10 +634,13 @@ class TmuxSessionManager: ObservableObject {
         // become observers that render from the viewer's per-pane Terminal instances.
         // Skip binding for the primarySurface itself — its renderer is already
         // managed by setActiveTmuxPane() (it owns the viewer).
+        var boundToPane = false
         if let source = primarySurface, surface !== source,
            let numericId = Int(paneId.dropFirst()) {  // "%3" -> 3
             let attached = surface.attachToTmuxPane(source: source, paneId: numericId)
-            if !attached {
+            if attached {
+                boundToPane = true
+            } else {
                 logger.warning("Failed to attach surface for pane \(paneId) to tmux viewer")
             }
         }
@@ -516,9 +648,16 @@ class TmuxSessionManager: ObservableObject {
         logger.info("Created Ghostty surface for pane \(paneId)")
         
         // Flush any output that was buffered before this surface existed.
-        // With the tmux pane binding in place, the surface renders directly from
-        // the viewer's pane terminal — pending output flush is a no-op safety net.
-        if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+        // IMPORTANT: Skip the flush if the surface was bound to a pane terminal.
+        // After attachToTmuxPane, the surface's renderer points at the pane terminal
+        // (which already has capture-pane content from viewer.zig). feedData() would
+        // write to the surface's OWN io.terminal — the wrong terminal — corrupting
+        // the observer's local state while the renderer reads from the pane terminal.
+        if boundToPane {
+            if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
+                logger.info("Discarding \(pending.count) buffered output chunks for pane \(paneId) (bound to pane terminal, content already in viewer)")
+            }
+        } else if let pending = pendingOutput.removeValue(forKey: paneId), !pending.isEmpty {
             logger.info("Flushing \(pending.count) buffered output chunks to new surface for pane \(paneId)")
             for data in pending {
                 surface.feedData(data)
@@ -567,6 +706,20 @@ class TmuxSessionManager: ObservableObject {
         self.surfaceInputHandler = inputHandler
         self.surfaceResizeHandler = resizeHandler
         logger.info("✅ Surface management configured")
+        
+        // Drain any pane IDs that were deferred because the factory wasn't ready.
+        // This closes the race where handleTmuxStateChanged fires before the Combine
+        // $isConnected sink configures the factory.
+        if !pendingSurfaceCreation.isEmpty {
+            let deferred = pendingSurfaceCreation
+            pendingSurfaceCreation.removeAll()
+            logger.info("Draining \(deferred.count) deferred surface creations: \(deferred.sorted())")
+            for paneId in deferred.sorted() {
+                if paneSurfaces[paneId] == nil {
+                    _ = getSurfaceOrCreate(for: paneId)
+                }
+            }
+        }
     }
     
     /// Create the primary surface for the session's initial pane.
@@ -603,16 +756,24 @@ class TmuxSessionManager: ObservableObject {
     /// Instead, we adopt the existing surface into TmuxSessionManager's
     /// paneSurfaces dictionary and wire up the tmux-aware input handler.
     func adoptExistingSurface(_ surface: Ghostty.SurfaceView) {
-        let initialPaneId = resolveInitialPaneId()
+        logger.info("Adopting existing surface as tmux primary (deferred pane registration)")
         
-        logger.info("Adopting existing surface as tmux primary for \(initialPaneId)")
+        // DO NOT register in paneSurfaces yet.
+        // At this point, no tmux state has arrived — resolveInitialPaneId() would
+        // fall back to "%0", which may not match any real pane ID (e.g., the real
+        // panes might be %25, %51, %52). Registering under a stale key causes the
+        // orphan cleanup in handleTmuxStateChanged() to destroy this surface —
+        // taking the tmux viewer with it.
+        //
+        // Instead, store ONLY as primarySurface. When handleTmuxStateChanged()
+        // fires with real pane IDs, getSurfaceOrCreate() will find primarySurface
+        // has no entry in paneSurfaces and re-use it for the first pane.
         
-        // Register in paneSurfaces
-        paneSurfaces[initialPaneId] = surface
-        
-        // Wire up the tmux-aware input handler (pane-tracking)
+        // Wire up the tmux-aware input handler.
+        // Use a placeholder pane ID — it will be re-wired when the surface is
+        // registered under its real pane ID in getSurfaceOrCreate().
         if let inputHandler = surfaceInputHandler {
-            inputHandler(surface, initialPaneId)
+            inputHandler(surface, "__adopted__")
         }
         
         // Wire up resize handler for single-pane mode
@@ -629,10 +790,10 @@ class TmuxSessionManager: ObservableObject {
             }
         }
         
-        // Assign as primary
-        assignPrimarySurface(surface, forPaneId: initialPaneId)
+        // Assign as primary (cell size callbacks, etc.)
+        assignPrimarySurface(surface, forPaneId: "__adopted__")
         
-        logger.info("Adopted existing surface as tmux primary for \(initialPaneId)")
+        logger.info("Adopted existing surface as tmux primary (awaiting real pane IDs)")
     }
     
     /// Get surface for a pane (returns nil if not created)
@@ -687,15 +848,19 @@ class TmuxSessionManager: ObservableObject {
         }
         
         if let surface = paneSurfaces.removeValue(forKey: paneId) {
-            // Detach from tmux pane binding before cleanup.
-            // This restores the surface's original mutex/terminal and
-            // unregisters it from the viewer's observer list.
-            surface.detachTmuxPane()
+            // Close the surface synchronously to free the Zig Surface and
+            // invalidate its userdata pointer BEFORE ARC releases the SurfaceView.
+            //
+            // NOTE: We intentionally skip detachTmuxPane() before close().
+            // Surface.deinit handles tmux_pane_binding restoration internally
+            // (mutex, terminal pointer, observer unregistration). Calling
+            // detachTmuxPane() separately is redundant and dangerous during
+            // teardown — it chases binding.source pointers that may be stale
+            // if the source surface is mid-teardown → SIGSEGV.
+            // See: Geistty-2026-02-17-211930.ips, Geistty-2026-02-17-211214.ips
+            surface.close()
             
-            // Clean up surface callbacks to break retain cycles
-            surface.onResize = nil
-            surface.onCellSizeChanged = nil
-            logger.info("Removed Ghostty surface for pane \(paneId) (paneActuallyClosed=\(paneActuallyClosed))")
+            logger.info("Removed and closed Ghostty surface for pane \(paneId) (paneActuallyClosed=\(paneActuallyClosed))")
         }
     }
     
@@ -812,10 +977,10 @@ class TmuxSessionManager: ObservableObject {
             
             if let focusPaneId {
                 focusedPaneId = "%\(focusPaneId)"
-                primarySurface?.setActiveTmuxPane(focusPaneId)
+                tmuxQuerySurface?.setActiveTmuxPane(focusPaneId)
             } else if let firstPaneId = tree.paneIds.first {
                 focusedPaneId = "%\(firstPaneId)"
-                primarySurface?.setActiveTmuxPane(firstPaneId)
+                tmuxQuerySurface?.setActiveTmuxPane(firstPaneId)
             }
         } else {
             // No split tree yet — in native Ghostty mode, select-window triggers
@@ -889,6 +1054,14 @@ class TmuxSessionManager: ObservableObject {
     func selectPane(_ paneId: String) {
         sendCommandFireAndForget("select-pane -t '\(paneId)'")
         focusedPaneId = paneId
+        
+        // Swap the Ghostty renderer + input routing to this pane.
+        // Without this, setActiveTmuxPane only fires on the first keystroke
+        // (via setFocusedPane from onWrite), leaving the renderer pointing
+        // at the old pane until the user types.
+        if let numericPaneId = TmuxId.numericPaneId(paneId) {
+            tmuxQuerySurface?.setActiveTmuxPane(numericPaneId)
+        }
     }
     
     /// Update focused pane locally without sending a tmux command.
@@ -899,7 +1072,7 @@ class TmuxSessionManager: ObservableObject {
             focusedPaneId = paneId
             // Swap the Ghostty renderer to show this pane's terminal
             if let numericPaneId = TmuxId.numericPaneId(paneId) {
-                primarySurface?.setActiveTmuxPane(numericPaneId)
+                tmuxQuerySurface?.setActiveTmuxPane(numericPaneId)
             }
         }
     }
@@ -1131,8 +1304,9 @@ class TmuxSessionManager: ObservableObject {
             removeSurface(for: paneId, paneActuallyClosed: true)
         }
         
-        // Clear output buffers
+        // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
+        pendingSurfaceCreation.removeAll()
         
         sessions.removeAll()
         windows.removeAll()

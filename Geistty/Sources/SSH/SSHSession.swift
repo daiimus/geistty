@@ -478,6 +478,11 @@ class SSHSession: ObservableObject, Identifiable {
             logger.info("tmux viewer startup complete (TMUX_READY), safe to send user input")
             self.viewerReady = true
             
+            // Tell the session manager the viewer is ready — this flushes any
+            // Swift-side commands (e.g., refresh-client) that were queued during
+            // the viewer's startup capture-pane sequence.
+            self.tmuxSessionManager?.viewerBecameReady()
+            
             // NOW it's safe to activate the first pane and flush pending input.
             // The viewer's command queue has drained — no risk of interleaving.
             self.activateFirstTmuxPane()
