@@ -553,11 +553,6 @@ extension Ghostty {
             // or if the user had the keyboard visible
             guard window != nil else { return }
             
-            // Observer surfaces must never become firstResponder — their Zig
-            // Termio has tmux_active=false, so keystrokes would bypass send-keys
-            // wrapping. Only the primary surface should restore focus.
-            guard !isMultiPaneObserver else { return }
-            
             // Use a slight delay to ensure the app is fully active
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self = self, self.window != nil else { return }
@@ -1822,16 +1817,6 @@ extension Ghostty {
             guard let surface = surface else { return }
             self.hasFocusState = focused
             
-            // In multi-pane tmux mode, the primary surface must always appear
-            // "focused" to Zig's renderer thread. When unfocused, the renderer
-            // downgrades QoS and (on iOS, with no display link) may stop drawing
-            // entirely — causing the surface to go black. Since the primary is
-            // always firstResponder in multi-pane mode (Fix B), this guard is
-            // defense in depth against system-initiated resignFirstResponder.
-            if !focused && usesExactGridSize {
-                return
-            }
-            
             ghostty_surface_set_focus(surface, focused)
             
             if focused {
@@ -1841,7 +1826,7 @@ extension Ghostty {
         
         // MARK: - First Responder & Keyboard
         
-        override var canBecomeFirstResponder: Bool { true }
+        override var canBecomeFirstResponder: Bool { !isMultiPaneObserver }
         
         override func becomeFirstResponder() -> Bool {
             let result = super.becomeFirstResponder()
@@ -1894,7 +1879,8 @@ extension Ghostty {
             return paneIds.prefix(Int(written)).map { Int($0) }
         }
         
-        /// Set which tmux pane this surface renders
+        /// Set which tmux pane this surface renders AND routes input to.
+        /// Swaps renderer_state.terminal to the pane's terminal.
         /// Returns true if successful, false if pane_id not found or not in tmux mode
         @discardableResult
         func setActiveTmuxPane(_ paneId: Int) -> Bool {
@@ -1904,6 +1890,20 @@ extension Ghostty {
             }
             let result = ghostty_surface_tmux_set_active_pane(surface, paneId)
             logger.debug("setActiveTmuxPane(\(paneId)): result=\(result)")
+            return result
+        }
+        
+        /// Set which tmux pane receives input (send-keys) WITHOUT swapping the renderer.
+        /// Used in multi-surface mode where each pane has its own observer surface.
+        /// Returns true if successful, false if pane_id not found or not in tmux mode
+        @discardableResult
+        func setActiveTmuxPaneInputOnly(_ paneId: Int) -> Bool {
+            guard let surface = surface else {
+                logger.warning("setActiveTmuxPaneInputOnly: surface is nil")
+                return false
+            }
+            let result = ghostty_surface_tmux_set_active_pane_input_only(surface, paneId)
+            logger.debug("setActiveTmuxPaneInputOnly(\(paneId)): result=\(result)")
             return result
         }
         
@@ -1933,6 +1933,25 @@ extension Ghostty {
             let result = ghostty_surface_tmux_attach_to_pane(targetSurface, sourceSurface, paneId)
             if result {
                 isMultiPaneObserver = true
+                
+                // If this surface was firstResponder (e.g., it was the direct
+                // surface before multi-pane mode activated), resign now.
+                // canBecomeFirstResponder returning false prevents future focus
+                // acquisition, but doesn't auto-resign an existing responder.
+                if isFirstResponder {
+                    _ = resignFirstResponder()
+                }
+                
+                // Strip observer down to a single instant-tap gesture.
+                // Observers are display-only mirrors — they don't need selection,
+                // scrolling, or zoom gestures. Only a tap for pane switching.
+                // NOTE: If we later implement pane promotion (swapping which
+                // surface is primary), the promotion logic should restore the
+                // full gesture suite.
+                gestureRecognizers?.forEach { removeGestureRecognizer($0) }
+                let paneTapGesture = UITapGestureRecognizer(
+                    target: self, action: #selector(handleTap(_:)))
+                addGestureRecognizer(paneTapGesture)
             }
             logger.debug("attachToTmuxPane(pane=\(paneId)): result=\(result)")
             return result
@@ -2392,22 +2411,17 @@ extension Ghostty {
                 updateSublayerFrames()
             }
             
-            // Focus management: request keyboard focus when added to window
-            // Use RunLoop to ensure view is fully laid out first
-            //
-            // Observer surfaces in multi-pane tmux mode must NOT auto-focus.
-            // Their Zig Termio has tmux_active=false — keystrokes would bypass
-            // send-keys wrapping and arrive as raw bytes on the control channel.
-            // The primary surface always owns keyboard focus in multi-pane mode.
-            if window != nil && !isMultiPaneObserver {
+            // Focus management: request keyboard focus when added to window.
+            // canBecomeFirstResponder returns false for observers, so
+            // becomeFirstResponder() is a no-op — no guard needed.
+            if window != nil {
                 RunLoop.main.perform { [weak self] in
                     guard let self = self, self.window != nil else { return }
-                    // Only become first responder if we're visible and in the window
                     if !self.isFirstResponder {
                         _ = self.becomeFirstResponder()
                     }
                 }
-            } else if window == nil {
+            } else {
                 // Resign when removed from window to clean up keyboard
                 if self.isFirstResponder {
                     _ = self.resignFirstResponder()

@@ -38,6 +38,9 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
     /// Value returned by `setActiveTmuxPane(_:)`
     var stubbedSetActivePaneResult: Bool = true
     
+    /// Value returned by `setActiveTmuxPaneInputOnly(_:)`
+    var stubbedSetActivePaneInputOnlyResult: Bool = true
+    
     /// Value returned by `tmuxWindowCount`
     var stubbedWindowCount: Int = 0
     
@@ -59,6 +62,9 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
     
     /// Pane IDs passed to `setActiveTmuxPane(_:)`, in order
     var setActiveTmuxPaneCalls: [Int] = []
+    
+    /// Pane IDs passed to `setActiveTmuxPaneInputOnly(_:)`, in order
+    var setActiveTmuxPaneInputOnlyCalls: [Int] = []
     
     /// Texts passed to `sendText(_:)`, in order
     var sendTextCalls: [String] = []
@@ -90,6 +96,12 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
     func setActiveTmuxPane(_ paneId: Int) -> Bool {
         setActiveTmuxPaneCalls.append(paneId)
         return stubbedSetActivePaneResult
+    }
+    
+    @discardableResult
+    func setActiveTmuxPaneInputOnly(_ paneId: Int) -> Bool {
+        setActiveTmuxPaneInputOnlyCalls.append(paneId)
+        return stubbedSetActivePaneInputOnlyResult
     }
     
     var tmuxWindowCount: Int {
@@ -126,6 +138,7 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
     /// Clear all call tracking (but keep stubbed values)
     func resetCallTracking() {
         setActiveTmuxPaneCalls.removeAll()
+        setActiveTmuxPaneInputOnlyCalls.removeAll()
         sendTextCalls.removeAll()
         getTmuxPaneIdsCallCount = 0
         getAllTmuxWindowsCallCount = 0
