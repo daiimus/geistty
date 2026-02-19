@@ -149,6 +149,7 @@ extension RawTerminalUIViewController {
                     self?.setupTmuxSurfaceFactory()
                     self?.setupSplitTreeObserver()
                     self?.setupWindowsObserver()
+                    self?.setupReconnectingObserver()
                 }
             }
     }
