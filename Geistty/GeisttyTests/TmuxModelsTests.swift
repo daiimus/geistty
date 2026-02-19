@@ -114,4 +114,50 @@ final class TmuxModelsTests: XCTestCase {
             XCTAssertEqual(TmuxId.numericPaneId(str), id, "Round-trip failed for pane ID \(id)")
         }
     }
+    
+    // MARK: - TmuxId Numeric Sort
+    
+    func testSortedNumericallyBasic() {
+        // Lexicographic sort: ["%10", "%11", "%9"]
+        // Numeric sort: ["%9", "%10", "%11"]
+        let ids = ["%9", "%10", "%11"]
+        let sorted = TmuxId.sortedNumerically(ids)
+        XCTAssertEqual(sorted, ["%9", "%10", "%11"])
+    }
+    
+    func testSortedNumericallyAlreadySorted() {
+        let ids = ["%0", "%1", "%2"]
+        let sorted = TmuxId.sortedNumerically(ids)
+        XCTAssertEqual(sorted, ["%0", "%1", "%2"])
+    }
+    
+    func testSortedNumericallyReversed() {
+        let ids = ["%100", "%20", "%3"]
+        let sorted = TmuxId.sortedNumerically(ids)
+        XCTAssertEqual(sorted, ["%3", "%20", "%100"])
+    }
+    
+    func testSortedNumericallyFromSet() {
+        // Sets have no guaranteed order — numeric sort should still work
+        let ids: Set<String> = ["%9", "%10", "%11"]
+        let sorted = TmuxId.sortedNumerically(ids)
+        XCTAssertEqual(sorted, ["%9", "%10", "%11"])
+    }
+    
+    func testSortedNumericallyWindowIds() {
+        // Also works with @ prefix (window IDs)
+        let ids = ["@9", "@10", "@2"]
+        let sorted = TmuxId.sortedNumerically(ids)
+        XCTAssertEqual(sorted, ["@2", "@9", "@10"])
+    }
+    
+    func testSortedNumericallyEmpty() {
+        let sorted = TmuxId.sortedNumerically([String]())
+        XCTAssertEqual(sorted, [])
+    }
+    
+    func testSortedNumericalySingle() {
+        let sorted = TmuxId.sortedNumerically(["%42"])
+        XCTAssertEqual(sorted, ["%42"])
+    }
 }

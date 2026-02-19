@@ -288,6 +288,7 @@ extension RawTerminalUIViewController {
             .sink { [weak self, weak overlay] tree in
                 guard let self = self, let overlay = overlay else { return }
                 let size = self.multiPaneHostingController?.view.bounds.size ?? .zero
+                overlay.cellSize = self.viewModel?.tmuxManager?.primaryCellSize ?? .zero
                 overlay.updateDividers(from: tree, containerSize: size)
             }
         

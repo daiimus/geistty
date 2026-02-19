@@ -121,4 +121,15 @@ enum TmuxId {
         guard isValidSessionId(id) else { return nil }
         return Int(id.dropFirst())
     }
+    
+    /// Sort tmux ID strings by their numeric suffix.
+    /// Lexicographic sort puts "%10" before "%9" — this sorts numerically:
+    /// ["%10", "%11", "%9"] -> ["%9", "%10", "%11"]
+    static func sortedNumerically(_ ids: some Collection<String>) -> [String] {
+        ids.sorted { a, b in
+            let aNum = Int(a.dropFirst()) ?? Int.max
+            let bNum = Int(b.dropFirst()) ?? Int.max
+            return aNum < bNum
+        }
+    }
 }

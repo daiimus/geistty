@@ -140,16 +140,22 @@ struct TmuxSplitTree: Equatable {
                 return .leaf(paneId: id, cols: layout.width, rows: layout.height)
                 
             case .horizontal(let children):
-                return buildSplit(from: children, direction: .horizontal)
+                // Pass the parent's width as the container size (includes divider space)
+                return buildSplit(from: children, direction: .horizontal, containerSize: layout.width)
                 
             case .vertical(let children):
-                return buildSplit(from: children, direction: .vertical)
+                // Pass the parent's height as the container size (includes divider space)
+                return buildSplit(from: children, direction: .vertical, containerSize: layout.height)
             }
         }
         
         /// Build a binary split tree from multiple children.
         /// tmux layouts can have N children, but our tree is binary.
-        func buildSplit(from children: [TmuxLayout], direction: Direction) -> Node {
+        ///
+        /// `containerSize` is the parent node's width (horizontal) or height (vertical).
+        /// tmux includes 1-cell dividers between children in this dimension, so the
+        /// correct ratio is `child.size / containerSize`, NOT `child.size / sum(children)`.
+        func buildSplit(from children: [TmuxLayout], direction: Direction, containerSize: Int) -> Node {
             guard !children.isEmpty else {
                 logger.error("Empty children in tmux layout — returning placeholder pane")
                 return .leaf(paneId: -1, cols: 80, rows: 24)
@@ -160,16 +166,18 @@ struct TmuxSplitTree: Equatable {
             }
             
             if children.count == 2 {
-                // Calculate ratio based on dimensions
+                // Calculate ratio using the parent's container size as denominator.
+                // This accounts for tmux's 1-cell divider between children.
+                // Example: parent=80, left=40, right=39, divider=1 → ratio = 40/80 = 0.5
                 let ratio: Double
+                let childSize = Double(direction == .horizontal ? children[0].width : children[0].height)
+                let container = Double(containerSize)
+                ratio = container > 0 ? childSize / container : 0.5
+                
                 if direction == .horizontal {
-                    let totalWidth = Double(children[0].width + children[1].width)
-                    ratio = totalWidth > 0 ? Double(children[0].width) / totalWidth : 0.5
-                    logger.info("📐 Split ratio: left=\(children[0].width) right=\(children[1].width) total=\(Int(totalWidth)) ratio=\(String(format: "%.3f", ratio))")
+                    logger.info("📐 Split ratio: left=\(children[0].width) right=\(children[1].width) container=\(containerSize) ratio=\(String(format: "%.3f", ratio))")
                 } else {
-                    let totalHeight = Double(children[0].height + children[1].height)
-                    ratio = totalHeight > 0 ? Double(children[0].height) / totalHeight : 0.5
-                    logger.info("📐 Split ratio: top=\(children[0].height) bottom=\(children[1].height) total=\(Int(totalHeight)) ratio=\(String(format: "%.3f", ratio))")
+                    logger.info("📐 Split ratio: top=\(children[0].height) bottom=\(children[1].height) container=\(containerSize) ratio=\(String(format: "%.3f", ratio))")
                 }
                 
                 return .split(Node.Split(
@@ -180,18 +188,21 @@ struct TmuxSplitTree: Equatable {
                 ))
             }
             
-            // More than 2 children: split into first and rest
-            // This creates a left-heavy tree which matches tmux's layout behavior
-            let firstChild = convert(children[0])
-            let restChildren = buildSplit(from: Array(children.dropFirst()), direction: direction)
-            
-            // Calculate ratio for first child vs rest
+            // More than 2 children: split into first and rest.
+            // This creates a left-heavy binary tree matching tmux's layout behavior.
+            //
+            // The first child takes `firstSize` of the container. The remaining
+            // container for the rest is: containerSize - firstSize - 1 (the 1 is
+            // the divider cell between the first child and the rest).
             let firstSize = direction == .horizontal ? children[0].width : children[0].height
-            let restSize = children.dropFirst().reduce(0) { sum, child in
-                sum + (direction == .horizontal ? child.width : child.height)
-            }
-            let totalSize = Double(firstSize + restSize)
-            let ratio = totalSize > 0 ? Double(firstSize) / totalSize : 0.5
+            let restContainerSize = containerSize - firstSize - 1
+            
+            let firstChild = convert(children[0])
+            let restChildren = buildSplit(from: Array(children.dropFirst()), direction: direction, containerSize: restContainerSize)
+            
+            // Ratio: fraction of the full container that the first child occupies
+            let container = Double(containerSize)
+            let ratio = container > 0 ? Double(firstSize) / container : 0.5
             
             return .split(Node.Split(
                 direction: direction,

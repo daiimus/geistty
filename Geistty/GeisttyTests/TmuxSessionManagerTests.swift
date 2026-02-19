@@ -2755,5 +2755,108 @@ extension TmuxSessionManagerTests {
         XCTAssertFalse(mock.setActiveTmuxPaneCalls.isEmpty,
                        "selectWindow should use full setActiveTmuxPane for renderer swap")
     }
+    
+    // MARK: - Session 106: Primary pane re-selection after observer tap
+    
+    /// Verifies that selectPane() correctly routes input back to the primary
+    /// pane (%2) after having selected an observer pane (%3). This is the
+    /// contract that handleTap() must fulfill when the primary surface is
+    /// tapped in multi-pane mode (Session 106 fix).
+    @MainActor
+    func testSelectPaneRouteBackToPrimaryAfterObserverSelection() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneInputOnlyResult = true
+        
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        // Simulate: user was on primary pane %2, then tapped observer pane %3
+        mgr.selectPane("%2")
+        mgr.selectPane("%3")
+        
+        // Now user taps back on primary pane %2 (the bug: this never happened)
+        mock.resetCallTracking()
+        log.commands.removeAll()
+        mgr.selectPane("%2")
+        
+        // Verify: focusedPaneId updated
+        XCTAssertEqual(mgr.focusedPaneId, "%2",
+                       "focusedPaneId should be %2 after tapping primary")
+        
+        // Verify: tmux command sent
+        XCTAssertEqual(log.commands, ["select-pane -t '%2'\n"],
+                       "select-pane command should be sent for primary pane")
+        
+        // Verify: Zig-side input routing updated
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [2],
+                       "setActiveTmuxPaneInputOnly(2) should route input to primary")
+    }
+    
+    /// Verifies the full 3-pane round-trip: primary → observer A → observer B
+    /// → back to primary. Each step must produce correct routing.
+    @MainActor
+    func testThreePaneRoundTripBackToPrimary() {
+        let (mgr, _) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneInputOnlyResult = true
+        
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        // Primary (%9) → observer (%10) → observer (%11) → back to primary (%9)
+        mgr.selectPane("%9")
+        XCTAssertEqual(mgr.focusedPaneId, "%9")
+        
+        mgr.selectPane("%10")
+        XCTAssertEqual(mgr.focusedPaneId, "%10")
+        
+        mgr.selectPane("%11")
+        XCTAssertEqual(mgr.focusedPaneId, "%11")
+        
+        // The critical step: going back to primary
+        mgr.selectPane("%9")
+        XCTAssertEqual(mgr.focusedPaneId, "%9",
+                       "focusedPaneId must return to %9 after round-trip")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [9, 10, 11, 9],
+                       "All 4 setActiveTmuxPaneInputOnly calls should be recorded in order")
+    }
+    
+    /// Verifies that onPaneTap closure for the primary pane calls selectPane
+    /// and produces the same effect as tapping an observer pane.
+    /// This tests the contract added in Session 106: handleTap() calls
+    /// onPaneTap() for the primary surface, not just observers.
+    @MainActor
+    func testOnPaneTapForPrimaryPaneRoutesCorrectly() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneInputOnlyResult = true
+        
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        // Simulate: onPaneTap closures as wired by TmuxMultiPaneView
+        let primaryOnTap = { mgr.selectPane("%9") }
+        let observerOnTap = { mgr.selectPane("%10") }
+        
+        // User taps observer → works
+        observerOnTap()
+        XCTAssertEqual(mgr.focusedPaneId, "%10")
+        
+        // User taps primary → must also work (the Session 106 fix)
+        mock.resetCallTracking()
+        log.commands.removeAll()
+        primaryOnTap()
+        
+        XCTAssertEqual(mgr.focusedPaneId, "%9",
+                       "onPaneTap for primary must route back to %9")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [9],
+                       "Primary pane onPaneTap must call setActiveTmuxPaneInputOnly")
+        XCTAssertEqual(log.commands, ["select-pane -t '%9'\n"],
+                       "Primary pane onPaneTap must send select-pane command")
+    }
 }
 

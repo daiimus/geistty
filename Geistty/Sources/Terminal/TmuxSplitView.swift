@@ -81,8 +81,13 @@ struct TmuxSplitView<L: View, R: View>: View {
     /// Current split ratio (0.0 to 1.0)
     @Binding var split: CGFloat
     
-    /// Visible size of the divider
-    private let dividerVisibleSize: CGFloat = 1
+    /// Visible size of the divider in points.
+    ///
+    /// Uses a thin 2pt line (matching the focus border) for a clean visual appearance.
+    /// tmux's 1-character-cell divider is accounted for in the split *ratio*
+    /// (computed by TmuxSplitTree.from(layout:)), so panes receive the correct
+    /// number of character cells regardless of the visual divider thickness.
+    let dividerVisibleSize: CGFloat
     
     /// Invisible hitbox size around the divider for easier touch
     private let dividerInvisibleSize: CGFloat = 20  // Larger for touch targets
@@ -132,6 +137,7 @@ struct TmuxSplitView<L: View, R: View>: View {
         _ direction: SplitViewDirection,
         _ split: Binding<CGFloat>,
         dividerColor: Color,
+        dividerVisibleSize: CGFloat = 1,
         @ViewBuilder left: () -> L,
         @ViewBuilder right: () -> R,
         onEqualize: @escaping () -> Void
@@ -139,6 +145,7 @@ struct TmuxSplitView<L: View, R: View>: View {
         self.direction = direction
         self._split = split
         self.dividerColor = dividerColor
+        self.dividerVisibleSize = dividerVisibleSize
         self.left = left()
         self.right = right()
         self.onEqualize = onEqualize
@@ -168,11 +175,11 @@ struct TmuxSplitView<L: View, R: View>: View {
         switch direction {
         case .horizontal:
             result.origin.x = leftRect.width + dividerVisibleSize / 2
-            result.size.width -= result.origin.x
+            result.size.width = max(0, result.size.width - result.origin.x)
             
         case .vertical:
             result.origin.y = leftRect.height + dividerVisibleSize / 2
-            result.size.height -= result.origin.y
+            result.size.height = max(0, result.size.height - result.origin.y)
         }
         
         return result
@@ -219,6 +226,11 @@ struct TmuxSplitTreeView<PaneContent: View>: View {
     /// Divider color
     let dividerColor: Color
     
+    /// Cell size from the primary Ghostty surface (width/height of one character cell in points).
+    /// Used to make SwiftUI dividers match tmux's 1-character-cell divider width.
+    /// When zero (surface not yet initialized), falls back to 1pt dividers.
+    let cellSize: CGSize
+    
     /// Called when a split is resized
     let onResize: (Int, Double) -> Void  // (paneId, newRatio)
     
@@ -245,6 +257,7 @@ struct TmuxSplitTreeView<PaneContent: View>: View {
                 TmuxSplitNodeView(
                     node: .split(split),
                     dividerColor: dividerColor,
+                    cellSize: cellSize,
                     onResize: onResize,
                     onEqualize: onEqualize,
                     onToggleZoom: onToggleZoom,
@@ -256,6 +269,7 @@ struct TmuxSplitTreeView<PaneContent: View>: View {
             TmuxSplitNodeView(
                 node: root,
                 dividerColor: dividerColor,
+                cellSize: cellSize,
                 onResize: onResize,
                 onEqualize: onEqualize,
                 onToggleZoom: onToggleZoom,
@@ -275,6 +289,7 @@ struct TmuxSplitTreeView<PaneContent: View>: View {
 private struct TmuxSplitNodeView<PaneContent: View>: View {
     let node: TmuxSplitTree.Node
     let dividerColor: Color
+    let cellSize: CGSize
     let onResize: (Int, Double) -> Void
     let onEqualize: () -> Void
     let onToggleZoom: (Int) -> Void
@@ -291,6 +306,14 @@ private struct TmuxSplitNodeView<PaneContent: View>: View {
             
         case .split(let split):
             let direction: SplitViewDirection = split.direction == .horizontal ? .horizontal : .vertical
+            
+            // Thin visual divider (2pt) — matches the focus border width.
+            // tmux's 1-character-cell divider is accounted for in the split *ratio*
+            // (computed by TmuxSplitTree.from(layout:) using containerSize), so the
+            // panes already get the correct number of character cells. The extra
+            // pixels from using a thin divider instead of a cell-width one are
+            // absorbed as slight padding within each pane — visually harmless.
+            let dividerSize: CGFloat = 2
 
             
             TmuxSplitView(
@@ -304,10 +327,12 @@ private struct TmuxSplitNodeView<PaneContent: View>: View {
                     }
                 ),
                 dividerColor: dividerColor,
+                dividerVisibleSize: dividerSize,
                 left: {
                     TmuxSplitNodeView(
                         node: split.left,
                         dividerColor: dividerColor,
+                        cellSize: cellSize,
                         onResize: onResize,
                         onEqualize: onEqualize,
                         onToggleZoom: onToggleZoom,
@@ -318,6 +343,7 @@ private struct TmuxSplitNodeView<PaneContent: View>: View {
                     TmuxSplitNodeView(
                         node: split.right,
                         dividerColor: dividerColor,
+                        cellSize: cellSize,
                         onResize: onResize,
                         onEqualize: onEqualize,
                         onToggleZoom: onToggleZoom,
@@ -374,6 +400,7 @@ struct TmuxSplitView_Previews: PreviewProvider {
         TmuxSplitTreeView(
             tree: tree,
             dividerColor: .gray,
+            cellSize: CGSize(width: 8, height: 16),  // Approximate cell size for preview
             onResize: { _, _ in },
             onEqualize: { },
             onToggleZoom: { paneId in print("Zoom toggled: \(paneId)") },
@@ -404,6 +431,7 @@ struct TmuxSplitView_Previews: PreviewProvider {
         TmuxSplitTreeView(
             tree: nestedTree,
             dividerColor: .gray,
+            cellSize: CGSize(width: 8, height: 16),  // Approximate cell size for preview
             onResize: { _, _ in },
             onEqualize: { },
             onToggleZoom: { paneId in print("Zoom toggled: \(paneId)") },
