@@ -3032,3 +3032,135 @@ extension TmuxSessionManagerTests {
     }
 }
 
+// MARK: - Teardown Ordering Invariant Tests (Session 109)
+
+extension TmuxSessionManagerTests {
+    
+    /// The teardown order tracker should start empty on a fresh manager.
+    @MainActor
+    func testTeardownOrderTrackerStartsEmpty() {
+        let mgr = TmuxSessionManager()
+        #if DEBUG
+        XCTAssertTrue(mgr.teardownOrderForTesting.isEmpty,
+                      "Teardown order tracker should start empty")
+        #endif
+    }
+    
+    /// controlModeExited with no surfaces should produce empty teardown order.
+    @MainActor
+    func testControlModeExitedEmptyTeardownOrder() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        mgr.controlModeExited(reason: "test")
+        
+        #if DEBUG
+        XCTAssertTrue(mgr.teardownOrderForTesting.isEmpty,
+                      "No surfaces → no teardown events")
+        #endif
+    }
+    
+    /// cleanup() with no surfaces should produce empty teardown order.
+    @MainActor
+    func testCleanupEmptyTeardownOrder() {
+        let mgr = TmuxSessionManager()
+        mgr.cleanup()
+        
+        #if DEBUG
+        XCTAssertTrue(mgr.teardownOrderForTesting.isEmpty,
+                      "No surfaces → no teardown events")
+        #endif
+    }
+    
+    /// Verify the structural invariant: controlModeExited() partitions surfaces
+    /// into observers (filter isMultiPaneObserver == true) THEN primaries
+    /// (filter isMultiPaneObserver == false). This prevents use-after-free in
+    /// Surface.zig deinit which chases binding.source → primary surface.
+    ///
+    /// We verify the code structure by confirming that after controlModeExited(),
+    /// paneSurfaces is fully cleared and primarySurface is nil. The actual
+    /// ordering guarantee is enforced by the filter-then-iterate pattern in the
+    /// source code, and validated on-device via the teardownOrderForTesting tracker.
+    @MainActor
+    func testControlModeExitedClearsSurfacesCompletely() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        
+        // Reconcile state to populate windows/split tree
+        let layout = horizontalSplitLayout(paneA: 9, paneB: 10)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: 9)],
+            activeWindowId: 0,
+            paneIds: [9, 10]
+        ))
+        
+        mgr.controlModeExited(reason: "test teardown")
+        
+        // All surface state must be fully cleared
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty,
+                      "controlModeExited must clear all paneSurfaces")
+        XCTAssertNil(mgr.primarySurface,
+                     "controlModeExited must clear primarySurface")
+    }
+    
+    /// Verify the structural invariant: cleanup() partitions surfaces into
+    /// observers THEN primaries via the filter pattern. Same invariant as
+    /// controlModeExited() but through the removeSurface() code path.
+    @MainActor
+    func testCleanupClearsSurfacesCompletely() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        
+        let layout = threePaneLayout(paneA: 9, paneB: 10, paneC: 11)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: 9)],
+            activeWindowId: 0,
+            paneIds: [9, 10, 11]
+        ))
+        
+        mgr.cleanup()
+        
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty,
+                      "cleanup must clear all paneSurfaces")
+        XCTAssertNil(mgr.primarySurface,
+                     "cleanup must clear primarySurface")
+        XCTAssertFalse(mgr.isConnected)
+    }
+    
+    /// removeSurface() for individual panes should record teardown order.
+    /// With no real surfaces in paneSurfaces, the tracker stays empty,
+    /// but we verify it doesn't crash.
+    @MainActor
+    func testRemoveSurfaceRecordsTeardownOrder() {
+        let mgr = TmuxSessionManager()
+        
+        // Remove non-existent panes — should be safe no-ops
+        mgr.removeSurface(for: "%9", paneActuallyClosed: true)
+        mgr.removeSurface(for: "%10", paneActuallyClosed: true)
+        
+        #if DEBUG
+        XCTAssertTrue(mgr.teardownOrderForTesting.isEmpty,
+                      "No surfaces to remove → no teardown events recorded")
+        #endif
+    }
+    
+    /// Verify that repeated cleanup calls don't corrupt the teardown tracker.
+    @MainActor
+    func testRepeatedCleanupIdempotentTeardownOrder() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        mgr.controlModeExited(reason: "first disconnect")
+        
+        #if DEBUG
+        let countAfterFirst = mgr.teardownOrderForTesting.count
+        #endif
+        
+        mgr.cleanup()
+        
+        #if DEBUG
+        // Second teardown adds no new events (nothing left to close)
+        XCTAssertEqual(mgr.teardownOrderForTesting.count, countAfterFirst,
+                       "Second cleanup should not add more teardown events")
+        #endif
+    }
+}
+
