@@ -293,6 +293,52 @@ class TmuxSessionManager: ObservableObject {
         primaryCellSize = .zero
     }
     
+    /// Lightweight reset for background detach/reattach.
+    /// Unlike `controlModeExited()` which destroys all surfaces, this preserves
+    /// the surface dictionary (`paneSurfaces`) and `primarySurface` so the UI
+    /// can be restored when we reconnect to tmux. Clears transient state that
+    /// will be re-populated by the new tmux viewer's startup sequence.
+    ///
+    /// Called from SSHSession's TMUX_EXIT handler when `isDetachingForBackground`
+    /// is true — meaning this %exit was the expected response to our detach-client,
+    /// not a real tmux session teardown.
+    func prepareForReattach() {
+        logger.info("Preparing for reattach — preserving \(paneSurfaces.count) surfaces")
+        
+        // Clear connection state (will be re-set by controlModeActivated on reattach)
+        isConnected = false
+        connectionState = .disconnected
+        
+        // Clear transient protocol state — the new viewer will rebuild this
+        pendingOutput.removeAll()
+        pendingSurfaceCreation.removeAll()
+        viewerReady = false
+        pendingCommands.removeAll()
+        
+        // Clear window/session metadata — will be repopulated by TMUX_STATE_CHANGED
+        // on the new connection. We keep focusedWindowId and focusedPaneId so the
+        // UI doesn't flash to a different window/pane during the brief reconnect.
+        currentSession = nil
+        sessions.removeAll()
+        windows.removeAll()
+        windowSplitTrees.removeAll()
+        currentSplitTree = TmuxSplitTree()
+        
+        // Reset resize tracking
+        lastResizeCols = 0
+        lastResizeRows = 0
+        lastRefreshSize = nil
+        resizeDebounceTask?.cancel()
+        resizeDebounceTask = nil
+        
+        // DO NOT clear: paneSurfaces, primarySurface, primaryCellSize,
+        // surfaceFactory, surfaceInputHandler, surfaceResizeHandler, writeToSSH
+        // These are either surfaces we want to preserve or infrastructure that
+        // will be re-wired by reconnectWithAuth().
+        
+        logger.info("prepareForReattach complete: \(paneSurfaces.count) surfaces preserved, focusedWindow=\(focusedWindowId), focusedPane=\(focusedPaneId)")
+    }
+    
     /// Called when the Ghostty tmux viewer's startup command queue has fully drained.
     /// After this point, Swift-side commands (refresh-client, select-pane, etc.) are
     /// safe to send — they won't interleave with viewer commands on the SSH channel.
