@@ -8,6 +8,7 @@
 
 import Foundation
 import NIOSSH
+import UIKit
 import os
 
 private let logger = Logger(subsystem: "com.geistty", category: "SSHSession")
@@ -77,6 +78,17 @@ enum SSHSessionError: LocalizedError {
     }
 }
 
+/// Abstraction for iOS background task management.
+/// Production uses `UIApplication.shared`; tests inject a mock.
+@MainActor
+protocol BackgroundTaskProvider: AnyObject {
+    func beginBackgroundTask(withName name: String?, expirationHandler: (() -> Void)?) -> UIBackgroundTaskIdentifier
+    func endBackgroundTask(_ identifier: UIBackgroundTaskIdentifier)
+}
+
+/// Default implementation using UIApplication (production code path)
+extension UIApplication: BackgroundTaskProvider {}
+
 /// Represents an SSH session - wraps NIOSSHConnection for SwiftUI usage
 @MainActor
 class SSHSession: ObservableObject, Identifiable {
@@ -125,6 +137,16 @@ class SSHSession: ObservableObject, Identifiable {
     @Published private(set) var isReconnecting: Bool = false
     private var reconnectAttempts: Int = 0
     private let maxReconnectAttempts: Int = 3
+    
+    // Background task state — protects detach+cleanup when iOS backgrounds the app.
+    // Without this, iOS suspends the app ~5s after backgrounding, killing the TCP
+    // socket before the tmux detach-client command can complete. The background task
+    // buys ~30s to finish the detach handshake and close the SSH channel cleanly.
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    
+    /// Injectable background task provider — defaults to UIApplication.shared.
+    /// Tests inject a mock to verify background task lifecycle without a running app.
+    var backgroundTaskProvider: BackgroundTaskProvider = UIApplication.shared
     
     // tmux options
     private var useTmux: Bool = false
@@ -458,6 +480,12 @@ class SSHSession: ObservableObject, Identifiable {
             self.tmuxPaneActivated = false
             self.activeTmuxPaneId = nil
             self.viewerReady = false
+            
+            // Detach is confirmed complete — end background task if one is active.
+            // This is the clean path: appWillResignActive() started the task,
+            // detach-client was sent, tmux responded with %exit, we're done.
+            self.endBackgroundTaskIfNeeded()
+            
             self.tmuxSessionManager?.controlModeExited(reason: "Ghostty tmux viewer exited")
         }
         
@@ -887,6 +915,10 @@ class SSHSession: ObservableObject, Identifiable {
         pendingInputQueue.removeAll()
         removeTmuxNotificationObservers()
         
+        // End any background task — we're explicitly disconnecting,
+        // no need to keep the background task running
+        endBackgroundTaskIfNeeded()
+        
         // Send clean detach before tearing down, so tmux session survives
         // on the server and can be reattached later (like iTerm2's behavior).
         // H5 fix: detach MUST happen before write queue teardown, otherwise
@@ -931,38 +963,61 @@ class SSHSession: ObservableObject, Identifiable {
     /// for reattach when the app returns to foreground. Without this, the
     /// tmux session would show as "attached" to a dead client until the
     /// TCP keepalive timeout expires.
+    ///
+    /// Uses `beginBackgroundTask` to buy ~30s of background execution time,
+    /// ensuring the detach-client command is written to the SSH channel and
+    /// the TCP connection closes cleanly before iOS suspends the app.
     func appWillResignActive() {
         guard controlModeState.isActive else { return }
+        
+        // Start a background task to protect the detach sequence.
+        // Without this, iOS suspends the app in ~5s and the TCP socket
+        // dies mid-write, leaving tmux with a stale "attached" client.
+        beginBackgroundTaskIfNeeded()
+        
         logger.info("App resigning active, sending clean detach to tmux")
         tmuxSessionManager?.detach()
+        
+        // Give the detach-client command time to flush through the SSH channel,
+        // then end the background task. The %exit notification from tmux will
+        // also trigger cleanup, but we set a safety timer in case it doesn't
+        // arrive (e.g., if the connection is already degraded).
+        Task { @MainActor [weak self] in
+            // Wait up to 5 seconds for the detach to complete
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            self?.endBackgroundTaskIfNeeded()
+        }
     }
     
     /// Called when the app becomes active again.
     /// Checks connection health and auto-reconnects if needed.
     func appDidBecomeActive() {
-        logger.info("🔄 App became active, checking connection health...")
+        logger.info("App became active, checking connection health...")
+        
+        // End any lingering background task from the resign-active sequence
+        endBackgroundTaskIfNeeded()
         
         // If already reconnecting, don't start another attempt
         guard !isReconnecting else {
-            logger.info("🔄 Already reconnecting, skipping")
+            logger.info("Already reconnecting, skipping")
             return
         }
         
         // If connection is alive, nothing to do — tmux session was detached
         // on background and will be reattached via reconnect flow
         if isConnectionAlive, controlModeState.isActive {
-            logger.info("🔄 Connection alive, control mode active")
+            logger.info("Connection alive, control mode active")
             return
         }
         
         // Connection is dead — attempt to reconnect if we have credentials
         if !isConnectionAlive && canReconnect {
-            logger.info("🔄 Connection dead, attempting auto-reconnect...")
+            logger.info("Connection dead, attempting auto-reconnect...")
             Task {
                 await attemptReconnect()
             }
         } else if !isConnectionAlive {
-            logger.warning("🔄 Connection dead but no stored credentials for reconnect")
+            logger.warning("Connection dead but no stored credentials for reconnect")
             // Notify session manager of connection loss
             tmuxSessionManager?.controlModeExited(reason: "Connection lost")
         }
@@ -979,7 +1034,7 @@ class SSHSession: ObservableObject, Identifiable {
         
         while reconnectAttempts < maxReconnectAttempts {
             reconnectAttempts += 1
-            logger.info("🔄 Reconnect attempt \(reconnectAttempts)/\(maxReconnectAttempts)")
+            logger.info("Reconnect attempt \(reconnectAttempts)/\(maxReconnectAttempts)")
             
             // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
             controlModeState = .inactive
@@ -999,14 +1054,14 @@ class SSHSession: ObservableObject, Identifiable {
                 
                 // Success!
                 reconnectAttempts = 0
-                logger.info("🔄 ✅ Reconnect successful!")
+                logger.info("Reconnect successful")
                 return
                 
             } catch is CancellationError {
-                logger.info("🔄 Reconnect cancelled")
+                logger.info("Reconnect cancelled")
                 return
             } catch {
-                logger.error("🔄 Reconnect failed: \(error.localizedDescription)")
+                logger.error("Reconnect failed: \(error.localizedDescription)")
                 
                 guard reconnectAttempts < maxReconnectAttempts else {
                     tmuxSessionManager?.controlModeExited(reason: "Reconnect failed: \(error.localizedDescription)")
@@ -1014,17 +1069,17 @@ class SSHSession: ObservableObject, Identifiable {
                 }
                 
                 // Retry after delay — propagate cancellation properly
-                logger.info("🔄 Retrying in 2 seconds...")
+                logger.info("Retrying in 2 seconds...")
                 do {
                     try await Task.sleep(nanoseconds: 2_000_000_000)
                 } catch {
-                    logger.info("🔄 Reconnect retry cancelled during sleep")
+                    logger.info("Reconnect retry cancelled during sleep")
                     return
                 }
             }
         }
         
-        logger.error("🔄 Max reconnect attempts (\(maxReconnectAttempts)) reached")
+        logger.error("Max reconnect attempts (\(maxReconnectAttempts)) reached")
         tmuxSessionManager?.controlModeExited(reason: "Reconnect failed after \(maxReconnectAttempts) attempts")
     }
     
@@ -1049,6 +1104,60 @@ class SSHSession: ObservableObject, Identifiable {
         // Re-attach to tmux session
         injectTerminalSetup()
     }
+    
+    // MARK: - Background Task Management
+    
+    /// Begin a background task to protect the detach sequence.
+    /// Called from `appWillResignActive()` so the tmux detach-client command
+    /// has time to flush through the SSH channel before iOS suspends the app.
+    private func beginBackgroundTaskIfNeeded() {
+        guard backgroundTaskID == .invalid else {
+            logger.debug("Background task already active (id=\(self.backgroundTaskID.rawValue))")
+            return
+        }
+        
+        backgroundTaskID = backgroundTaskProvider.beginBackgroundTask(
+            withName: "GeisttyTmuxDetach"
+        ) { [weak self] in
+            // Expiration handler — iOS is about to force-suspend us.
+            // End the task to avoid being killed.
+            Task { @MainActor [weak self] in
+                self?.logger_backgroundTaskExpired()
+                self?.endBackgroundTaskIfNeeded()
+            }
+        }
+        
+        if backgroundTaskID == .invalid {
+            logger.warning("Failed to begin background task — iOS denied the request")
+        } else {
+            logger.info("Background task started (id=\(self.backgroundTaskID.rawValue))")
+        }
+    }
+    
+    /// End the background task, signaling iOS that we're done with
+    /// background work and can be safely suspended.
+    /// Safe to call multiple times — guards against `.invalid`.
+    func endBackgroundTaskIfNeeded() {
+        guard backgroundTaskID != .invalid else { return }
+        
+        let taskID = backgroundTaskID
+        backgroundTaskID = .invalid
+        backgroundTaskProvider.endBackgroundTask(taskID)
+        logger.info("Background task ended (id=\(taskID.rawValue))")
+    }
+    
+    /// Separated to avoid capture issues with logger in the expiration closure
+    private func logger_backgroundTaskExpired() {
+        logger.warning("Background task expiring — iOS forcing suspension")
+    }
+    
+    #if DEBUG
+    /// Test-only accessor for background task state
+    var backgroundTaskIDForTesting: UIBackgroundTaskIdentifier {
+        backgroundTaskID
+    }
+    
+    #endif
     
     // Internal method to handle received data, called from connection delegate
     fileprivate func handleReceivedData(_ data: Data) {

@@ -79,6 +79,7 @@
 		D1000013 /* FontMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000013 /* FontMappingTests.swift */; };
 
 		D1000022 /* TmuxViewerReadyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000022 /* TmuxViewerReadyTests.swift */; };
+		D1000037 /* BackgroundTaskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000037 /* BackgroundTaskTests.swift */; };
 		D1000014 /* ConnectionProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000014 /* ConnectionProfileTests.swift */; };
 		D1000015 /* GhosttyInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000015 /* GhosttyInputTests.swift */; };
 		D1000016 /* TmuxModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000016 /* TmuxModelsTests.swift */; };
@@ -222,6 +223,7 @@
 		D2000020 /* TmuxSessionNameResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolverTests.swift; sourceTree = "<group>"; };
 
 		D2000022 /* TmuxViewerReadyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxViewerReadyTests.swift; sourceTree = "<group>"; };
+		D2000037 /* BackgroundTaskTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskTests.swift; sourceTree = "<group>"; };
 		D2000023 /* ResizeTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResizeTimingTests.swift; sourceTree = "<group>"; };
 		D2000024 /* ConfigSyncThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSyncThemeTests.swift; sourceTree = "<group>"; };
 		D2000025 /* ConfigIntrospectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigIntrospectionTests.swift; sourceTree = "<group>"; };
@@ -464,6 +466,7 @@
 				D2000034 /* TmuxSessionManagerTests.swift */,
 				D2000035 /* CommandPaletteTests.swift */,
 				D2000036 /* TmuxWireDiagnosticsTests.swift */,
+				D2000037 /* BackgroundTaskTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -703,6 +706,7 @@
 				D1000034 /* TmuxSessionManagerTests.swift in Sources */,
 				D1000035 /* CommandPaletteTests.swift in Sources */,
 				D1000036 /* TmuxWireDiagnosticsTests.swift in Sources */,
+				D1000037 /* BackgroundTaskTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
