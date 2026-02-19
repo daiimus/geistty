@@ -574,6 +574,10 @@ class RawTerminalUIViewController: UIViewController {
     // Command palette overlay
     var commandPaletteHostingController: UIHostingController<AnyView>?
     
+    // Reconnecting overlay (WS-R2)
+    var reconnectingOverlay: UIView?
+    var reconnectingObserver: AnyCancellable?
+    
     // Window picker support (shown when multiple tmux windows exist)
     var windowPickerHostingController: UIHostingController<TmuxWindowPickerView>?
     var windowsObserver: AnyCancellable?
@@ -726,6 +730,91 @@ class RawTerminalUIViewController: UIViewController {
         view.backgroundColor = UIColor(themeBg)
         
         logger.info("✅ Configuration reloaded")
+    }
+    
+    // MARK: - Reconnecting Overlay (WS-R2)
+    
+    /// Observe `sshSession.isReconnecting` and show/hide the reconnecting overlay.
+    func setupReconnectingObserver() {
+        guard let session = viewModel?.sshSession else { return }
+        
+        reconnectingObserver = session.$isReconnecting
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isReconnecting in
+                if isReconnecting {
+                    self?.showReconnectingOverlay()
+                } else {
+                    self?.hideReconnectingOverlay()
+                }
+            }
+    }
+    
+    /// Show a translucent "Reconnecting..." overlay on top of the terminal.
+    /// The terminal surfaces remain visible underneath for visual continuity.
+    func showReconnectingOverlay() {
+        guard reconnectingOverlay == nil else { return }
+        
+        // Blur background
+        let blurEffect = UIBlurEffect(style: .dark)
+        let blurView = UIVisualEffectView(effect: blurEffect)
+        blurView.alpha = 0.85
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Content stack: spinner + label
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.color = .white
+        spinner.startAnimating()
+        
+        let label = UILabel()
+        label.text = "Reconnecting..."
+        label.textColor = .white
+        label.font = .systemFont(ofSize: 18, weight: .medium)
+        
+        let stack = UIStackView(arrangedSubviews: [spinner, label])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        
+        blurView.contentView.addSubview(stack)
+        
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: blurView.contentView.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: blurView.contentView.centerYAnchor),
+        ])
+        
+        view.addSubview(blurView)
+        
+        NSLayoutConstraint.activate([
+            blurView.topAnchor.constraint(equalTo: view.topAnchor),
+            blurView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            blurView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        
+        reconnectingOverlay = blurView
+        
+        // Fade in
+        blurView.alpha = 0
+        UIView.animate(withDuration: 0.3) {
+            blurView.alpha = 0.85
+        }
+        
+        logger.info("Showing reconnecting overlay")
+    }
+    
+    /// Hide the reconnecting overlay with a fade-out animation.
+    func hideReconnectingOverlay() {
+        guard let overlay = reconnectingOverlay else { return }
+        
+        UIView.animate(withDuration: 0.3, animations: {
+            overlay.alpha = 0
+        }, completion: { _ in
+            overlay.removeFromSuperview()
+        })
+        
+        reconnectingOverlay = nil
+        logger.info("Hiding reconnecting overlay")
     }
     
     // MARK: - Key Table Indicator
@@ -955,6 +1044,7 @@ class RawTerminalUIViewController: UIViewController {
         splitTreeObserver?.cancel()
         connectionObserver?.cancel()
         keyTableObserver?.cancel()
+        reconnectingObserver?.cancel()
     }
 }
 

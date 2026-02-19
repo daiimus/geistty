@@ -250,6 +250,10 @@ class NIOSSHConnection {
     var cols: Int = 80
     var rows: Int = 24
     
+    /// Connection timeout in seconds. Defaults to 15s for initial connections.
+    /// Reconnect code sets this to 5s for faster failure detection.
+    var connectionTimeoutSeconds: UInt64 = 15
+    
     // NIO components
     private var eventLoopGroup: NIOTSEventLoopGroup?
     private var channel: Channel?
@@ -380,14 +384,14 @@ class NIOSSHConnection {
             
             // Connect with timeout — bootstrap.connect can hang for 75s+ on unreachable hosts.
             // Use a task group race: the real connection vs a sleep-based timeout.
-            logger.info("🔗 Connecting to \(connectionHost):\(connectionPort)...")
-            let connectionTimeoutSeconds: UInt64 = 15
+            logger.info("🔗 Connecting to \(connectionHost):\(connectionPort) (timeout=\(self.connectionTimeoutSeconds)s)...")
+            let timeoutSeconds = self.connectionTimeoutSeconds
             let channel: Channel = try await withThrowingTaskGroup(of: Channel.self) { group in
                 group.addTask {
                     try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
                 }
                 group.addTask {
-                    try await Task.sleep(nanoseconds: connectionTimeoutSeconds * 1_000_000_000)
+                    try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
                     throw NIOSSHError.timeout
                 }
                 // First task to complete wins; cancel the other

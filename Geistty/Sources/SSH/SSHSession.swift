@@ -1081,11 +1081,16 @@ class SSHSession: ObservableObject, Identifiable {
             reconnectAttempts += 1
             logger.info("Reconnect attempt \(reconnectAttempts)/\(maxReconnectAttempts)")
             
-            // Clean up old connection state (but keep tmuxSessionManager for surface reuse)
+            // Clean up old connection state (but keep tmuxSessionManager for surface reuse).
+            // Nil the delegate BEFORE disconnecting so the old connection's death
+            // rattle doesn't fire connectionDidClose back to us — the stale-connection
+            // guard in connectionDidClose is the primary defense, but nilling the
+            // delegate is a belt-and-suspenders measure.
             controlModeState = .inactive
             tmuxPaneActivated = false
             activeTmuxPaneId = nil
             viewerReady = false
+            connection?.delegate = nil
             connection?.disconnect()
             connection = nil
             
@@ -1133,6 +1138,7 @@ class SSHSession: ObservableObject, Identifiable {
         let conn = NIOSSHConnection(host: host, port: port, username: username)
         conn.cols = terminalCols
         conn.rows = terminalRows
+        conn.connectionTimeoutSeconds = 5  // Faster timeout for reconnect (vs 15s for initial)
         conn.delegate = self
         connection = conn
         
@@ -1339,9 +1345,32 @@ class SSHSession: ObservableObject, Identifiable {
     /// Simulate NIOSSHConnection calling connectionDidClose for testing.
     /// Creates a throwaway NIOSSHConnection and invokes the delegate method,
     /// exercising the real `isDetachingForBackground` suppression logic.
-    func simulateConnectionDidCloseForTesting(error: Error? = nil) {
-        let dummyConnection = NIOSSHConnection(host: "test", port: 22, username: "test")
-        connectionDidClose(dummyConnection, error: error)
+    ///
+    /// By default, uses a dummy connection (simulating a stale/unknown connection).
+    /// Pass `useCurrentConnection: true` to simulate the *current* connection closing
+    /// (e.g., when the active connection dies without reconnect in progress).
+    func simulateConnectionDidCloseForTesting(error: Error? = nil, useCurrentConnection: Bool = false) {
+        if useCurrentConnection, let conn = connection {
+            connectionDidClose(conn, error: error)
+        } else {
+            let dummyConnection = NIOSSHConnection(host: "test", port: 22, username: "test")
+            connectionDidClose(dummyConnection, error: error)
+        }
+    }
+    
+    /// Set isReconnecting for testing. Only available in DEBUG builds.
+    func setIsReconnectingForTesting(_ value: Bool) {
+        isReconnecting = value
+    }
+    
+    /// Set a mock connection for testing. Only available in DEBUG builds.
+    func setConnectionForTesting(_ conn: NIOSSHConnection?) {
+        connection = conn
+    }
+    
+    /// Get the current connection for testing verification. Only available in DEBUG builds.
+    var connectionForTesting: NIOSSHConnection? {
+        connection
     }
     #endif
 }
@@ -1371,6 +1400,15 @@ extension SSHSession: NIOSSHConnectionDelegate {
     }
     
     func connectionDidClose(_ connection: NIOSSHConnection, error: Error?) {
+        // Stale connection guard: during reconnect, attemptReconnect() calls
+        // oldConnection.disconnect() which fires this callback. If `connection`
+        // is not our current self.connection, it's a death rattle from the old
+        // connection — ignore it to prevent spurious UI navigation.
+        if connection !== self.connection && self.connection != nil {
+            logger.info("Ignoring connectionDidClose from stale connection (reconnect in progress)")
+            return
+        }
+        
         self.lastError = error
         self.state = .disconnected
         
@@ -1382,6 +1420,14 @@ extension SSHSession: NIOSSHConnectionDelegate {
         // appDidBecomeActive() already handles creating a fresh SSH connection.
         if isDetachingForBackground {
             logger.info("SSH channel closed during background detach — suppressing disconnect notification")
+            return
+        }
+        
+        // During reconnect, the old connection's teardown may fire after
+        // isDetachingForBackground has been cleared. Suppress these too —
+        // attemptReconnect() manages the lifecycle directly.
+        if isReconnecting {
+            logger.info("SSH channel closed during reconnect — suppressing disconnect notification")
             return
         }
         

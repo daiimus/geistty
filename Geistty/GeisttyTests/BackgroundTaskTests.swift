@@ -646,4 +646,296 @@ final class BackgroundTaskTests: XCTestCase {
         XCTAssertEqual(delegate.didDisconnectCalls.count, 1,
                        "Normal disconnect should notify delegate")
     }
+    
+    // MARK: - WS-R1: Stale connection guard tests
+    
+    @MainActor
+    func testStaleConnectionGuardIgnoresOldConnection() {
+        // When self.connection is set and a DIFFERENT connection fires
+        // connectionDidClose, the callback is from a stale (old) connection
+        // during reconnect — it should be completely ignored.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Set a "current" connection and put state into .connected
+        let currentConn = NIOSSHConnection(host: "current", port: 22, username: "test")
+        session.setConnectionForTesting(currentConn)
+        session.state = .connected
+        
+        // Simulate a DIFFERENT (stale) connection calling connectionDidClose
+        // Default simulateConnectionDidCloseForTesting creates a dummy connection
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        
+        // Should be completely ignored — state unchanged, delegate not called
+        XCTAssertEqual(session.state, .connected,
+                       "State should remain .connected — stale connection close must be ignored")
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Delegate should NOT be notified by a stale connection")
+    }
+    
+    @MainActor
+    func testStaleConnectionGuardAllowsCurrentConnection() {
+        // When the CURRENT connection fires connectionDidClose, it should
+        // proceed normally (not be blocked by the stale guard).
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Set a connection and then close it via useCurrentConnection: true
+        let conn = NIOSSHConnection(host: "current", port: 22, username: "test")
+        session.setConnectionForTesting(conn)
+        
+        session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
+        
+        XCTAssertEqual(session.state, .disconnected,
+                       "State should be updated when the current connection closes")
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1,
+                       "Delegate should be notified when the current connection closes")
+    }
+    
+    @MainActor
+    func testStaleConnectionGuardPassesThroughWhenConnectionNil() {
+        // When self.connection is nil (e.g., fresh session or after explicit disconnect),
+        // any connectionDidClose should pass through — the `self.connection != nil` check
+        // prevents the stale guard from blocking legitimate notifications.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // connection is nil by default on a fresh SSHSession
+        XCTAssertNil(session.connectionForTesting)
+        
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        
+        XCTAssertEqual(session.state, .disconnected,
+                       "Should pass through when self.connection is nil")
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1,
+                       "Delegate should be notified when self.connection is nil")
+    }
+    
+    @MainActor
+    func testStaleConnectionGuardDoesNotUpdateState() {
+        // The stale guard returns BEFORE setting state or lastError — a stale
+        // connection's death rattle should leave the session completely untouched.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        let currentConn = NIOSSHConnection(host: "current", port: 22, username: "test")
+        session.setConnectionForTesting(currentConn)
+        session.state = .connected
+        
+        let testError = NSError(domain: "stale", code: 1, userInfo: nil)
+        session.simulateConnectionDidCloseForTesting(error: testError)
+        
+        // State should be UNCHANGED (still .connected, not .disconnected)
+        XCTAssertEqual(session.state, .connected,
+                       "Stale connection close must not change state")
+        XCTAssertNil(session.lastError,
+                     "Stale connection close must not set lastError")
+    }
+    
+    // MARK: - WS-R1: Reconnect suppression tests
+    
+    @MainActor
+    func testReconnectSuppressionBlocksDelegateNotification() {
+        // When isReconnecting is true, connectionDidClose from the current
+        // connection should update state but NOT notify the delegate — the
+        // reconnect process manages the lifecycle directly.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Set a connection and mark as reconnecting
+        let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
+        session.setConnectionForTesting(conn)
+        session.setIsReconnectingForTesting(true)
+        
+        session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
+        
+        // State should be updated (connection IS closed)
+        XCTAssertEqual(session.state, .disconnected,
+                       "State should still be updated during reconnect")
+        // But delegate should NOT be notified
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Delegate must NOT be notified during reconnect — " +
+                       "this would cause SwiftUI to navigate away from TerminalContainerView")
+    }
+    
+    @MainActor
+    func testReconnectSuppressionPreservesError() {
+        // Even when suppressing delegate notification, lastError should be set
+        // so diagnostic code can see what happened.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
+        session.setConnectionForTesting(conn)
+        session.setIsReconnectingForTesting(true)
+        
+        let testError = NSError(domain: "reconnect", code: 42, userInfo: nil)
+        session.simulateConnectionDidCloseForTesting(error: testError, useCurrentConnection: true)
+        
+        XCTAssertEqual((session.lastError as? NSError)?.code, 42,
+                       "lastError should be set even when reconnect suppresses delegate")
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Delegate should not be called")
+    }
+    
+    @MainActor
+    func testReconnectNotActiveAllowsDelegateNotification() {
+        // Contrast test: when isReconnecting is false and isDetachingForBackground
+        // is false, the delegate SHOULD be notified normally.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
+        session.setConnectionForTesting(conn)
+        
+        // Both flags are false (default)
+        XCTAssertFalse(session.isReconnecting)
+        XCTAssertFalse(session.isDetachingForBackground)
+        
+        session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
+        
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1,
+                       "Delegate should be notified when no suppression flags are set")
+    }
+    
+    // MARK: - WS-R1: Guard priority / layering tests
+    
+    @MainActor
+    func testStaleGuardTakesPriorityOverReconnectSuppression() {
+        // Stale guard fires FIRST and returns before even checking
+        // isReconnecting — state and lastError should be untouched.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        let currentConn = NIOSSHConnection(host: "current", port: 22, username: "test")
+        session.setConnectionForTesting(currentConn)
+        session.setIsReconnectingForTesting(true)
+        session.state = .connected
+        
+        let testError = NSError(domain: "stale", code: 99, userInfo: nil)
+        session.simulateConnectionDidCloseForTesting(error: testError)
+        
+        // Stale guard should fire first — nothing changes
+        XCTAssertEqual(session.state, .connected,
+                       "Stale guard should prevent any state change")
+        XCTAssertNil(session.lastError)
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0)
+    }
+    
+    @MainActor
+    func testBackgroundDetachTakesPriorityOverReconnect() {
+        // When both isDetachingForBackground and isReconnecting are true
+        // (shouldn't happen in practice, but defensive coding), the background
+        // detach guard fires first (since it comes first in code order).
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
+        session.setConnectionForTesting(conn)
+        session.setIsDetachingForBackgroundForTesting(true)
+        session.setIsReconnectingForTesting(true)
+        
+        session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
+        
+        // Both guards would suppress — but background fires first
+        XCTAssertEqual(session.state, .disconnected,
+                       "State should still be updated (happens before guards)")
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Delegate should not be called regardless of which guard fires")
+    }
+    
+    // MARK: - WS-R1: Full reconnect lifecycle simulation
+    
+    @MainActor
+    func testFullReconnectLifecycleOldConnectionSuppressed() {
+        // Simulates the complete reconnect flow:
+        // 1. App has an active connection
+        // 2. App backgrounds → detach
+        // 3. App foregrounds → attemptReconnect starts
+        //    a. Old connection's delegate nilled (belt-and-suspenders)
+        //    b. Old connection disconnected → connectionDidClose fires
+        //       → suppressed by stale guard OR reconnect flag
+        // 4. New connection established
+        // 5. isReconnecting = false
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        let mock = MockBackgroundTaskProvider()
+        session.backgroundTaskProvider = mock
+        
+        // Step 1: Simulate active SSH+tmux session
+        let oldConn = NIOSSHConnection(host: "server", port: 22, username: "user")
+        session.setConnectionForTesting(oldConn)
+        session.setControlModeStateForTesting(.active)
+        session.state = .connected
+        
+        // Step 2: Background
+        session.appWillResignActive()
+        XCTAssertTrue(session.isDetachingForBackground)
+        
+        // Old connection closes during background (SSH channel dies)
+        session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Background detach guard suppresses")
+        
+        // Step 3: Foreground — simulate what attemptReconnect does
+        session.appDidBecomeActive()
+        XCTAssertFalse(session.isDetachingForBackground)
+        
+        // attemptReconnect nils delegate and disconnects old conn
+        // (we can't call attemptReconnect directly without a real server,
+        //  but we can simulate the critical sequence)
+        session.setIsReconnectingForTesting(true)
+        let newConn = NIOSSHConnection(host: "server", port: 22, username: "user")
+        session.setConnectionForTesting(newConn)
+        session.state = .connected
+        
+        // Old conn's death rattle fires — with our new connection set,
+        // the dummy connection is stale. Verify the stale guard blocks it:
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Stale connection guard suppresses old conn death rattle")
+        
+        // Step 4: New connection succeeds — isReconnecting cleared
+        session.setIsReconnectingForTesting(false)
+        
+        // Step 5: If the NEW connection later dies normally, delegate IS notified
+        session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1,
+                       "Normal disconnect on established connection notifies delegate")
+    }
+    
+    // MARK: - WS-R3: Connection timeout tests
+    
+    @MainActor
+    func testDefaultConnectionTimeoutIs15Seconds() {
+        let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
+        XCTAssertEqual(conn.connectionTimeoutSeconds, 15,
+                       "Default connection timeout should be 15 seconds")
+    }
+    
+    @MainActor
+    func testConnectionTimeoutCanBeSetTo5Seconds() {
+        let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
+        conn.connectionTimeoutSeconds = 5
+        XCTAssertEqual(conn.connectionTimeoutSeconds, 5,
+                       "Connection timeout should be configurable to 5 seconds for reconnect")
+    }
+    
+    @MainActor
+    func testConnectionTimeoutCanBeSetToArbitraryValue() {
+        let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
+        conn.connectionTimeoutSeconds = 30
+        XCTAssertEqual(conn.connectionTimeoutSeconds, 30,
+                       "Connection timeout should accept any UInt64 value")
+    }
 }
