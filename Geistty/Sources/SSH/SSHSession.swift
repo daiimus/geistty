@@ -1335,6 +1335,14 @@ class SSHSession: ObservableObject, Identifiable {
     var earlyReceiveBufferForTesting: [Data] {
         earlyReceiveBuffer
     }
+    
+    /// Simulate NIOSSHConnection calling connectionDidClose for testing.
+    /// Creates a throwaway NIOSSHConnection and invokes the delegate method,
+    /// exercising the real `isDetachingForBackground` suppression logic.
+    func simulateConnectionDidCloseForTesting(error: Error? = nil) {
+        let dummyConnection = NIOSSHConnection(host: "test", port: 22, username: "test")
+        connectionDidClose(dummyConnection, error: error)
+    }
     #endif
 }
 
@@ -1365,6 +1373,18 @@ extension SSHSession: NIOSSHConnectionDelegate {
     func connectionDidClose(_ connection: NIOSSHConnection, error: Error?) {
         self.lastError = error
         self.state = .disconnected
+        
+        // When detaching for background, the SSH channel closes because the
+        // `exec tmux -CC ...` command exits after detach-client succeeds.
+        // This is EXPECTED — suppress the disconnect notification so SwiftUI
+        // doesn't remove TerminalContainerView (which triggers full surface
+        // teardown and a renderer use-after-free SIGSEGV).
+        // appDidBecomeActive() already handles creating a fresh SSH connection.
+        if isDetachingForBackground {
+            logger.info("SSH channel closed during background detach — suppressing disconnect notification")
+            return
+        }
+        
         self.delegate?.sshSession(self, didDisconnectWithError: error)
     }
     

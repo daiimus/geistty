@@ -163,9 +163,12 @@ class TerminalViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.sshSession?.appWillResignActive()
-            }
+            // CRITICAL: Must run synchronously — NOT in a Task wrapper.
+            // The isDetachingForBackground flag must be set BEFORE any other
+            // willResignActive handlers run (e.g., Ghostty.App's focus-false),
+            // because those can trigger tmux_exit which checks the flag.
+            // A Task wrapper defers to the next run loop iteration, too late.
+            self?.sshSession?.appWillResignActive()
         }
         lifecycleObservers.append(resignObserver)
         
@@ -175,9 +178,9 @@ class TerminalViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.sshSession?.appDidBecomeActive()
-            }
+            // Synchronous for same reason as resign — must run before other
+            // didBecomeActive handlers that might inspect connection state.
+            self?.sshSession?.appDidBecomeActive()
         }
         lifecycleObservers.append(activeObserver)
     }
