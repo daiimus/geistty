@@ -507,4 +507,143 @@ final class BackgroundTaskTests: XCTestCase {
         XCTAssertFalse(session.tmuxSessionManager?.isConnected ?? true,
                        "Manager should show disconnected when credentials missing")
     }
+    
+    // MARK: - connectionDidClose suppression tests (WS-D2 fix)
+    
+    @MainActor
+    func testConnectionDidCloseSuppressesDelegateWhenDetachingForBackground() {
+        // When isDetachingForBackground is true, connectionDidClose should NOT
+        // call delegate.sshSession(didDisconnectWithError:) — this prevents
+        // SwiftUI from removing TerminalContainerView and triggering the
+        // renderer use-after-free SIGSEGV.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        session.setControlModeStateForTesting(.active)
+        session.setIsDetachingForBackgroundForTesting(true)
+        
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Delegate should NOT be notified of disconnect during background detach")
+    }
+    
+    @MainActor
+    func testConnectionDidCloseCallsDelegateWhenNotDetaching() {
+        // Normal disconnect (not background detach) — delegate SHOULD be notified.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // isDetachingForBackground defaults to false
+        XCTAssertFalse(session.isDetachingForBackground)
+        
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1,
+                       "Delegate should be notified of disconnect in normal path")
+    }
+    
+    @MainActor
+    func testConnectionDidCloseUpdatesStateRegardlessOfFlag() {
+        // Even when suppressing the delegate notification, state and lastError
+        // should still be updated — the connection IS closed.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        session.setIsDetachingForBackgroundForTesting(true)
+        
+        let testError = NSError(domain: "test", code: 42, userInfo: nil)
+        session.simulateConnectionDidCloseForTesting(error: testError)
+        
+        XCTAssertEqual(session.state, .disconnected,
+                       "State should be .disconnected after connectionDidClose")
+        XCTAssertEqual((session.lastError as? NSError)?.code, 42,
+                       "lastError should be set even when suppressing delegate")
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "But delegate should NOT be called")
+    }
+    
+    @MainActor
+    func testConnectionDidClosePassesErrorToDelegateInNormalPath() {
+        // When NOT detaching for background, the error should be passed through.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        let testError = NSError(domain: "test", code: 99, userInfo: nil)
+        session.simulateConnectionDidCloseForTesting(error: testError)
+        
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1)
+        XCTAssertEqual((delegate.didDisconnectCalls.first?.error as? NSError)?.code, 99,
+                       "Error should be passed to delegate")
+    }
+    
+    @MainActor
+    func testConnectionDidCloseWithNilErrorInNormalPath() {
+        // Clean disconnect (no error) should still notify delegate.
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1)
+        XCTAssertNil(delegate.didDisconnectCalls.first?.error,
+                     "Error should be nil for clean disconnect")
+    }
+    
+    // MARK: - Full background lifecycle with connectionDidClose
+    
+    @MainActor
+    func testFullBackgroundLifecycleWithConnectionDidClose() {
+        // Simulates the complete background transition:
+        // 1. appWillResignActive → flag set, detach-client sent
+        // 2. connectionDidClose fires (SSH channel closes after tmux detach)
+        //    → delegate NOT notified → SwiftUI doesn't remove view → no SIGSEGV
+        // 3. appDidBecomeActive → reconnect path
+        let session = SSHSession()
+        let mock = MockBackgroundTaskProvider()
+        let delegate = MockSSHSessionDelegate()
+        session.backgroundTaskProvider = mock
+        session.delegate = delegate
+        session.setControlModeStateForTesting(.active)
+        
+        // Step 1: App backgrounds
+        session.appWillResignActive()
+        XCTAssertTrue(session.isDetachingForBackground)
+        XCTAssertEqual(mock.activeTasks.count, 1)
+        
+        // Step 2: SSH channel closes (tmux exec'd process exits after detach)
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        
+        // Key assertion: delegate was NOT notified
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Delegate must NOT be notified during background detach — " +
+                       "this would cause SwiftUI to remove TerminalContainerView → SIGSEGV")
+        // But state IS updated
+        XCTAssertEqual(session.state, .disconnected)
+        
+        // Step 3: App foregrounds
+        session.appDidBecomeActive()
+        XCTAssertFalse(session.isDetachingForBackground,
+                       "Flag should be cleared after becoming active")
+        // Delegate still not notified about the SSH close from step 2
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
+                       "Delegate should never have been notified for the background disconnect")
+    }
+    
+    @MainActor
+    func testNormalDisconnectNotifiesDelegate() {
+        // Contrast test: when NOT in background detach flow,
+        // connectionDidClose DOES notify delegate (normal behavior).
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        session.simulateConnectionDidCloseForTesting(error: nil)
+        
+        XCTAssertEqual(delegate.didDisconnectCalls.count, 1,
+                       "Normal disconnect should notify delegate")
+    }
 }
