@@ -1954,16 +1954,39 @@ extension Ghostty {
                     _ = resignFirstResponder()
                 }
                 
-                // Strip observer down to a single instant-tap gesture.
-                // Observers are display-only mirrors — they don't need selection,
-                // scrolling, or zoom gestures. Only a tap for pane switching.
+                // Strip observer down to minimal gestures. Observers are
+                // display-only mirrors — they don't need selection, scrolling,
+                // or text editing gestures. They keep:
+                //   1. Single-tap for pane switching (handleTap → onPaneTap)
+                //   2. Pinch for per-pane font size zoom (handlePinch)
+                //   3. Two-finger double-tap for font size reset (handleTwoFingerDoubleTap)
+                //
+                // Pinch and font-reset gestures call ghostty_surface_binding_action
+                // directly on self.surface — they don't need keyboard focus and
+                // don't interfere with the input routing system.
+                //
                 // NOTE: If we later implement pane promotion (swapping which
                 // surface is primary), the promotion logic should restore the
                 // full gesture suite.
                 gestureRecognizers?.forEach { removeGestureRecognizer($0) }
+                
                 let paneTapGesture = UITapGestureRecognizer(
                     target: self, action: #selector(handleTap(_:)))
                 addGestureRecognizer(paneTapGesture)
+                
+                // Pinch-to-zoom: per-pane font size adjustment. Each observer
+                // surface has independent font_size state in Ghostty's Surface
+                // struct — SharedGridSet is ref-counted, not shared mutable.
+                let pinchGesture = UIPinchGestureRecognizer(
+                    target: self, action: #selector(handlePinch(_:)))
+                addGestureRecognizer(pinchGesture)
+                
+                // Two-finger double-tap: reset font size to config default.
+                let twoFingerDoubleTapGesture = UITapGestureRecognizer(
+                    target: self, action: #selector(handleTwoFingerDoubleTap(_:)))
+                twoFingerDoubleTapGesture.numberOfTouchesRequired = 2
+                twoFingerDoubleTapGesture.numberOfTapsRequired = 2
+                addGestureRecognizer(twoFingerDoubleTapGesture)
             }
             logger.debug("attachToTmuxPane(pane=\(paneId)): result=\(result)")
             return result

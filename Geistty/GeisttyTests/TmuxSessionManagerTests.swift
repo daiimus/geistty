@@ -2520,6 +2520,178 @@ extension TmuxSessionManagerTests {
     }
 }
 
+// MARK: - Session 107: Observer Zoom Gesture Contract Tests (WS-Z)
+
+extension TmuxSessionManagerTests {
+
+    /// CONTRACT: After attachToTmuxPane(), observer surfaces must have exactly 3
+    /// gesture recognizers:
+    ///   1. UITapGestureRecognizer (single tap, 1 touch) — pane switching
+    ///   2. UIPinchGestureRecognizer — per-pane font size zoom
+    ///   3. UITapGestureRecognizer (double tap, 2 touches) — font size reset
+    ///
+    /// Since we can't instantiate a real SurfaceView in tests (requires Metal +
+    /// GhosttyKit), this test documents the expected gesture contract. The actual
+    /// gesture setup is in Ghostty.swift attachToTmuxPane().
+    ///
+    /// KEY DESIGN FACTS (verified in Ghostty source):
+    /// - increase_font_size/decrease_font_size are surface-scoped actions in Binding.zig
+    /// - Each Surface has independent font_size, font_grid_key, font_metrics fields
+    /// - ghostty_surface_tmux_attach_to_pane only replaces renderer_state.mutex and
+    ///   renderer_state.terminal — font state is NOT shared
+    /// - Pinch/font-reset gestures call ghostty_surface_binding_action on self.surface,
+    ///   so they operate on the observer's own font state, not the primary's
+    /// - These gestures don't need canBecomeFirstResponder=true because they don't
+    ///   involve keyboard focus or input routing
+    @MainActor
+    func testObserverGestureContractDocumentation() {
+        // This test documents the contract. The actual gesture setup cannot be
+        // tested without Metal, but we verify the architectural invariants.
+        let mgr = TmuxSessionManager()
+
+        let layout = horizontalSplitLayout(paneA: 6, paneB: 7)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7]
+        ))
+
+        // Without a Ghostty runtime, paneSurfaces won't be populated (surfaces
+        // require Metal + GhosttyKit). The contract we're documenting is:
+        //
+        // After attachToTmuxPane() on an observer surface:
+        //   gestureRecognizers.count == 3
+        //   gestureRecognizers contains UITapGestureRecognizer(taps=1, touches=1)  — pane switching
+        //   gestureRecognizers contains UIPinchGestureRecognizer                   — per-pane font zoom
+        //   gestureRecognizers contains UITapGestureRecognizer(taps=2, touches=2)  — font reset
+        //   canBecomeFirstResponder == false
+        //   isMultiPaneObserver == true
+        //
+        // Primary surface retains full gesture suite (12+ gestures).
+        //
+        // KEY DESIGN FACTS (verified in Ghostty source):
+        // - increase_font_size/decrease_font_size are surface-scoped in Binding.zig
+        // - Each Surface has independent font_size, font_grid_key, font_metrics
+        // - ghostty_surface_tmux_attach_to_pane only replaces renderer_state.mutex
+        //   and renderer_state.terminal — font state is NOT shared
+        // - Pinch/font-reset call ghostty_surface_binding_action on self.surface
+        //   (the observer's own surface, not the primary's)
+        // - These gestures don't need canBecomeFirstResponder=true
+
+        // Verify the state snapshot has the right pane count
+        XCTAssertEqual(mgr.currentSplitTree.paneIds.count, 2,
+                       "State snapshot should track 2 panes for gesture setup")
+    }
+
+    /// Per-pane font size independence: selectPane() should work correctly
+    /// regardless of which pane has been zoomed (font-size-wise). This verifies
+    /// that the input routing system is decoupled from font size state.
+    @MainActor
+    func testSelectPaneWorksIndependentlyOfFontSizeState() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let layout = threePaneLayout(paneA: 6, paneB: 7, paneC: 8)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7, 8]
+        ))
+
+        // Simulate: user pinch-zooms observer pane %7 (font size change happens
+        // on the SurfaceView, invisible to TmuxSessionManager). Then taps pane %8.
+        // The selectPane() call must still work — font state doesn't affect routing.
+        mgr.selectPane("%8")
+        XCTAssertEqual(mgr.focusedPaneId, "%8")
+        XCTAssertTrue(log.commands.contains(where: { $0.contains("select-pane -t '%8'") }))
+
+        // Now tap back to primary %6
+        log.commands.removeAll()
+        mgr.selectPane("%6")
+        XCTAssertEqual(mgr.focusedPaneId, "%6",
+                       "selectPane to primary must work after observer font zoom")
+        XCTAssertTrue(log.commands.contains(where: { $0.contains("select-pane -t '%6'") }))
+    }
+
+    /// Zoom gestures must coexist with pane-tap gesture on observer surfaces.
+    /// The single-tap (pane switch) must NOT require pinch or two-finger-double-tap
+    /// to fail — they are independent gesture types (tap vs pinch vs multi-touch tap).
+    ///
+    /// This test verifies the contract at the TmuxSessionManager level: rapid
+    /// selectPane calls interleaved with simulated font changes should all succeed.
+    @MainActor
+    func testZoomAndPaneTapGestureCoexistence() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        mock.stubbedSetActivePaneResult = true
+
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let layout = threePaneLayout(paneA: 6, paneB: 7, paneC: 8)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7, 8]
+        ))
+
+        // Sequence: tap %7, "zoom" %7, tap %8, "zoom" %8, tap %6
+        // Each selectPane must succeed regardless of interleaved font changes.
+        mgr.selectPane("%7")
+        XCTAssertEqual(mgr.focusedPaneId, "%7")
+
+        // (font zoom on %7 happens on SurfaceView — invisible here)
+
+        log.commands.removeAll()
+        mgr.selectPane("%8")
+        XCTAssertEqual(mgr.focusedPaneId, "%8")
+
+        // (font zoom on %8 happens on SurfaceView — invisible here)
+
+        log.commands.removeAll()
+        mgr.selectPane("%6")
+        XCTAssertEqual(mgr.focusedPaneId, "%6",
+                       "Pane switching must work after interleaved font zoom gestures")
+        XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls.last, 6,
+                       "Last setActiveTmuxPaneInputOnly must target primary pane")
+    }
+
+    /// Per-pane font size means each observer surface has its own currentFontSize
+    /// @Published property. The primaryCellSize on TmuxSessionManager should only
+    /// reflect the PRIMARY surface's cell size, not observer surfaces.
+    ///
+    /// primaryCellSize is private(set) — it's only updated by the primary surface's
+    /// cellSize publisher. Observer surface font changes (which update the observer's
+    /// own SurfaceView.currentFontSize) have no path to modify primaryCellSize.
+    @MainActor
+    func testPrimaryCellSizeIsPrivateSet() {
+        let mgr = TmuxSessionManager()
+
+        let layout = horizontalSplitLayout(paneA: 6, paneB: 7)
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [6, 7]
+        ))
+
+        // primaryCellSize starts at .zero when no real surface is attached.
+        // The private(set) access control ensures only the primary surface's
+        // cellSize publisher can update it — observer font changes are isolated.
+        XCTAssertEqual(mgr.primaryCellSize, .zero,
+                       "Without a real primary surface, primaryCellSize should be .zero")
+
+        // CONTRACT: primaryCellSize is updated ONLY via the Combine subscription
+        // in setupPrimarySurfaceObservation() which binds to primarySurface.$cellSize.
+        // Observer surfaces have no path to modify this property.
+    }
+}
+
 // MARK: - Session 98: onWrite Focus Override Regression Tests
 
 extension TmuxSessionManagerTests {

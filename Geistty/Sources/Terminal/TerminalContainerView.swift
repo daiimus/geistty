@@ -590,6 +590,14 @@ class RawTerminalUIViewController: UIViewController {
         .lightContent
     }
     
+    /// Auto-hide the home indicator after a few seconds of inactivity.
+    /// Terminal apps are full-screen immersive experiences — the persistent
+    /// home indicator bar wastes bottom screen real estate and is visually
+    /// distracting on a dark terminal background.
+    override var prefersHomeIndicatorAutoHidden: Bool {
+        true
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         

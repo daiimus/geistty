@@ -237,6 +237,14 @@ extension RawTerminalUIViewController {
         let hostingController = UIHostingController(rootView: multiPaneView)
         multiPaneHostingController = hostingController
         
+        // Prevent UIHostingController from propagating safe area insets to
+        // SwiftUI content. Without this, the GeometryReader in TmuxMultiPaneView
+        // reports a size reduced by the bottom safe area (home indicator), leaving
+        // ~20px of unused space at the bottom on Face ID iPads.
+        if #available(iOS 16.4, *) {
+            hostingController.safeAreaRegions = []
+        }
+        
         // Add as child view controller
         addChild(hostingController)
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
