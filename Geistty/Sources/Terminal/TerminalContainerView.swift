@@ -769,6 +769,7 @@ class RawTerminalUIViewController: UIViewController {
         if let overlay = dividerOverlayView,
            let tmuxManager = viewModel?.tmuxManager {
             let size = multiPaneHostingController?.view.bounds.size ?? .zero
+            overlay.cellSize = tmuxManager.primaryCellSize
             overlay.updateDividers(from: tmuxManager.currentSplitTree, containerSize: size)
         }
     }

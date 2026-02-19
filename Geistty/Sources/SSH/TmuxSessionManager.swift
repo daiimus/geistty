@@ -373,11 +373,12 @@ class TmuxSessionManager: ObservableObject {
         // Create surfaces for new panes.
         // If the factory isn't configured yet (race: Combine sink hasn't fired),
         // record the pane IDs so configureSurfaceManagement() can create them later.
-        // IMPORTANT: Sort so the lowest-numbered pane gets processed first.
+        // IMPORTANT: Sort NUMERICALLY so the lowest-numbered pane gets processed first.
         // When an adopted primarySurface exists but isn't registered yet,
         // getSurfaceOrCreate() assigns it to the FIRST pane that needs a surface.
-        // Sorting ensures this is deterministic (lowest pane ID = first/focused pane).
-        for paneId in allActivePaneIds.sorted() {
+        // Numeric sort ensures this is deterministic — lexicographic sort would put
+        // "%10" before "%9", causing the wrong pane to get the primary surface.
+        for paneId in TmuxId.sortedNumerically(allActivePaneIds) {
             if paneSurfaces[paneId] == nil {
                 logger.info("  Creating surface for new pane \(paneId)")
                 if let _ = getSurfaceOrCreate(for: paneId) {
@@ -548,6 +549,14 @@ class TmuxSessionManager: ObservableObject {
                 inputHandler(primary, paneId)
             }
             
+            // NOTE: We intentionally do NOT call setActiveTmuxPane() here.
+            // activateFirstTmuxPane() in SSHSession handles renderer binding
+            // when TMUX_READY fires. Calling setActiveTmuxPane during surface
+            // creation races with observer surface IO thread initialization
+            // and causes a Zig PANIC ("reached unreachable code" during resize).
+            // The numeric sort fix ensures the primary always gets the lowest
+            // pane ID, matching what activateFirstTmuxPane() sets.
+            
             logger.info("Registered adopted primarySurface under real pane ID \(paneId)")
             
             // Flush any pending output for this pane (primary owns the viewer,
@@ -713,8 +722,8 @@ class TmuxSessionManager: ObservableObject {
         if !pendingSurfaceCreation.isEmpty {
             let deferred = pendingSurfaceCreation
             pendingSurfaceCreation.removeAll()
-            logger.info("Draining \(deferred.count) deferred surface creations: \(deferred.sorted())")
-            for paneId in deferred.sorted() {
+            logger.info("Draining \(deferred.count) deferred surface creations: \(TmuxId.sortedNumerically(deferred))")
+            for paneId in TmuxId.sortedNumerically(deferred) {
                 if paneSurfaces[paneId] == nil {
                     _ = getSurfaceOrCreate(for: paneId)
                 }
@@ -812,7 +821,7 @@ class TmuxSessionManager: ObservableObject {
         }
         
         // 2. Use first pane that has pending output (data has arrived)
-        if let firstPendingPaneId = pendingOutput.keys.sorted().first {
+        if let firstPendingPaneId = TmuxId.sortedNumerically(pendingOutput.keys).first {
             logger.info("resolveInitialPaneId: from pending output → \(firstPendingPaneId)")
             return firstPendingPaneId
         }
@@ -869,8 +878,8 @@ class TmuxSessionManager: ObservableObject {
     private func reassignPrimarySurface(excludingPaneId closedPaneId: String, fromPaneIds remainingPaneIds: Set<String>) {
         logger.info("📐 🔄 Primary surface's pane \(closedPaneId) closed, reassigning...")
         
-        // Sort to get deterministic ordering (lowest numeric ID first)
-        let sortedPaneIds = remainingPaneIds.sorted()
+        // Sort numerically to get deterministic ordering (lowest numeric ID first)
+        let sortedPaneIds = TmuxId.sortedNumerically(remainingPaneIds)
         
         guard let firstRemainingPaneId = sortedPaneIds.first else {
             // No remaining panes - clear primary surface

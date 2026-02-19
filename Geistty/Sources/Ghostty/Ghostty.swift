@@ -1018,6 +1018,18 @@ extension Ghostty {
             
             _ = becomeFirstResponder()
             
+            // In multi-pane mode, tapping the primary surface must also route
+            // input back to the primary's pane. The onPaneTap callback (set by
+            // TmuxMultiPaneView for all surfaces) calls selectPane() which
+            // updates focusedPaneId and calls setActiveTmuxPaneInputOnly().
+            // Without this, after tapping an observer pane, tapping back on the
+            // primary just re-confirms firstResponder (no-op) but never restores
+            // input routing to the primary's pane.
+            if let onPaneTap = onPaneTap {
+                Ghostty.logger.info("[handleTap] primary pane tapped in multi-pane mode, calling onPaneTap")
+                onPaneTap()
+            }
+            
             // If Ctrl toggle is active, this tap should open a link
             if ctrlToggleActive, let surface = surface {
                 let point = gesture.location(in: self)

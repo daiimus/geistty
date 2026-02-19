@@ -571,4 +571,127 @@ final class TmuxSplitTreeTests: XCTestCase {
         let desc = zoomed.debugDescription
         XCTAssertTrue(desc.contains("[ZOOMED]"))
     }
+
+    // MARK: - Ratio Calculation: Divider-Aware (Bug 1)
+
+    /// tmux horizontal split: parent=80, left=40, right=39, divider=1.
+    /// The ratio should be child0.width / parent.width = 40/80 = 0.5,
+    /// NOT child0.width / (child0.width + child1.width) = 40/79 = 0.5063.
+    func testFromLayoutHorizontalSplitRatioAccountsForDivider() throws {
+        // Layout: 80x24,0,0{40x24,0,0,1,39x24,41,0,2}
+        // Parent width = 80, left = 40, right = 39, divider = 1 (40 + 1 + 39 = 80)
+        let layout = try TmuxLayout.parse("80x24,0,0{40x24,0,0,1,39x24,41,0,2}")
+        let tree = TmuxSplitTree.from(layout: layout)
+
+        guard case .split(let split) = tree.root else {
+            XCTFail("Root should be a split")
+            return
+        }
+
+        // Ratio should use parent width (80) as denominator
+        // Expected: 40/80 = 0.5
+        XCTAssertEqual(split.ratio, 0.5, accuracy: 0.001,
+                       "Ratio should be child.width / parent.width = 40/80 = 0.5")
+    }
+
+    /// tmux vertical split: parent height=24, top=12, bottom=11, divider=1.
+    func testFromLayoutVerticalSplitRatioAccountsForDivider() throws {
+        // Layout: 80x24,0,0[80x12,0,0,1,80x11,0,13,2]
+        // Parent height = 24, top = 12, bottom = 11, divider = 1 (12 + 1 + 11 = 24)
+        let layout = try TmuxLayout.parse("80x24,0,0[80x12,0,0,1,80x11,0,13,2]")
+        let tree = TmuxSplitTree.from(layout: layout)
+
+        guard case .split(let split) = tree.root else {
+            XCTFail("Root should be a split")
+            return
+        }
+
+        // Expected: 12/24 = 0.5
+        XCTAssertEqual(split.ratio, 0.5, accuracy: 0.001,
+                       "Ratio should be child.height / parent.height = 12/24 = 0.5")
+    }
+
+    /// Unequal horizontal split: parent=80, left=26, right=53, divider=1.
+    func testFromLayoutUnequalHorizontalSplitRatio() throws {
+        // Layout: 80x24,0,0{26x24,0,0,1,53x24,27,0,2}
+        // 26 + 1 + 53 = 80
+        let layout = try TmuxLayout.parse("80x24,0,0{26x24,0,0,1,53x24,27,0,2}")
+        let tree = TmuxSplitTree.from(layout: layout)
+
+        guard case .split(let split) = tree.root else {
+            XCTFail("Root should be a split")
+            return
+        }
+
+        // Expected: 26/80 = 0.325
+        XCTAssertEqual(split.ratio, 0.325, accuracy: 0.001,
+                       "Ratio should be 26/80 = 0.325")
+    }
+
+    // MARK: - Ratio Calculation: N-ary Splits (Bug 6)
+
+    /// 3-way horizontal split: parent=120, children 40+40+38, two dividers.
+    /// First binary split: child0=40 vs rest(40+1+38=79), parent=120.
+    /// Inner binary split: child1=40 vs child2=38, inner_width=79.
+    func testFromLayoutThreeWaySplitRatioAccountsForDividers() throws {
+        // Layout: 120x24,0,0{40x24,0,0,1,40x24,41,0,2,38x24,82,0,3}
+        // Parent width = 120, children: 40, 40, 38
+        // 40 + 1 + 40 + 1 + 38 = 120
+        let layout = try TmuxLayout.parse("120x24,0,0{40x24,0,0,1,40x24,41,0,2,38x24,82,0,3}")
+        let tree = TmuxSplitTree.from(layout: layout)
+
+        guard case .split(let outerSplit) = tree.root else {
+            XCTFail("Root should be a split")
+            return
+        }
+
+        // Outer split: child0=40 out of parent=120
+        // Expected outer ratio: 40/120 = 0.333
+        XCTAssertEqual(outerSplit.ratio, 40.0 / 120.0, accuracy: 0.001,
+                       "Outer ratio should be 40/120")
+
+        // Inner split: child1=40 out of inner container width.
+        // Inner container = 120 - 40 - 1 = 79 (rest of parent minus child0 minus 1 divider)
+        // Inner ratio = 40/79 = 0.5063
+        guard case .split(let innerSplit) = outerSplit.right else {
+            XCTFail("Right child should be a split")
+            return
+        }
+
+        XCTAssertEqual(innerSplit.ratio, 40.0 / 79.0, accuracy: 0.001,
+                       "Inner ratio should be 40/79")
+    }
+
+    /// 4-way vertical split to stress-test N-ary divider accounting.
+    func testFromLayoutFourWayVerticalSplitRatios() throws {
+        // 4 panes stacked vertically:
+        // Parent: 80x100
+        // Children: 24, 24, 24, 25 (with 3 dividers: 24+1+24+1+24+1+25 = 100)
+        let layout = try TmuxLayout.parse("80x100,0,0[80x24,0,0,1,80x24,0,25,2,80x24,0,50,3,80x25,0,75,4]")
+        let tree = TmuxSplitTree.from(layout: layout)
+
+        guard case .split(let s1) = tree.root else {
+            XCTFail("Root should be a split"); return
+        }
+
+        // Outer: child0=24 out of parent=100
+        XCTAssertEqual(s1.ratio, 24.0 / 100.0, accuracy: 0.001,
+                       "First split: 24/100")
+
+        guard case .split(let s2) = s1.right else {
+            XCTFail("Expected nested split"); return
+        }
+
+        // Second level: child1=24 out of (100 - 24 - 1) = 75
+        XCTAssertEqual(s2.ratio, 24.0 / 75.0, accuracy: 0.001,
+                       "Second split: 24/75")
+
+        guard case .split(let s3) = s2.right else {
+            XCTFail("Expected nested split"); return
+        }
+
+        // Third level: child2=24 out of (75 - 24 - 1) = 50
+        XCTAssertEqual(s3.ratio, 24.0 / 50.0, accuracy: 0.001,
+                       "Third split: 24/50")
+    }
 }

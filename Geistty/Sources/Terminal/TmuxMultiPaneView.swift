@@ -50,6 +50,7 @@ struct TmuxMultiPaneView: View {
             TmuxSplitTreeView(
                 tree: sessionManager.currentSplitTree,
                 dividerColor: dividerColor,
+                cellSize: sessionManager.primaryCellSize,
                 onResize: { paneId, newRatio in
                     // Update local tree immediately for smooth drag feedback
                     sessionManager.updateSplitRatio(forPaneId: paneId, ratio: newRatio)
@@ -611,6 +612,11 @@ class DividerOverlayView: UIView {
     /// Visible drag indicator thickness
     private let indicatorThickness: CGFloat = 4
     
+    /// Cell size from the primary Ghostty surface.
+    /// Reserved for potential future use (e.g., snapping divider drag to cell boundaries).
+    /// Divider visual width is now a constant 2pt (matching TmuxSplitNodeView and focus border).
+    var cellSize: CGSize = .zero
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
@@ -656,6 +662,11 @@ class DividerOverlayView: UIView {
         dividerView.hitAreaSize = hitAreaSize
         dividerView.containerRect = rect
         
+        // Thin visual divider (2pt) — matches TmuxSplitNodeView and focus border.
+        // tmux's 1-character-cell divider is accounted for in the split *ratio*,
+        // so child rect calculations use this thin value for visual positioning only.
+        let dividerWidth: CGFloat = 2
+        
         // During drag: update visual ratio and show indicator
         dividerView.onDragChanged = { [weak self] newRatio in
             self?.onDragChanged?(paneId, Double(newRatio))
@@ -677,7 +688,8 @@ class DividerOverlayView: UIView {
             self?.onDragEnded?(paneId, Double(newRatio))
         }
         
-        // Position divider based on direction and ratio
+        // Position divider based on direction and ratio.
+        // The divider center sits at ratio * containerSize, matching TmuxSplitView's layout.
         switch split.direction {
         case .horizontal:
             let dividerX = rect.origin.x + rect.width * ratio
@@ -688,11 +700,13 @@ class DividerOverlayView: UIView {
                 height: rect.height
             )
             
-            // Recurse into children
+            // Recurse into children — account for divider width
+            let leftWidth = rect.width * ratio - dividerWidth / 2
+            let rightWidth = rect.width * (1 - ratio) - dividerWidth / 2
             let leftRect = CGRect(x: rect.origin.x, y: rect.origin.y,
-                                  width: rect.width * ratio, height: rect.height)
-            let rightRect = CGRect(x: dividerX, y: rect.origin.y,
-                                   width: rect.width * (1 - ratio), height: rect.height)
+                                  width: max(0, leftWidth), height: rect.height)
+            let rightRect = CGRect(x: dividerX + dividerWidth / 2, y: rect.origin.y,
+                                   width: max(0, rightWidth), height: rect.height)
             createDividers(from: split.left, in: leftRect)
             createDividers(from: split.right, in: rightRect)
             
@@ -705,11 +719,13 @@ class DividerOverlayView: UIView {
                 height: hitAreaSize
             )
             
-            // Recurse into children
+            // Recurse into children — account for divider height
+            let topHeight = rect.height * ratio - dividerWidth / 2
+            let bottomHeight = rect.height * (1 - ratio) - dividerWidth / 2
             let topRect = CGRect(x: rect.origin.x, y: rect.origin.y,
-                                 width: rect.width, height: rect.height * ratio)
-            let bottomRect = CGRect(x: rect.origin.x, y: dividerY,
-                                    width: rect.width, height: rect.height * (1 - ratio))
+                                 width: rect.width, height: max(0, topHeight))
+            let bottomRect = CGRect(x: rect.origin.x, y: dividerY + dividerWidth / 2,
+                                    width: rect.width, height: max(0, bottomHeight))
             createDividers(from: split.left, in: topRect)
             createDividers(from: split.right, in: bottomRect)
         }
