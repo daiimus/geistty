@@ -100,6 +100,10 @@ class TmuxSessionManager: ObservableObject {
     var pendingCommandsForTesting: [String] {
         pendingCommands
     }
+    
+    /// Test-only: tracks the order in which surfaces are closed during teardown.
+    /// Each entry is (paneId, isObserver). Observers should always come before primaries.
+    var teardownOrderForTesting: [(paneId: String, isObserver: Bool)] = []
     #endif
     
     /// Cell size from the primary surface (for calculating terminal dimensions)
@@ -258,20 +262,31 @@ class TmuxSessionManager: ObservableObject {
         // CRITICAL: Clear surface state to ensure fresh surfaces on reconnect
         // Old surfaces may be in bad state and won't properly report cell size
         //
-        // NOTE: We call close() WITHOUT calling detachTmuxPane() first.
-        // Surface.deinit (called by close → ghostty_surface_free) already
-        // handles tmux_pane_binding restoration internally: it restores the
-        // original mutex, restores the original terminal pointer, and
-        // unregisters from the viewer's observer list.
+        // ORDERING INVARIANT: Observer surfaces MUST be freed before the primary.
+        // ghostty_surface_free → Surface.zig deinit chases binding.source pointer
+        // (which points to the primary surface) to unregister from the viewer's
+        // observer list. If the primary is freed first, this dereference hits
+        // freed memory → SIGSEGV.
         //
-        // Calling detachTmuxPane() during teardown is DANGEROUS because it
-        // chases binding.source.io.terminal_stream.handler — dereferencing
-        // through the source surface's IO subsystem. If the source is mid-
-        // teardown or the viewer is defunct, this pointer chase can hit freed
-        // memory → SIGSEGV (see Geistty-2026-02-17-211930.ips).
-        for (paneId, surface) in paneSurfaces {
+        // We close() WITHOUT calling detachTmuxPane() first because detachTmuxPane()
+        // chases the same binding.source pointer chain. The ordering guarantee
+        // makes ghostty_surface_free's internal cleanup safe.
+        let observers = paneSurfaces.filter { $0.value.isMultiPaneObserver }
+        let primaries = paneSurfaces.filter { !$0.value.isMultiPaneObserver }
+        
+        for (paneId, surface) in observers {
+            #if DEBUG
+            teardownOrderForTesting.append((paneId: paneId, isObserver: true))
+            #endif
             surface.close()
-            logger.debug("Closed surface for pane \(paneId)")
+            logger.debug("Closed observer surface for pane \(paneId)")
+        }
+        for (paneId, surface) in primaries {
+            #if DEBUG
+            teardownOrderForTesting.append((paneId: paneId, isObserver: false))
+            #endif
+            surface.close()
+            logger.debug("Closed primary surface for pane \(paneId)")
         }
         paneSurfaces.removeAll()
         primarySurface = nil
@@ -867,6 +882,9 @@ class TmuxSessionManager: ObservableObject {
             // teardown — it chases binding.source pointers that may be stale
             // if the source surface is mid-teardown → SIGSEGV.
             // See: Geistty-2026-02-17-211930.ips, Geistty-2026-02-17-211214.ips
+            #if DEBUG
+            teardownOrderForTesting.append((paneId: paneId, isObserver: surface.isMultiPaneObserver))
+            #endif
             surface.close()
             
             logger.info("Removed and closed Ghostty surface for pane \(paneId) (paneActuallyClosed=\(paneActuallyClosed))")
@@ -1309,8 +1327,20 @@ class TmuxSessionManager: ObservableObject {
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
         
-        // Remove all surfaces (paneActuallyClosed: true ensures %0 is also cleaned up)
-        for paneId in paneSurfaces.keys {
+        // ORDERING INVARIANT: Observer surfaces MUST be freed before the primary.
+        // ghostty_surface_free → Surface.zig deinit chases binding.source pointer
+        // (which points to the primary surface) to unregister from the viewer's
+        // observer list. If the primary is freed first, this dereference hits
+        // freed memory → SIGSEGV.
+        //
+        // paneActuallyClosed: true ensures %0 is also cleaned up (not kept alive).
+        let observerPanes = paneSurfaces.filter { $0.value.isMultiPaneObserver }
+        let primaryPanes = paneSurfaces.filter { !$0.value.isMultiPaneObserver }
+        
+        for (paneId, _) in observerPanes {
+            removeSurface(for: paneId, paneActuallyClosed: true)
+        }
+        for (paneId, _) in primaryPanes {
             removeSurface(for: paneId, paneActuallyClosed: true)
         }
         
