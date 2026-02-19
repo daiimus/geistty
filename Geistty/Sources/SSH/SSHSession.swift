@@ -219,6 +219,14 @@ class SSHSession: ObservableObject, Identifiable {
     /// This state tracks whether the viewer is active (from TMUX_STATE_CHANGED action).
     private(set) var controlModeState: ControlModeState = .inactive
     
+    /// Whether we're in the process of detaching tmux for an iOS background transition.
+    /// Set to `true` by `appWillResignActive()` before sending `detach-client`.
+    /// When the TMUX_EXIT handler fires while this is `true`, we skip the nuclear
+    /// `controlModeExited()` teardown (which destroys all surfaces) and instead do
+    /// a lightweight `prepareForReattach()` that preserves surfaces for reconnect.
+    /// Cleared by `appDidBecomeActive()` after initiating the reattach sequence.
+    private(set) var isDetachingForBackground: Bool = false
+    
     /// Session name discovery state for geistty-N auto-naming.
     /// When no custom tmux session name is set, we query `tmux list-sessions`
     /// before entering control mode. This state tracks that pre-control-mode query.
@@ -486,7 +494,17 @@ class SSHSession: ObservableObject, Identifiable {
             // detach-client was sent, tmux responded with %exit, we're done.
             self.endBackgroundTaskIfNeeded()
             
-            self.tmuxSessionManager?.controlModeExited(reason: "Ghostty tmux viewer exited")
+            if self.isDetachingForBackground {
+                // This %exit is the expected response to our detach-client for
+                // background. Do a lightweight reset that preserves surfaces
+                // so we can reconnect and restore the UI when foregrounded.
+                logger.info("Background detach complete — preserving surfaces for reattach")
+                self.tmuxSessionManager?.prepareForReattach()
+            } else {
+                // Normal tmux exit (user ran `exit`, server killed session, etc.)
+                // Nuclear teardown — destroy all surfaces and reset state.
+                self.tmuxSessionManager?.controlModeExited(reason: "Ghostty tmux viewer exited")
+            }
         }
         
         let readyObserver = NotificationCenter.default.addObserver(
@@ -909,6 +927,7 @@ class SSHSession: ObservableObject, Identifiable {
         tmuxPaneActivated = false
         activeTmuxPaneId = nil
         viewerReady = false
+        isDetachingForBackground = false
         sessionDiscoveryState = .idle
         sessionDiscoveryTimer?.cancel()
         sessionDiscoveryTimer = nil
@@ -970,12 +989,17 @@ class SSHSession: ObservableObject, Identifiable {
     func appWillResignActive() {
         guard controlModeState.isActive else { return }
         
+        // Mark that this detach is intentional (for background), so the TMUX_EXIT
+        // handler knows to skip the nuclear controlModeExited() teardown and
+        // preserve surfaces for reconnect when the app returns to foreground.
+        isDetachingForBackground = true
+        
         // Start a background task to protect the detach sequence.
         // Without this, iOS suspends the app in ~5s and the TCP socket
         // dies mid-write, leaving tmux with a stale "attached" client.
         beginBackgroundTaskIfNeeded()
         
-        logger.info("App resigning active, sending clean detach to tmux")
+        logger.info("App resigning active, sending clean detach to tmux (background detach)")
         tmuxSessionManager?.detach()
         
         // Give the detach-client command time to flush through the SSH channel,
@@ -991,8 +1015,10 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Called when the app becomes active again.
     /// Checks connection health and auto-reconnects if needed.
+    /// If we detached for background (isDetachingForBackground), initiates
+    /// reconnect to reattach to the tmux session with preserved surfaces.
     func appDidBecomeActive() {
-        logger.info("App became active, checking connection health...")
+        logger.info("App became active, checking connection health... isDetachingForBackground=\(isDetachingForBackground)")
         
         // End any lingering background task from the resign-active sequence
         endBackgroundTaskIfNeeded()
@@ -1000,6 +1026,25 @@ class SSHSession: ObservableObject, Identifiable {
         // If already reconnecting, don't start another attempt
         guard !isReconnecting else {
             logger.info("Already reconnecting, skipping")
+            return
+        }
+        
+        // Background reattach path: we detached intentionally for background,
+        // now we need a new SSH connection to reattach to the tmux session.
+        // The exec'd shell is dead (exec replaces the shell process), so the
+        // SSH channel can't be reused — we always need a fresh connection.
+        if isDetachingForBackground {
+            isDetachingForBackground = false
+            
+            if canReconnect {
+                logger.info("Background detach completed, initiating reattach via new SSH connection")
+                Task {
+                    await attemptReconnect()
+                }
+            } else {
+                logger.warning("Background detach completed but no stored credentials for reattach")
+                tmuxSessionManager?.controlModeExited(reason: "Cannot reattach — no stored credentials")
+            }
             return
         }
         
@@ -1096,9 +1141,27 @@ class SSHSession: ObservableObject, Identifiable {
         
         try await conn.connect(authMethod: authMethod)
         
-        // Re-setup tmux session manager (Ghostty handles tmux protocol natively)
+        // Re-setup tmux session manager — but PRESERVE the existing one if it
+        // has surfaces (background reattach case). Creating a new manager would
+        // destroy all surfaces, losing the UI state we carefully preserved
+        // during the background detach.
         if tmuxMode == .controlMode {
-            setupTmuxSessionManager()
+            if let existingManager = tmuxSessionManager, !existingManager.paneSurfaces.isEmpty {
+                // Reattach case: manager has surfaces from the previous session.
+                // Just re-wire the write function to use the new SSH connection.
+                logger.info("Preserving existing TmuxSessionManager with \(existingManager.paneSurfaces.count) surfaces")
+                existingManager.setupWithDirectWrite { [weak self] command in
+                    Task { @MainActor in
+                        self?.writeControlCommand(command)
+                    }
+                }
+                // Re-register notification observers (they were left intact during
+                // background detach, but the surface they filter on is the same)
+                observeTmuxNotifications()
+            } else {
+                // Fresh connection or manager had no surfaces — create new
+                setupTmuxSessionManager()
+            }
         }
         
         // Re-attach to tmux session
@@ -1241,6 +1304,11 @@ class SSHSession: ObservableObject, Identifiable {
     /// Set tmux pane activated for testing. Only available in DEBUG builds.
     func setTmuxPaneActivatedForTesting(_ activated: Bool) {
         tmuxPaneActivated = activated
+    }
+    
+    /// Set isDetachingForBackground for testing. Only available in DEBUG builds.
+    func setIsDetachingForBackgroundForTesting(_ value: Bool) {
+        isDetachingForBackground = value
     }
     
     /// Set up tmux session manager for testing. Only available in DEBUG builds.
