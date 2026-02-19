@@ -322,7 +322,15 @@ class TmuxSessionManager: ObservableObject {
         sessions.removeAll()
         windows.removeAll()
         windowSplitTrees.removeAll()
-        currentSplitTree = TmuxSplitTree()
+        // IMPORTANT: Do NOT clear currentSplitTree here. Setting it to an empty
+        // TmuxSplitTree() triggers the splitTreeObserver → handleSplitTreeChange()
+        // → cleanupMultiPaneMode() → removes the multi-pane hosting controller
+        // from the view hierarchy → primary surface auto-resizes → Ghostty resize
+        // while the tmux viewer is dead → renderer use-after-free SIGSEGV.
+        //
+        // The split tree must be preserved so the multi-pane view hierarchy stays
+        // intact during background. When we reattach, TMUX_STATE_CHANGED will
+        // repopulate windowSplitTrees and update currentSplitTree naturally.
         
         // Reset resize tracking
         lastResizeCols = 0

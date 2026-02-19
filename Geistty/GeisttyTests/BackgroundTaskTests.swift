@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import Combine
 @testable import Geistty
 
 // MARK: - Mock Background Task Provider
@@ -937,5 +938,120 @@ final class BackgroundTaskTests: XCTestCase {
         conn.connectionTimeoutSeconds = 30
         XCTAssertEqual(conn.connectionTimeoutSeconds, 30,
                        "Connection timeout should accept any UInt64 value")
+    }
+    
+    // MARK: - WS-BG1: prepareForReattach preserves split tree (SIGSEGV fix)
+    
+    @MainActor
+    func testPrepareForReattachPreservesSplitTree() {
+        // Root cause of Session 116 SIGSEGV: prepareForReattach() was clearing
+        // currentSplitTree → triggered splitTreeObserver → cleanupMultiPaneMode()
+        // → primary surface auto-resize → renderer UAF while tmux viewer is dead.
+        //
+        // Fix: prepareForReattach() no longer clears currentSplitTree.
+        let manager = TmuxSessionManager()
+        manager.controlModeActivated()
+        
+        // Build a multi-pane split tree directly — simulates what
+        // reconcileTmuxState would produce for a 2-pane layout
+        let mock = MockTmuxSurface()
+        let leftCols = 40
+        let rightCols = 39
+        let body = "80x24,0,0{\(leftCols)x24,0,0,15,\(rightCols)x24,\(leftCols + 1),0,16}"
+        let checksum = TmuxChecksum.calculate(body).asString()
+        let layout = "\(checksum),\(body)"
+        
+        mock.stubbedWindows = [
+            TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")
+        ]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        
+        #if DEBUG
+        manager.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        manager.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        // Verify we have a split tree
+        XCTAssertTrue(manager.currentSplitTree.isSplit,
+                      "Should have a split tree before prepareForReattach")
+        XCTAssertEqual(Set(manager.currentSplitTree.paneIds), Set([15, 16]))
+        
+        // Now simulate background detach
+        manager.prepareForReattach()
+        
+        // CRITICAL: split tree must be preserved
+        XCTAssertTrue(manager.currentSplitTree.isSplit,
+                      "currentSplitTree must be preserved after prepareForReattach — " +
+                      "clearing it triggers cleanupMultiPaneMode → resize → SIGSEGV")
+        XCTAssertEqual(Set(manager.currentSplitTree.paneIds), Set([15, 16]),
+                       "Pane IDs in split tree must be preserved")
+    }
+    
+    @MainActor
+    func testPrepareForReattachClearsWindowsButNotCurrentSplitTree() {
+        // windows is the list of tmux windows — this can be cleared because it will
+        // be repopulated by TMUX_STATE_CHANGED on reattach.
+        // But currentSplitTree (the ACTIVE layout driving the UI) must NOT be cleared.
+        let manager = TmuxSessionManager()
+        manager.controlModeActivated()
+        
+        let mock = MockTmuxSurface()
+        let body = "80x24,0,0,5"
+        let checksum = TmuxChecksum.calculate(body).asString()
+        let layout = "\(checksum),\(body)"
+        
+        mock.stubbedWindows = [
+            TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")
+        ]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [5]
+        
+        #if DEBUG
+        manager.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        manager.handleTmuxStateChanged(windowCount: 1, paneCount: 1)
+        XCTAssertFalse(manager.currentSplitTree.isEmpty)
+        XCTAssertFalse(manager.windows.isEmpty, "Should have windows before reattach")
+        
+        manager.prepareForReattach()
+        
+        // windows cleared (will be repopulated)
+        XCTAssertTrue(manager.windows.isEmpty,
+                      "windows should be cleared for fresh state on reattach")
+        // currentSplitTree preserved (UI stability)
+        XCTAssertFalse(manager.currentSplitTree.isEmpty,
+                       "currentSplitTree must NOT be cleared — it drives the live UI")
+    }
+    
+    @MainActor
+    func testPrepareForReattachSplitTreeObserverDoesNotFireCleanup() {
+        // Integration-style test: if prepareForReattach had cleared currentSplitTree
+        // to an empty TmuxSplitTree(), the Combine observer would fire with
+        // hasPanes=false → cleanupMultiPaneMode() → resize → SIGSEGV.
+        //
+        // After the fix, the observer should NOT fire at all during prepareForReattach
+        // because currentSplitTree is not mutated.
+        let manager = TmuxSessionManager()
+        manager.controlModeActivated()
+        
+        var observerFired = false
+        let observer = manager.$currentSplitTree
+            .dropFirst() // skip initial value
+            .sink { _ in
+                observerFired = true
+            }
+        
+        manager.prepareForReattach()
+        
+        XCTAssertFalse(observerFired,
+                       "splitTreeObserver should NOT fire during prepareForReattach — " +
+                       "no mutation means no Combine emission, no resize cascade")
+        
+        observer.cancel()
     }
 }
