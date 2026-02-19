@@ -4,7 +4,7 @@
 
 Geistty is a native iOS/iPadOS SSH terminal powered by Ghostty's terminal engine.
 
-**Current state**: v0.1-stable — SSH + tmux control mode working end-to-end.
+**Current state**: v0.2 — SSH + tmux control mode working end-to-end, multi-pane fully functional.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 ---
@@ -13,30 +13,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 | # | Issue | Severity | Notes |
 |---|-------|----------|-------|
-| 1 | Multi-pane dimension bug — panes don't use full available space after split | Medium | SwiftUI can't observe nested `@Published` across objects. See [details](#multi-pane-dimension-bug). |
-| 2 | IOSurfaceLayer size mismatch during rapid resize | Low | Cosmetic — `surface is wrong size for layer, discarding`. Resize debouncing could be tighter. |
-| 3 | NoHomeDir warning from Ghostty config | Low | Harmless on iOS — Ghostty looks for `~/.config/ghostty/` |
-| 4 | Scroll sensitivity not configurable | Low | Adaptive velocity works but some users may want tuning |
-| 5 | `captureTmuxPane()` for search is stubbed | Low | Relied on old gateway command/response pattern. Use Ghostty's built-in search instead. |
-
-### Multi-Pane Dimension Bug
-
-**Symptom:** After `Cmd+D` split, neither pane fills its allocated area.
-
-**Root cause:** SwiftUI doesn't observe nested `@Published` properties across different objects.
-`onCellSizeChanged` callback was added but resize still doesn't trigger correctly.
-
-**What works:** Connect, Cmd+D (split), Cmd+] (switch panes), exit one pane.
-**What's broken:** Neither pane uses full available space after split.
-
-**Next steps:**
-1. Check console for `📐 Primary cell size updated` messages
-2. Verify `handleSizeChange` is called with correct geometry
-3. Check if `refresh-client -C` is actually sent to tmux
-4. Compare sent dimensions with actual available pixel space
-5. May need to investigate `TmuxSplitTreeView` layout
-
-**Related files:** `TmuxMultiPaneView.swift`, `Ghostty.swift` (sizeDidChange), `TmuxSessionManager.swift` (primaryCellSize), `TmuxSplitTreeView.swift`
+| 1 | tmux teardown SIGSEGV | High | `%exit` → `controlModeExited()` → `surface.close()` without `detachTmuxPane()` first → use-after-free in Zig. Intentional skip — dereferencing `binding.source` during teardown hits freed memory. Relies on Ghostty internal cleanup ordering. |
+| 2 | tmux session name grabbing | Medium | Grabs arbitrary tmux sessions instead of targeting a specific one. |
+| 3 | SwiftUI AttributeGraph cycles | Medium | ~26 per layout pass. Cosmetic but noisy. From nested `@Published` + `GeometryReader`. |
+| 4 | IOSurfaceLayer size mismatch during rapid resize | Low | Cosmetic — `surface is wrong size for layer, discarding`. Resize debouncing could be tighter. |
+| 5 | Write interleaving | Low | Rapid keystrokes can interleave across SSH writes. No user-visible corruption observed. |
+| 6 | `unexpected block output err=false` | Low | Benign but noisy Zig-side log during tmux command processing. |
+| 7 | Session resume/reconnect after iOS backgrounding | Medium | No `beginBackgroundTask` — TCP dies immediately when app backgrounds. `attemptReconnect()` exists (3 retries) but is fragile. See WS-D plan. |
+| 8 | `captureTmuxPane()` for search is stubbed | Low | Relied on old gateway command/response pattern. Use Ghostty's built-in search instead. |
+| 9 | NoHomeDir warning from Ghostty config | Low | Harmless on iOS — Ghostty looks for `~/.config/ghostty/` |
+| 10 | `failed to get pin for clicked point` | Low | Benign Zig warning from `Surface.zig:4484` during resize — viewport coordinates exceed page list dimensions. Not a bug. |
 
 ---
 
@@ -111,6 +97,15 @@ All removed code archived in `docs/archive/DEAD_CODE_FEB_2026.swift`.
 | Fix | 6-agent code review (63 findings): Phase A Critical (C1-C8), Phase B High (H3-H13), Phase C Medium (M1-M20), Phase D Low (L3-L19) — all complete | Feb 2026 |
 | Infra | TmuxWireDiagnostics shadow parser for tmux control mode debugging (48 tests) | Feb 2026 |
 | Testing | Test suite expanded from 470 to 550 tests across 25 suites | Feb 2026 |
+| Feature | Multi-pane terminal binding — per-pane rendering with shared mutex observer system (Sessions 68-106, 38-session epic) | Feb 2026 |
+| Fix | Observer wakeup — iOS has no display link, so observer renderers need explicit notify_cb callback | Feb 2026 |
+| Fix | Renderer bleed — `syncLayouts()` re-pointed primary renderer at wrong pane; fixed by registering primary as observer for `fixupObservers()` | Feb 2026 |
+| Fix | Nuke-and-pave focus system — replaced 9 layered guards (Fixes A-I) with clean `canBecomeFirstResponder = !isMultiPaneObserver` | Feb 2026 |
+| Fix | Multi-pane echo — added `setActiveTmuxPaneInputOnly` (input routing without renderer swap) | Feb 2026 |
+| Fix | Multi-pane sizing — divider-aware ratios, thin 2pt dividers, negative width clamp, lexicographic sort fix | Feb 2026 |
+| Feature | Per-pane pinch-to-zoom — observer surfaces get pinch + two-finger-double-tap gestures (WS-Z) | Feb 2026 |
+| Fix | Bottom screen real estate — disable safe area propagation on tmux hosting controller, auto-hide home indicator (WS-B) | Feb 2026 |
+| Testing | Test suite: 25 suites, 649+ tests across 22 test files (~10,200 lines) | Feb 2026 |
 
 ---
 
@@ -125,6 +120,8 @@ All removed code archived in `docs/archive/DEAD_CODE_FEB_2026.swift`.
 - Terminal resize on keyboard show/hide
 - Scrollback: touch scrolling, trackpad, momentum, position indicator
 - tmux support: Ctrl+B prefix, bracketed paste, auto-attach, custom session name
+- **tmux multi-pane**: per-pane rendering, observer surfaces, focus switching, close/create handling
+- **Per-pane pinch-to-zoom**: independent font size per observer surface, two-finger reset
 - Saved connections: profiles, UserDefaults, add/edit/delete, favorites, iCloud sync (code ready)
 - SSH key auth: Ed25519/RSA generation, Keychain storage, key management UI, Files import
 - Credential provider system: Keychain + SSH key providers, unified CredentialManager
@@ -134,17 +131,32 @@ All removed code archived in `docs/archive/DEAD_CODE_FEB_2026.swift`.
 - iPad: Split View, Stage Manager, external display, menu bar integration
 - Gestures: double-tap word select, triple-tap line select, pinch zoom, two-finger reset
 - Shortcuts: Cmd+C/V/A/K/W/0/+/-, font size buttons, dismiss keyboard
+- **Bottom screen real estate**: safe area propagation disabled, home indicator auto-hidden
 
 ### Remaining
 
 | Task | Priority | Notes |
 |------|----------|-------|
+| Graceful disconnect/reconnect (WS-D) | High | Safe tmux teardown, `beginBackgroundTask`, reconnection UX, SSH keepalive. See [Phase 5.5](#phase-55-graceful-disconnect--reconnect-planned). |
 | Common symbols bar (~, \|, `, etc.) | Medium | Hard to type on iOS software keyboard |
 | Keyboard shortcuts help overlay | Low | Discoverability |
 | Key repeat delay/rate as configurable settings | Low | Currently hardcoded 0.4s/20Hz |
 | Fine-tune scroll sensitivity settings | Low | |
 | Connection timeout setting | Low | |
-| Keep-alive ping option | Low | |
+| Keep-alive ping option | Low | Partially addressed by WS-D |
+
+---
+
+## Phase 5.5: Graceful Disconnect & Reconnect (PLANNED)
+
+Designed in Session 107, planned for Sessions 110-113.
+
+| Step | Scope | Description |
+|------|-------|-------------|
+| WS-D1 | Safe teardown | Fix tmux teardown SIGSEGV — `detachTmuxPane()` before `surface.close()` in `controlModeExited()` |
+| WS-D2 | Background task | Add `beginBackgroundTask` to keep TCP alive during iOS backgrounding |
+| WS-D3 | Reconnection UX | Visual status indicators, robust retry logic, session re-attach |
+| WS-D4 | SSH keepalive | Periodic keepalive pings to prevent idle disconnect |
 
 ---
 

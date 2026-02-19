@@ -124,7 +124,8 @@ This document tracks the implementation status of Ghostty C APIs in Geistty.
 |-------|--------|---------------|
 | `ghostty_surface_tmux_pane_count` | ✅ | `SurfaceView.tmuxPaneCount()` |
 | `ghostty_surface_tmux_pane_ids` | ✅ | `SurfaceView.tmuxPaneIds()` |
-| `ghostty_surface_tmux_set_active_pane` | ✅ | `SurfaceView.tmuxSetActivePane(_:)` |
+| `ghostty_surface_tmux_set_active_pane` | ✅ | `SurfaceView.tmuxSetActivePane(_:)` — swaps renderer + input routing + registers observer |
+| `ghostty_surface_tmux_set_active_pane_input_only` | ✅ | `SurfaceView.tmuxSetActivePaneInputOnly(_:)` — input routing only, no renderer swap |
 | `ghostty_surface_tmux_reset_active_pane` | ✅ | `SurfaceView.tmuxResetActivePane()` |
 | `ghostty_surface_tmux_window_count` | ✅ | `SurfaceView.tmuxWindowCount()` |
 | `ghostty_surface_tmux_window_info` | ✅ | `SurfaceView.tmuxWindowInfo(at:)` |

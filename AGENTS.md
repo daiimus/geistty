@@ -79,7 +79,7 @@ Geistty/
 
 ## Key Files
 
-- `Sources/Ghostty/Ghostty.swift` - SurfaceView (~2404 lines): Metal rendering, keyboard input, gestures, write callback, tmux action notifications
+- `Sources/Ghostty/Ghostty.swift` - SurfaceView (~2558 lines): Metal rendering, keyboard input, gestures, write callback, tmux action notifications, multi-pane observer management
 - `Sources/Ghostty/Ghostty.App.swift` - App lifecycle, runtime init, action callback dispatch
 - `Sources/Ghostty/Ghostty.Config.swift` - Config wrapper (create, load, finalize)
 - `Sources/Ghostty/Ghostty.SearchState.swift` - Search overlay state model
@@ -149,7 +149,8 @@ The `ios-external-backend` branch adds:
    **Pane-level queries:**
    - `ghostty_surface_tmux_pane_count()` - Get number of panes
    - `ghostty_surface_tmux_pane_ids()` - Get array of pane IDs
-   - `ghostty_surface_tmux_set_active_pane(id)` - Set active pane for input routing
+   - `ghostty_surface_tmux_set_active_pane(id)` - Set active pane (swaps input routing + renderer + registers observer)
+   - `ghostty_surface_tmux_set_active_pane_input_only(id)` - Set active pane for input routing only (no renderer swap — used in multi-pane mode)
    - `ghostty_surface_tmux_reset_active_pane()` - Reset to default pane
 
    **Window-level queries:**
@@ -250,6 +251,17 @@ User Input → Ghostty encodes keystroke → Termio.queueWrite()
 ### Known Limitations
 
 - `captureTmuxPane()` for search is stubbed — it relied on the old gateway command/response pattern. Use Ghostty's built-in search instead.
+
+### Multi-Pane Architecture (Critical Context)
+
+When tmux has multiple panes, one **primary** surface (adopted from the direct SSH surface) renders the lowest-numbered pane. Additional panes get **observer** surfaces (factory-created). Key rules:
+
+- **Primary**: `canBecomeFirstResponder = true`, always firstResponder, full gesture suite
+- **Observer**: `canBecomeFirstResponder = false`, 3 gestures only (tap, pinch-zoom, two-finger-double-tap for font reset)
+- **Two `setActiveTmuxPane` variants**: `set_active_pane` swaps renderer + input routing (used for window switches). `set_active_pane_input_only` only changes input routing (used for pane focus within a window).
+- **Font size is per-surface**: each Surface has independent `font_size`, `font_grid_key`, `font_metrics`. Per-pane zoom works naturally.
+- **Observer registration**: Primary is registered as an observer so `fixupObservers()` corrects its renderer after `syncLayouts()` re-points it at `active_pane_id`.
+- **Focus**: `selectPane()` calls `setActiveTmuxPaneInputOnly`. No guards, no hooks — clean and minimal.
 
 ### Control Mode Protocol Reference
 

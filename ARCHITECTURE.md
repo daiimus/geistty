@@ -1,6 +1,6 @@
 # Architecture
 
-> Geistty v0.1-stable -- February 2026
+> Geistty v0.2 -- February 2026
 
 Geistty is a native iOS/iPadOS SSH terminal that uses [Ghostty](https://ghostty.org)'s real terminal engine (compiled from Zig) with an External termio backend. iOS cannot spawn local shells (no `fork`/`exec`/PTY), so all terminal data flows over SSH. Ghostty handles VT parsing, Metal rendering, and tmux control mode. Swift handles SSH transport, connection management, and iOS UI.
 
@@ -112,7 +112,7 @@ graph TB
 
 Four files carry most of the weight. Everything else is supporting cast.
 
-### 1. `Ghostty.swift` (~2404 lines)
+### 1. `Ghostty.swift` (~2558 lines)
 
 SurfaceView — the UIView subclass that hosts Ghostty's Metal rendering. Handles:
 
@@ -126,10 +126,11 @@ SurfaceView — the UIView subclass that hosts Ghostty's Metal rendering. Handle
 - Search overlay coordination
 - tmux C API wrappers (pane and window queries via `TmuxSurfaceProtocol`)
 - Notification posting for tmux actions
+- Multi-pane observer surface management (attach/detach, gesture contract)
 
 Note: `Ghostty.App`, `Ghostty.Config`, `SearchState`, and `SurfaceConfiguration` were extracted into separate files (E1-E4 decomposition, Session 25) following upstream naming conventions.
 
-### 2. `SSHSession.swift` (~1208 lines)
+### 2. `SSHSession.swift` (~1213 lines)
 
 SSH connection lifecycle, tmux control mode entry, reconnection logic, and data routing. Key responsibilities:
 
@@ -139,7 +140,7 @@ SSH connection lifecycle, tmux control mode entry, reconnection logic, and data 
 - Forwards tmux events to `TmuxSessionManager`
 - Manages `isReconnecting` state and retry logic
 
-### 3. `TerminalContainerView.swift` (~958 lines)
+### 3. `TerminalContainerView.swift` (~967 lines)
 
 SwiftUI view + UIKit view controller bridge. The view controller (`RawTerminalUIViewController`) creates and owns the `SurfaceView`. The VC was decomposed into focused extensions:
 
@@ -152,7 +153,7 @@ SwiftUI view + UIKit view controller bridge. The view controller (`RawTerminalUI
 
 The SwiftUI wrapper handles toolbar, multi-pane vs single-pane transitions, and disconnect overlay.
 
-### 4. `TmuxSessionManager.swift` (~1140 lines)
+### 4. `TmuxSessionManager.swift` (~1347 lines)
 
 Tracks tmux windows, panes, and sessions. Manages the mapping between tmux pane IDs and Ghostty surfaces. Handles:
 
@@ -534,6 +535,67 @@ graph TB
 
 ---
 
+## Multi-Pane Surface Architecture
+
+When tmux has multiple panes, Geistty creates one primary surface and N-1 observer surfaces. This architecture took 38 sessions (68-106) to build.
+
+### Surface Roles
+
+| Surface | Type | Creation | Keyboard Input | `canBecomeFirstResponder` |
+|---------|------|----------|---------------|---------------------------|
+| Primary | Adopted from direct surface | Created at SSH connect time | Always firstResponder | `true` |
+| Observer | Factory-created per extra pane | Created in `getSurfaceOrCreate()` | Routed via `selectPane()` | `false` |
+
+The primary surface renders the lowest-numbered pane. Observer surfaces render all other panes.
+
+### The Two `setActiveTmuxPane` Variants
+
+A critical architectural distinction — two separate C APIs for setting the active pane:
+
+| API | Sets `active_pane_id`? | Swaps `renderer_state.terminal`? | Registers observer? | Used by |
+|-----|----------------------|--------------------------------|--------------------|---------| 
+| `ghostty_surface_tmux_set_active_pane` | Yes | Yes | Yes | `activateFirstTmuxPane`, `selectWindow` |
+| `ghostty_surface_tmux_set_active_pane_input_only` | Yes | No | No | `selectPane`, `setFocusedPane`, `handleTmuxStateChanged` |
+
+**Why two?** `setActiveTmuxPane` (full) swaps BOTH input routing AND the renderer — it was designed for single-surface mode where one surface renders everything. In multi-pane mode, each surface has its own renderer pointed at its own pane's terminal. `setActiveTmuxPaneInputOnly` changes which pane receives keystrokes without disturbing any surface's renderer binding.
+
+### Observer Registration (Renderer Bleed Fix)
+
+`stream_handler.zig:syncLayouts()` re-points the primary renderer at `active_pane_id`. In multi-pane mode, `active_pane_id` tracks input routing (which may differ from the primary's rendered pane). The fix: `ghostty_surface_tmux_set_active_pane` registers the primary surface as an observer so that `fixupObservers()` corrects the renderer after `syncLayouts()`.
+
+```
+ghostty_surface_tmux_set_active_pane:
+  1. viewer.unregisterObserverByPtr(&surface.renderer_state.terminal)
+  2. Set renderer_state.terminal = &pane.terminal
+  3. viewer.registerObserver(pane_id, &surface.renderer_state.terminal, ...)
+  4. Set active_pane_id = pane_id
+
+After syncLayouts → fixupObservers():
+  For each observer, re-points terminal_ptr at the correct pane's terminal
+```
+
+### Observer Gesture Contract
+
+After `attachToTmuxPane()`, observer surfaces have exactly 3 gestures:
+
+1. `UITapGestureRecognizer` (1 tap, 1 touch) — pane switching via `handleTap()` → `onPaneTap()`
+2. `UIPinchGestureRecognizer` — per-pane font size via `handlePinch()`
+3. `UITapGestureRecognizer` (2 taps, 2 touches) — font reset via `handleTwoFingerDoubleTap()`
+
+Primary surfaces retain the full gesture suite (12+ gestures). Font size is per-surface in Ghostty — each Surface has independent `font_size`, `font_grid_key`, `font_metrics`.
+
+### Focus System
+
+Clean and minimal (post nuke-and-pave in Session 97):
+
+- `canBecomeFirstResponder` returns `!isMultiPaneObserver` — only the primary surface can become first responder
+- `selectPane(paneId)` calls `setActiveTmuxPaneInputOnly` to route keystrokes
+- `handleTap()` on observer calls `onPaneTap()` callback → `selectPane()`
+- `handleTap()` on primary calls `selectPane()` directly for the primary's pane
+- No guards, no interceptors, no `onWrite` hooks fighting the focus system
+
+---
+
 ## Ghostty Fork: What We Changed
 
 Our fork (`daiimus/ghostty`, branch `ios-external-backend`) adds or modifies these files relative to upstream:
@@ -566,8 +628,13 @@ Our fork (`daiimus/ghostty`, branch `ios-external-backend`) adds or modifies the
 | 8 | `aa6c99b` | Resize callback for External backend |
 | 9 | `0a8c369` | tmux resize: data race fix, startup catch-up, pane terminal resize |
 | 10 | `216ff75` | Use-after-free fix in `renderer_state.terminal` after `syncLayouts` |
+| 11 | `602c662` | Persistent VT parser across `%output` messages + absorbing state reset |
+| 12 | `a2ec06b` | Multi-pane terminal binding — shared mutex observer system |
+| 13 | `65b19c0` | Observer wakeup callback for iOS renderer wake (no display link) |
+| 14 | `985b505` | Input-only active pane API (`ghostty_surface_tmux_set_active_pane_input_only`) |
+| 15 | `5b6d51e` | Observer registration for renderer bleed fix + `unregisterObserverByPtr` |
 
-Commits 11-12 (`fe750a2` persistent VT stream + `607a3c9` revert) cancel each other out. The persistent VT parser approach was later re-implemented correctly with absorbing state reset — see [Known Issue #1 (RESOLVED)](#1-utf-8--escape-sequence-splitting-across-output--resolved).
+The revert pair (`b82cf2d` persistent VT stream + `204c7cd` revert) cancel each other out and are not listed above. The persistent VT parser approach was later re-implemented correctly in commit 11 with absorbing state reset.
 
 ---
 
@@ -601,7 +668,7 @@ A comparison of our patterns against upstream macOS Ghostty. These are not bugs 
 
 **Upstream:** macOS Ghostty keeps `SurfaceView` in a single file (`Ghostty.SurfaceView_AppKit.swift`), with separate files for `+Input`, `+Gestures`, etc.
 
-**Us:** `Ghostty.swift` is ~2404 lines with SurfaceView as the primary content. We extracted `App`, `Config`, `SearchState`, and `SurfaceConfiguration` into separate files (E1-E4), following upstream naming. We decided NOT to further split SurfaceView because upstream keeps theirs in a single file too.
+**Us:** `Ghostty.swift` is ~2558 lines with SurfaceView as the primary content. We extracted `App`, `Config`, `SearchState`, and `SurfaceConfiguration` into separate files (E1-E4), following upstream naming. We decided NOT to further split SurfaceView because upstream keeps theirs in a single file too.
 
 **Impact:** Low. Matches upstream pattern. The VC side was decomposed into 6 extension files for the same purpose.
 
@@ -677,28 +744,40 @@ Not everything is a gap. We follow several of Mitchell's patterns correctly:
 
 Ordered by severity:
 
-### 1. ~~UTF-8 / Escape Sequence Splitting Across `%output`~~ — RESOLVED
+### 1. tmux Teardown SIGSEGV — Open
+
+`controlModeExited()` calls `surface.close()` WITHOUT calling `detachTmuxPane()` first. This is intentional — dereferencing `binding.source` during teardown hits freed memory because the Zig-side viewer is already being destroyed. The current code relies on Ghostty's internal cleanup ordering, which works but is fragile.
+
+**Impact:** Crash on tmux `%exit` (closing last pane, detach-client during backgrounding). The most dangerous open bug.
+
+**Plan:** WS-D1 — safe teardown sequence. Needs careful analysis of the Zig-side destruction order.
+
+### 2. ~~UTF-8 / Escape Sequence Splitting Across `%output`~~ — RESOLVED
 
 tmux control mode splits output at arbitrary byte boundaries (confirmed from tmux source `control.c`). This could split multi-byte UTF-8 characters and escape sequences across separate `%output` messages.
 
-**Fix (Sessions 54-57):** The VT parser in `viewer.zig` is now **persistent** across `%output` messages, so split escape sequences are reassembled correctly. DCS/OSC/APC absorbing states are reset at `%output` message boundaries to prevent the parser from getting permanently trapped in passthrough state (which caused a display freeze regression). The initial persistent parser attempt (`fe750a2`) caused the freeze; the final fix adds absorbing state reset + `vtStream()` swap and is committed and working.
+**Fix (Sessions 54-57):** The VT parser in `viewer.zig` is now **persistent** across `%output` messages, so split escape sequences are reassembled correctly. DCS/OSC/APC absorbing states are reset at `%output` message boundaries to prevent the parser from getting permanently trapped in passthrough state (which caused a display freeze regression). The initial persistent parser attempt (`b82cf2d`) caused the freeze; the final fix adds absorbing state reset + `vtStream()` swap and is committed and working.
 
-### 2. SurfaceView in Single File
+### 3. SurfaceView in Single File
 
-`Ghostty.swift` is ~2404 lines — SurfaceView is the remaining large component after E1-E4 decomposition extracted App, Config, SearchState, and SurfaceConfiguration. This matches upstream Ghostty's pattern of keeping SurfaceView in a single file. The VC side was decomposed into 6 extension files.
+`Ghostty.swift` is ~2558 lines — SurfaceView is the remaining large component after E1-E4 decomposition extracted App, Config, SearchState, and SurfaceConfiguration. This matches upstream Ghostty's pattern of keeping SurfaceView in a single file. The VC side was decomposed into 6 extension files.
 
-### 3. Verbose Hex Logging in Production — Partially Addressed
+### 4. Verbose Hex Logging in Production — Partially Addressed
 
 `SSHSession.handleReceivedData()` hex-dumps every SSH packet at `.info` level. This hits disk on every byte received. The Session 57 code review fixed many other logger level misuses across the codebase, but this specific hex dump remains. Should be `.debug` or gated behind a compile flag.
 
-### 4. `TMUX_STATE_CHANGED` Data
+### 5. `TMUX_STATE_CHANGED` Data
 
 `TMUX_STATE_CHANGED` carries `window_count` and `pane_count`. Detailed per-window data (layout string, focused pane, window name) is queried via the window-level C API functions after receiving the notification.
 
-### 5. `AppSettings.shared` vs `ghostty.conf`
+### 6. `AppSettings.shared` vs `ghostty.conf`
 
 Two config sources. Boundary is undocumented.
 
-### 6. `captureTmuxPane()` Stub
+### 7. `captureTmuxPane()` Stub
 
-Dead code that always returns failure. Leftover from the old gateway architecture. See also TODO.md Known Issue #5.
+Dead code that always returns failure. Leftover from the old gateway architecture.
+
+### 8. iOS Backgrounding — No `beginBackgroundTask`
+
+TCP connection dies immediately when app enters background. No `beginBackgroundTask` to extend lifetime. `attemptReconnect()` exists but is fragile. Planned for WS-D2.
