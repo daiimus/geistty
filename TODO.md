@@ -13,7 +13,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 | # | Issue | Severity | Notes |
 |---|-------|----------|-------|
-| 1 | tmux teardown SIGSEGV | High | `%exit` → `controlModeExited()` → `surface.close()` without `detachTmuxPane()` first → use-after-free in Zig. Intentional skip — dereferencing `binding.source` during teardown hits freed memory. Relies on Ghostty internal cleanup ordering. |
+| 1 | ~~tmux teardown SIGSEGV~~ | ~~High~~ **FIXED** | Fixed in Session 109. Ordered teardown: observers closed before primary. `controlModeExited()` and `cleanup()` partition `paneSurfaces` via `filter { $0.value.isMultiPaneObserver }`. 7 tests for ordering invariant. |
 | 2 | tmux session name grabbing | Medium | Grabs arbitrary tmux sessions instead of targeting a specific one. |
 | 3 | SwiftUI AttributeGraph cycles | Medium | ~26 per layout pass. Cosmetic but noisy. From nested `@Published` + `GeometryReader`. |
 | 4 | IOSurfaceLayer size mismatch during rapid resize | Low | Cosmetic — `surface is wrong size for layer, discarding`. Resize debouncing could be tighter. |
@@ -153,7 +153,7 @@ Designed in Session 107, planned for Sessions 110-113.
 
 | Step | Scope | Description |
 |------|-------|-------------|
-| WS-D1 | Safe teardown | Fix tmux teardown SIGSEGV — `detachTmuxPane()` before `surface.close()` in `controlModeExited()` |
+| WS-D1 | Safe teardown | ~~Fix tmux teardown SIGSEGV~~ **DONE** (Session 109). Ordered observer-before-primary teardown in `controlModeExited()` and `cleanup()`. 7 tests. |
 | WS-D2 | Background task | Add `beginBackgroundTask` to keep TCP alive during iOS backgrounding |
 | WS-D3 | Reconnection UX | Visual status indicators, robust retry logic, session re-attach |
 | WS-D4 | SSH keepalive | Periodic keepalive pings to prevent idle disconnect |
