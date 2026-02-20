@@ -23,6 +23,7 @@ These are behavioral rules established by the user. Follow them strictly.
 7. **Slow down.** Diagnose thoroughly, validate assumptions on device, and check with the user before making big architectural moves. Don't charge ahead without stopping to look around.
 8. **Leverage tooling.** Use `idevicecrashreport`, `xcrun devicectl device copy from --domain-type systemCrashLogs`, crash log analysis, and `ci.sh test` to verify things programmatically. Don't force manual testing.
 9. **Prefer simplicity.** Think about simple, standard iOS patterns before diving into complex Zig-level solutions.
+10. **Reconcile issues every session.** At session start, run `gh issue list` to orient. At session end, close any issues that were resolved (with commit link + summary) and note follow-up work on any issues that were touched but not finished.
 
 ## Project Management
 
