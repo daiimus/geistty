@@ -279,7 +279,17 @@ class SSHSession: ObservableObject, Identifiable {
     private var writeConsumerTask: Task<Void, Never>?
     
     init() {
-        setupWriteStream()
+        // Initial setup — no previous consumer exists, so we can create directly
+        let (stream, continuation) = AsyncStream<(command: Data, original: Data)>.makeStream()
+        writeStream = stream
+        writeContinuation = continuation
+        
+        writeConsumerTask = Task { [weak self] in
+            for await (command, original) in stream {
+                guard let self = self, !Task.isCancelled else { break }
+                await self.executeWrite(command, originalData: original)
+            }
+        }
     }
     
     deinit {
@@ -827,10 +837,16 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Set up the serial write stream and consumer task.
     /// Called from init() and after reconnect to ensure a fresh stream.
-    private func setupWriteStream() {
-        // Cancel any previous consumer
-        writeConsumerTask?.cancel()
+    ///
+    /// This method is async because it awaits the previous consumer task's
+    /// completion before starting a new one. Without this, two consumer tasks
+    /// can briefly coexist, processing writes concurrently and breaking ordering.
+    private func setupWriteStream() async {
+        // Finish the stream first so the consumer's `for await` terminates
         writeContinuation?.finish()
+        // Cancel as a signal, then await to guarantee the old consumer is done
+        writeConsumerTask?.cancel()
+        await writeConsumerTask?.value
         
         let (stream, continuation) = AsyncStream<(command: Data, original: Data)>.makeStream()
         writeStream = stream
@@ -1178,7 +1194,8 @@ class SSHSession: ObservableObject, Identifiable {
         connection = conn
         
         // Set up fresh serial write queue for the new connection
-        setupWriteStream()
+        // await ensures the old consumer task completes before starting a new one
+        await setupWriteStream()
         
         try await conn.connect(authMethod: authMethod)
         

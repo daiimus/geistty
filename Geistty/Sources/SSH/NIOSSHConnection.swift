@@ -384,20 +384,64 @@ class NIOSSHConnection {
             
             // Connect with timeout — bootstrap.connect can hang for 75s+ on unreachable hosts.
             // Use a task group race: the real connection vs a sleep-based timeout.
+            //
+            // IMPORTANT: NIO's bootstrap.connect() wraps an EventLoopFuture and is NOT
+            // cancellation-cooperative. When the timeout wins the race:
+            //   1. group.cancelAll() is called
+            //   2. The connect task ignores cancellation (NIO future still resolves)
+            //   3. The Channel is created but its result is discarded by the task group
+            //   4. The Channel leaks until the EventLoopGroup shuts down
+            //
+            // To prevent this, we capture any successfully-created channel and close it
+            // if the timeout won.
             logger.info("🔗 Connecting to \(connectionHost):\(connectionPort) (timeout=\(self.connectionTimeoutSeconds)s)...")
             let timeoutSeconds = self.connectionTimeoutSeconds
-            let channel: Channel = try await withThrowingTaskGroup(of: Channel.self) { group in
-                group.addTask {
-                    try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
+            
+            // Sendable box to capture the channel from the connect task
+            // so we can close it if the timeout wins
+            final class ChannelBox: @unchecked Sendable {
+                private let lock = NSLock()
+                private var _channel: Channel?
+                
+                var channel: Channel? {
+                    lock.lock()
+                    defer { lock.unlock() }
+                    return _channel
                 }
-                group.addTask {
-                    try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
-                    throw NIOSSHError.timeout
+                
+                func set(_ ch: Channel) {
+                    lock.lock()
+                    defer { lock.unlock() }
+                    _channel = ch
                 }
-                // First task to complete wins; cancel the other
-                let result = try await group.next()!
-                group.cancelAll()
-                return result
+            }
+            let channelBox = ChannelBox()
+            
+            let channel: Channel
+            do {
+                channel = try await withThrowingTaskGroup(of: Channel.self) { group in
+                    group.addTask {
+                        let ch = try await bootstrap.connect(host: connectionHost, port: connectionPort).get()
+                        channelBox.set(ch)
+                        return ch
+                    }
+                    group.addTask {
+                        try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+                        throw NIOSSHError.timeout
+                    }
+                    // First task to complete wins; cancel the other
+                    let result = try await group.next()!
+                    group.cancelAll()
+                    return result
+                }
+            } catch {
+                // If the timeout won, the connect task may have created a channel
+                // that was never returned. Close it to prevent leaking.
+                if let orphanedChannel = channelBox.channel {
+                    logger.warning("🔗 Closing orphaned channel after timeout")
+                    try? await orphanedChannel.close()
+                }
+                throw error
             }
             self.channel = channel
             
