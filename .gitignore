@@ -89,3 +89,6 @@ Geistty/GeisttyUITests/TestConfig.local.swift
 # SSH known hosts and config for testing
 test_known_hosts
 test_ssh_config
+
+# OpenCode private notes (device IDs, keychain paths, etc.)
+.opencode/

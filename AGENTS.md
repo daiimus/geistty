@@ -10,10 +10,40 @@ Geistty is an iOS SSH terminal app built on top of Ghostty's terminal emulator. 
 
 We're open to bleeding-edge solutions, but **favor approaches that align with the coding style and architectural patterns established by Ghostty's creator (Mitchell Hashimoto) and contributors**, as well as those of the libraries we modify (SwiftNIO-SSH). When in doubt, look at how similar problems are solved in the upstream codebases.
 
+## Working Directives
+
+These are behavioral rules established by the user. Follow them strictly.
+
+1. **Agent leads architecture.** Make architectural decisions, but check in with the user before big moves.
+2. **Test before deploy.** Do NOT deploy to the device and ask the user to manually test incomplete functionality. Write unit tests first. Only deploy after tests pass.
+3. **Analysis first.** Don't bolt on diagnostics. Understand the problem before writing code.
+4. **What would Mitchell Hashimoto do?** When stuck, study upstream macOS Ghostty patterns.
+5. **Minimize fork divergence.** Ask "does this need to go in the fork, or can it live in Swift?" The less we touch the fork, the easier. See `docs/decisions/ADR-003-fork-philosophy.md`.
+6. **Archive over deletion.** When removing dead code, archive it rather than delete it.
+7. **Slow down.** Diagnose thoroughly, validate assumptions on device, and check with the user before making big architectural moves. Don't charge ahead without stopping to look around.
+8. **Leverage tooling.** Use `idevicecrashreport`, `xcrun devicectl device copy from --domain-type systemCrashLogs`, crash log analysis, and `ci.sh test` to verify things programmatically. Don't force manual testing.
+9. **Prefer simplicity.** Think about simple, standard iOS patterns before diving into complex Zig-level solutions.
+
+## Project Management
+
+- **GitHub Issues** are the source of truth for bugs and features: `gh issue list --repo daiimus/geistty`
+- Check active stability work: `gh issue list --repo daiimus/geistty --milestone v0.3-stable`
+- When closing an issue, add a final comment summarizing what was done and linking the commit.
+- **ADRs** in `docs/decisions/` capture architectural decisions that shouldn't be relitigated.
+- **TODO.md** is the high-level roadmap. Actionable items are GitHub Issues.
+- Labels: `p0-critical` through `p3-low`, `architecture`, `tech-debt`, `zig-fork`, `swift-only`, `ux`, `infra`
+- Milestones: `v0.3-stable` (no crashes), `v0.4-polish` (UX), `v0.5-testflight` (release)
+
 ## Repository Structure
 
 - **Main App**: `Geistty/` - Xcode project and Swift sources
 - **Ghostty Fork**: `../ghostty/` - Custom ghostty with iOS support (branch: `ios-external-backend`)
+
+## Devices
+
+- **Icarus** = iPad Pro (primary test device)
+- **Athena** = iPhone (secondary test device)
+- **Dionysus** = Mac (dev machine + SSH target)
 
 ## Commands
 
@@ -370,7 +400,7 @@ on the Zig side. No DCS filter or Swift-side wrapping is needed.
 
 ## Roadmap & Tasks
 
-See `TODO.md` for current tasks, known issues, and planned features.
+See `TODO.md` for the high-level roadmap. Active bugs and features are tracked as [GitHub Issues](https://github.com/daiimus/geistty/issues). Architectural decisions are documented in `docs/decisions/`.
 
 ## Debugging
 
