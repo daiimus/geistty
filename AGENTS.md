@@ -323,6 +323,45 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 
 ---
 
+## Environment
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| Xcode | 26.2 | Build version 17C52 |
+| Zig | 0.15.2 | Required for building GhosttyKit |
+| Swift | 5.0 | Set in Xcode project |
+| iOS deployment target | 17.0 | Minimum supported iOS version |
+| macOS | Sequoia+ | For development |
+
+## Conventions
+
+### Current Focus
+
+Active milestone: **v0.3-stable** — no crashes, clean lifecycle, known regressions fixed. Check what's open:
+```bash
+gh issue list --repo daiimus/geistty --milestone v0.3-stable
+```
+
+### Commit Messages
+
+Use `type(scope): description` format. Types: `fix`, `feat`, `docs`, `refactor`, `test`, `chore`, `infra`. Scope is the subsystem (`ssh`, `tmux`, `ghostty`, `ci`, `ui`, etc.). Description explains the *why*, not the *what*.
+
+Examples from this repo:
+```
+fix(ssh): rewrite background/reconnect flow — stop detach-client, use C1 ST reset
+feat(ci): CI keychain for device builds — no more manual keychain unlocking
+docs: migrate project management to GitHub Issues + ADRs
+```
+
+### Closing Issues
+
+When closing a GitHub Issue, add a final comment that:
+1. Summarizes what was done
+2. Links the commit hash
+3. Notes any follow-up work spawned
+
+---
+
 ## File Provider (Archived)
 
 **Status:** Archived January 16, 2026  
