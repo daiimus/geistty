@@ -11,8 +11,9 @@
 #   ./ci.sh lint           - Check for Swift warnings/errors
 #   ./ci.sh sync-ghostty   - Rebuild and sync GhosttyKit from ghostty fork
 #   ./ci.sh all            - Run all checks (build + test + lint)
-#   ./ci.sh device-build   - Build for device (requires signing)
+#   ./ci.sh device-build   - Build for device (uses CI keychain for signing)
 #   ./ci.sh install DEVICE - Install and run on device
+#   ./ci.sh deploy [DEVICE] - Build, install, and launch with console output
 #
 
 set -e
@@ -24,6 +25,8 @@ PROJECT="Geistty.xcodeproj"
 SCHEME="Geistty"
 SIMULATOR="platform=iOS Simulator,name=iPhone 17 Pro"
 DERIVED_DATA="$HOME/Library/Developer/Xcode/DerivedData/Geistty-ci"
+CI_KEYCHAIN="$HOME/Library/Keychains/ci.keychain-db"
+CI_KEYCHAIN_PASSWORD_FILE="$HOME/.config/geistty/ci-keychain-password"
 
 # Colors for output
 RED='\033[0;31m'
@@ -41,6 +44,43 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Unlock the CI keychain for code signing (device builds only).
+# Uses a dedicated keychain with only the signing cert — the login
+# keychain (with personal passwords) is never touched.
+unlock_ci_keychain() {
+    if [ ! -f "$CI_KEYCHAIN" ]; then
+        log_error "CI keychain not found at $CI_KEYCHAIN"
+        log_info "See AGENTS.md for CI keychain setup instructions"
+        return 1
+    fi
+
+    if [ ! -f "$CI_KEYCHAIN_PASSWORD_FILE" ]; then
+        log_error "CI keychain password file not found at $CI_KEYCHAIN_PASSWORD_FILE"
+        return 1
+    fi
+
+    local PASSWORD
+    PASSWORD=$(head -1 "$CI_KEYCHAIN_PASSWORD_FILE")
+
+    security unlock-keychain -p "$PASSWORD" "$CI_KEYCHAIN" 2>/dev/null
+    if [ $? -eq 0 ]; then
+        log_info "CI keychain unlocked"
+    else
+        log_error "Failed to unlock CI keychain"
+        return 1
+    fi
+
+    # Ensure CI keychain is FIRST in the search list so codesign
+    # finds our unlocked cert before the (potentially locked) login keychain
+    local CURRENT_KEYCHAINS
+    CURRENT_KEYCHAINS=$(security list-keychains -d user | tr -d '"' | tr -d ' ')
+    security list-keychains -d user -s \
+        "$CI_KEYCHAIN" \
+        ~/Library/Keychains/login.keychain-db \
+        /Library/Keychains/System.keychain
+    log_info "CI keychain set as primary in search list"
 }
 
 # Resolve packages first (one time)
@@ -74,26 +114,29 @@ build_simulator() {
 
 # Build for device
 build_device() {
+    unlock_ci_keychain || return 1
+
     log_info "Building for iOS Device..."
     
-    local DEVICE_ID="${1:-}"
-    if [ -z "$DEVICE_ID" ]; then
-        # Find first connected device
-        DEVICE_ID=$(xcrun devicectl list devices 2>/dev/null | grep -E "^[0-9A-F-]+" | head -1 | awk '{print $1}')
+    local DEVICE_NAME="${1:-Icarus}"
+    
+    # If a CoreDevice UUID was passed, resolve it to a device name
+    if [[ "$DEVICE_NAME" =~ ^[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}$ ]]; then
+        local RESOLVED
+        RESOLVED=$(xcrun devicectl list devices 2>/dev/null | grep "$DEVICE_NAME" | awk '{print $1}')
+        if [ -n "$RESOLVED" ]; then
+            DEVICE_NAME="$RESOLVED"
+        fi
     fi
     
-    if [ -z "$DEVICE_ID" ]; then
-        log_error "No device found. Connect a device or provide DEVICE_ID"
-        return 1
-    fi
-    
-    log_info "Building for device: $DEVICE_ID"
+    log_info "Building for device: $DEVICE_NAME"
     
     xcodebuild build \
         -project "$PROJECT" \
         -scheme "$SCHEME" \
-        -destination "id=$DEVICE_ID" \
+        -destination "platform=iOS,name=$DEVICE_NAME" \
         -allowProvisioningUpdates \
+        CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION=YES \
         2>&1 | tee /tmp/geistty_device_build.log | tail -30
     
     if [ ${PIPESTATUS[0]} -eq 0 ]; then
@@ -107,13 +150,14 @@ build_device() {
 
 # Install on device
 install_device() {
-    local DEVICE_ID="${1:-}"
-    if [ -z "$DEVICE_ID" ]; then
-        DEVICE_ID=$(xcrun devicectl list devices 2>/dev/null | grep -E "^[0-9A-F-]+" | head -1 | awk '{print $1}')
-    fi
-    
-    if [ -z "$DEVICE_ID" ]; then
-        log_error "No device found"
+    unlock_ci_keychain || return 1
+
+    local DEVICE_NAME="${1:-Icarus}"
+    local DEVICE_UUID
+    DEVICE_UUID=$(xcrun devicectl list devices 2>/dev/null | grep "$DEVICE_NAME" | awk '{print $3}')
+
+    if [ -z "$DEVICE_UUID" ]; then
+        log_error "No device found matching '$DEVICE_NAME'"
         return 1
     fi
     
@@ -125,11 +169,43 @@ install_device() {
         return 1
     fi
     
-    log_info "Installing $APP_PATH on $DEVICE_ID..."
-    xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH" 2>&1
+    log_info "Installing $APP_PATH on $DEVICE_NAME ($DEVICE_UUID)..."
+    xcrun devicectl device install app --device "$DEVICE_UUID" "$APP_PATH" 2>&1
     
     log_info "Launching app..."
-    xcrun devicectl device process launch --device "$DEVICE_ID" com.geistty.app 2>&1
+    xcrun devicectl device process launch --device "$DEVICE_UUID" com.geistty.app 2>&1
+}
+
+# Build, install, and launch with console output (full deploy workflow)
+deploy_device() {
+    local DEVICE_NAME="${1:-Icarus}"
+    local DEVICE_UUID
+    DEVICE_UUID=$(xcrun devicectl list devices 2>/dev/null | grep "$DEVICE_NAME" | awk '{print $3}')
+
+    if [ -z "$DEVICE_UUID" ]; then
+        log_error "No device found matching '$DEVICE_NAME'"
+        return 1
+    fi
+
+    # Build
+    resolve_packages
+    build_device "$DEVICE_NAME" || return 1
+
+    # Find the built app
+    APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Geistty.app" -path "*/Debug-iphoneos/*" 2>/dev/null | head -1)
+
+    if [ -z "$APP_PATH" ]; then
+        log_error "No built app found after successful build"
+        return 1
+    fi
+
+    # Install
+    log_info "Installing on $DEVICE_NAME ($DEVICE_UUID)..."
+    xcrun devicectl device install app --device "$DEVICE_UUID" "$APP_PATH" 2>&1
+
+    # Launch with console
+    log_info "Launching with console output (Ctrl+C to detach)..."
+    xcrun devicectl device process launch --device "$DEVICE_UUID" --console com.geistty.app 2>&1
 }
 
 # Run unit tests (if test target exists)
@@ -266,8 +342,9 @@ show_help() {
     echo ""
     echo "Commands:"
     echo "  build           Build for iOS Simulator (no signing required)"
-    echo "  device-build    Build for iOS device (requires signing)"
-    echo "  install [ID]    Install and launch on device"
+    echo "  device-build    Build for iOS device (auto-unlocks CI keychain)"
+    echo "  install [NAME]  Install and launch on device (default: Icarus)"
+    echo "  deploy [NAME]   Build, install, and launch with console output"
     echo "  test            Run unit tests on simulator"
     echo "  ui-test         Run UI tests on simulator"
     echo "  lint            Analyze code for warnings"
@@ -277,7 +354,9 @@ show_help() {
     echo ""
     echo "Examples:"
     echo "  $0 build                              # Build for simulator"
-    echo "  $0 install <YOUR-DEVICE-UDID>  # Install on specific device"
+    echo "  $0 install Icarus                         # Install on Icarus"
+    echo "  $0 deploy                                  # Full deploy to Icarus (default)"
+    echo "  $0 deploy Athena                            # Full deploy to Athena"
     echo "  $0 all                                # Full CI run"
 }
 
@@ -296,6 +375,9 @@ case "${1:-help}" in
         ;;
     install)
         install_device "${2:-}"
+        ;;
+    deploy)
+        deploy_device "${2:-}"
         ;;
     test)
         run_tests
