@@ -949,13 +949,18 @@ class TmuxSessionManager: ObservableObject {
     /// Remove surface for a pane
     /// - Parameters:
     ///   - paneId: The pane ID to remove
-    ///   - paneActuallyClosed: If true, the pane was actually closed in tmux (allow %0 removal).
-    ///                         If false (default), this is cleanup during disconnect (keep %0 alive).
+    ///   - paneActuallyClosed: If true, the pane was actually closed in tmux (allow primary removal).
+    ///                         If false (default), this is cleanup during disconnect (keep primary alive).
     func removeSurface(for paneId: String, paneActuallyClosed: Bool = false) {
-        // Only keep %0 alive during disconnect (not when pane actually closes)
-        // When pane %0 actually closes, we need to remove it to avoid zombie surface
-        if paneId == "%0" && !paneActuallyClosed {
-            logger.info("Keeping primary surface %0 alive (disconnect, not pane close)")
+        // During disconnect cleanup, keep the primary surface alive so the view
+        // controller retains a valid surfaceView for reattach. When a pane is
+        // actually closed by the user, we must remove it regardless of whether
+        // it's the primary — otherwise it becomes a zombie surface.
+        //
+        // Previously this compared against hardcoded "%0", but the primary pane
+        // can be any ID (e.g., %2, %25). Compare by identity instead.
+        if !paneActuallyClosed, let primary = primarySurface, paneSurfaces[paneId] === primary {
+            logger.info("Keeping primary surface \(paneId) alive (disconnect, not pane close)")
             return
         }
         
