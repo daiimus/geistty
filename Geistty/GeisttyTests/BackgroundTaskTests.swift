@@ -69,8 +69,10 @@ final class MockBackgroundTaskProvider: BackgroundTaskProvider {
 
 /// Tests for the background task management in SSHSession.
 ///
-/// When the app backgrounds, SSHSession starts a background task to protect
-/// the tmux detach-client command from being killed before it completes.
+/// When the app backgrounds with an active tmux session, SSHSession captures
+/// a BackgroundSessionState snapshot and starts a background task to let
+/// in-flight SSH writes flush. On foreground, it sends C1 ST to exit the
+/// stale DCS passthrough and reconnects via a fresh SSH connection.
 /// These tests verify the begin/end lifecycle using a mock provider.
 final class BackgroundTaskTests: XCTestCase {
     
@@ -263,23 +265,22 @@ final class BackgroundTaskTests: XCTestCase {
         session.backgroundTaskProvider = mock
         session.setControlModeStateForTesting(.active)
         
-        // 1. App backgrounds — start background task + send detach
+        // 1. App backgrounds — start background task + capture state
         session.appWillResignActive()
         XCTAssertEqual(mock.activeTasks.count, 1, "Background task should be active")
         
-        // 2. tmux sends %exit — SSHSession handles TMUX_EXIT notification,
-        //    which calls endBackgroundTaskIfNeeded() internally
+        // 2. Background task ends (e.g., via safety timer or TMUX_EXIT)
         session.endBackgroundTaskIfNeeded()
-        XCTAssertTrue(mock.activeTasks.isEmpty, "Task should end on tmux exit")
+        XCTAssertTrue(mock.activeTasks.isEmpty, "Task should end")
         XCTAssertEqual(mock.endCallCount, 1)
         
         // 3. App foregrounds — endBackgroundTaskIfNeeded() is no-op (already ended)
         session.appDidBecomeActive()
         XCTAssertEqual(mock.endCallCount, 1,
-                       "Should NOT double-end — task was already cleaned up by tmux exit")
+                       "Should NOT double-end — task was already cleaned up")
     }
     
-    // MARK: - Background detach flag tests
+    // MARK: - Background state flag tests
     
     @MainActor
     func testResignActiveSetsDetachingForBackgroundFlag() {
@@ -289,12 +290,12 @@ final class BackgroundTaskTests: XCTestCase {
         session.setControlModeStateForTesting(.active)
         
         XCTAssertFalse(session.isDetachingForBackground,
-                       "Flag should be false initially")
+                       "backgroundState should be nil initially")
         
         session.appWillResignActive()
         
         XCTAssertTrue(session.isDetachingForBackground,
-                      "Flag should be set after resigning active with tmux")
+                      "backgroundState should be set after resigning active with tmux")
     }
     
     @MainActor
@@ -307,7 +308,7 @@ final class BackgroundTaskTests: XCTestCase {
         session.appWillResignActive()
         
         XCTAssertFalse(session.isDetachingForBackground,
-                       "Flag should NOT be set when tmux is inactive")
+                       "backgroundState should NOT be set when tmux is inactive")
     }
     
     @MainActor
@@ -326,19 +327,19 @@ final class BackgroundTaskTests: XCTestCase {
         session.appDidBecomeActive()
         
         XCTAssertFalse(session.isDetachingForBackground,
-                       "Flag should be cleared when becoming active")
+                       "backgroundState should be cleared when becoming active (no credentials path)")
     }
     
     @MainActor
     func testDisconnectClearsDetachingForBackgroundFlag() {
         let session = SSHSession()
         session.setControlModeStateForTesting(.active)
-        session.setIsDetachingForBackgroundForTesting(true)
+        session.setBackgroundStateForTesting(true)
         
         session.disconnect()
         
         XCTAssertFalse(session.isDetachingForBackground,
-                       "disconnect() should clear the detaching flag")
+                       "disconnect() should clear backgroundState")
     }
     
     // MARK: - prepareForReattach tests
@@ -434,9 +435,9 @@ final class BackgroundTaskTests: XCTestCase {
     
     @MainActor
     func testBackgroundDetachSkipsControlModeExited() {
-        // This tests the conceptual flow: when isDetachingForBackground is true,
-        // the TMUX_EXIT handler should call prepareForReattach instead of
-        // controlModeExited. We verify via the manager's state.
+        // This tests the conceptual flow: when backgroundState is set,
+        // the TMUX_EXIT handler (triggered by C1 ST on foreground) should
+        // call prepareForReattach instead of controlModeExited.
         let session = SSHSession()
         let mock = MockBackgroundTaskProvider()
         session.backgroundTaskProvider = mock
@@ -446,24 +447,25 @@ final class BackgroundTaskTests: XCTestCase {
         session.setControlModeStateForTesting(.active)
         session.tmuxSessionManager?.controlModeActivated()
         
-        // Resign active (sets flag, starts background task)
+        // Resign active (sets backgroundState, starts background task)
         session.appWillResignActive()
         XCTAssertTrue(session.isDetachingForBackground)
         
         // Simulate TMUX_EXIT notification by directly testing the flag check:
-        // After TMUX_EXIT with flag set, the manager should NOT have surfaces destroyed
+        // After TMUX_EXIT with backgroundState set, the manager should NOT have
+        // surfaces destroyed
         XCTAssertNotNil(session.tmuxSessionManager,
-                        "Session manager should still exist during background detach")
+                        "Session manager should still exist during background")
     }
     
     @MainActor
     func testNormalTmuxExitCallsControlModeExited() {
-        // When isDetachingForBackground is false, TMUX_EXIT should do full teardown
+        // When backgroundState is nil, TMUX_EXIT should do full teardown
         let session = SSHSession()
         session.setupTmuxForTesting()
         session.setControlModeStateForTesting(.active)
         
-        // Flag is false (default)
+        // backgroundState is nil (default)
         XCTAssertFalse(session.isDetachingForBackground)
         
         // After a normal tmux exit, controlModeExited should be called
@@ -479,14 +481,14 @@ final class BackgroundTaskTests: XCTestCase {
         let mock = MockBackgroundTaskProvider()
         session.backgroundTaskProvider = mock
         
-        // Set up: flag is set but no credentials → should log warning, not crash
-        session.setIsDetachingForBackgroundForTesting(true)
+        // Set up: backgroundState is set but no credentials → should log warning, not crash
+        session.setBackgroundStateForTesting(true)
         
         session.appDidBecomeActive()
         
-        // Flag should be cleared regardless
+        // backgroundState should be cleared (no credentials → else branch clears it)
         XCTAssertFalse(session.isDetachingForBackground,
-                       "Flag should be cleared by appDidBecomeActive")
+                       "backgroundState should be cleared by appDidBecomeActive (no credentials path)")
     }
     
     @MainActor
@@ -496,14 +498,14 @@ final class BackgroundTaskTests: XCTestCase {
         session.setControlModeStateForTesting(.active)
         session.tmuxSessionManager?.controlModeActivated()
         
-        // Set flag but clear credentials
-        session.setIsDetachingForBackgroundForTesting(true)
+        // Set backgroundState but clear credentials
+        session.setBackgroundStateForTesting(true)
         // No storedAuthMethod → canReconnect == false
         
         session.appDidBecomeActive()
         
         XCTAssertFalse(session.isDetachingForBackground,
-                       "Flag should be cleared")
+                       "backgroundState should be cleared")
         // The session manager should have had controlModeExited called
         XCTAssertFalse(session.tmuxSessionManager?.isConnected ?? true,
                        "Manager should show disconnected when credentials missing")
@@ -513,7 +515,7 @@ final class BackgroundTaskTests: XCTestCase {
     
     @MainActor
     func testConnectionDidCloseSuppressesDelegateWhenDetachingForBackground() {
-        // When isDetachingForBackground is true, connectionDidClose should NOT
+        // When backgroundState is set, connectionDidClose should NOT
         // call delegate.sshSession(didDisconnectWithError:) — this prevents
         // SwiftUI from removing TerminalContainerView and triggering the
         // renderer use-after-free SIGSEGV.
@@ -521,12 +523,12 @@ final class BackgroundTaskTests: XCTestCase {
         let delegate = MockSSHSessionDelegate()
         session.delegate = delegate
         session.setControlModeStateForTesting(.active)
-        session.setIsDetachingForBackgroundForTesting(true)
+        session.setBackgroundStateForTesting(true)
         
         session.simulateConnectionDidCloseForTesting(error: nil)
         
         XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
-                       "Delegate should NOT be notified of disconnect during background detach")
+                       "Delegate should NOT be notified of disconnect during background")
     }
     
     @MainActor
@@ -552,7 +554,7 @@ final class BackgroundTaskTests: XCTestCase {
         let session = SSHSession()
         let delegate = MockSSHSessionDelegate()
         session.delegate = delegate
-        session.setIsDetachingForBackgroundForTesting(true)
+        session.setBackgroundStateForTesting(true)
         
         let testError = NSError(domain: "test", code: 42, userInfo: nil)
         session.simulateConnectionDidCloseForTesting(error: testError)
@@ -599,10 +601,10 @@ final class BackgroundTaskTests: XCTestCase {
     @MainActor
     func testFullBackgroundLifecycleWithConnectionDidClose() {
         // Simulates the complete background transition:
-        // 1. appWillResignActive → flag set, detach-client sent
-        // 2. connectionDidClose fires (SSH channel closes after tmux detach)
+        // 1. appWillResignActive → backgroundState captured
+        // 2. connectionDidClose fires (SSH connection dies during background)
         //    → delegate NOT notified → SwiftUI doesn't remove view → no SIGSEGV
-        // 3. appDidBecomeActive → reconnect path
+        // 3. appDidBecomeActive → reconnect path (no credentials → clears state)
         let session = SSHSession()
         let mock = MockBackgroundTaskProvider()
         let delegate = MockSSHSessionDelegate()
@@ -615,20 +617,20 @@ final class BackgroundTaskTests: XCTestCase {
         XCTAssertTrue(session.isDetachingForBackground)
         XCTAssertEqual(mock.activeTasks.count, 1)
         
-        // Step 2: SSH channel closes (tmux exec'd process exits after detach)
+        // Step 2: SSH channel closes (TCP keepalive expires during background)
         session.simulateConnectionDidCloseForTesting(error: nil)
         
         // Key assertion: delegate was NOT notified
         XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
-                       "Delegate must NOT be notified during background detach — " +
+                       "Delegate must NOT be notified during background — " +
                        "this would cause SwiftUI to remove TerminalContainerView → SIGSEGV")
         // But state IS updated
         XCTAssertEqual(session.state, .disconnected)
         
-        // Step 3: App foregrounds
+        // Step 3: App foregrounds (no credentials → backgroundState cleared in else branch)
         session.appDidBecomeActive()
         XCTAssertFalse(session.isDetachingForBackground,
-                       "Flag should be cleared after becoming active")
+                       "backgroundState should be cleared after becoming active (no credentials path)")
         // Delegate still not notified about the SSH close from step 2
         XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
                        "Delegate should never have been notified for the background disconnect")
@@ -833,16 +835,16 @@ final class BackgroundTaskTests: XCTestCase {
     
     @MainActor
     func testBackgroundDetachTakesPriorityOverReconnect() {
-        // When both isDetachingForBackground and isReconnecting are true
+        // When both backgroundState is set and isReconnecting is true
         // (shouldn't happen in practice, but defensive coding), the background
-        // detach guard fires first (since it comes first in code order).
+        // state guard fires first (since it comes first in code order).
         let session = SSHSession()
         let delegate = MockSSHSessionDelegate()
         session.delegate = delegate
         
         let conn = NIOSSHConnection(host: "test", port: 22, username: "test")
         session.setConnectionForTesting(conn)
-        session.setIsDetachingForBackgroundForTesting(true)
+        session.setBackgroundStateForTesting(true)
         session.setIsReconnectingForTesting(true)
         
         session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
@@ -860,8 +862,9 @@ final class BackgroundTaskTests: XCTestCase {
     func testFullReconnectLifecycleOldConnectionSuppressed() {
         // Simulates the complete reconnect flow:
         // 1. App has an active connection
-        // 2. App backgrounds → detach
-        // 3. App foregrounds → attemptReconnect starts
+        // 2. App backgrounds → backgroundState captured
+        // 3. App foregrounds → no credentials → backgroundState cleared
+        //    Then manually simulate reconnect sequence:
         //    a. Old connection's delegate nilled (belt-and-suspenders)
         //    b. Old connection disconnected → connectionDidClose fires
         //       → suppressed by stale guard OR reconnect flag
@@ -883,18 +886,17 @@ final class BackgroundTaskTests: XCTestCase {
         session.appWillResignActive()
         XCTAssertTrue(session.isDetachingForBackground)
         
-        // Old connection closes during background (SSH channel dies)
+        // Old connection closes during background (TCP keepalive expires)
         session.simulateConnectionDidCloseForTesting(error: nil, useCurrentConnection: true)
         XCTAssertEqual(delegate.didDisconnectCalls.count, 0,
-                       "Background detach guard suppresses")
+                       "Background state guard suppresses")
         
-        // Step 3: Foreground — simulate what attemptReconnect does
+        // Step 3: Foreground (no credentials → backgroundState cleared)
         session.appDidBecomeActive()
-        XCTAssertFalse(session.isDetachingForBackground)
+        XCTAssertFalse(session.isDetachingForBackground,
+                       "backgroundState cleared — no credentials path")
         
-        // attemptReconnect nils delegate and disconnects old conn
-        // (we can't call attemptReconnect directly without a real server,
-        //  but we can simulate the critical sequence)
+        // Manually simulate what attemptReconnect does
         session.setIsReconnectingForTesting(true)
         let newConn = NIOSSHConnection(host: "server", port: 22, username: "user")
         session.setConnectionForTesting(newConn)

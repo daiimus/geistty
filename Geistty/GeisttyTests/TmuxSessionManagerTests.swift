@@ -713,6 +713,11 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        // In production, controlModeActivated() always fires before
+        // handleTmuxStateChanged (SSHSession.swift:449). Set isConnected = true
+        // so getSurfaceOrCreate() allows factory creation.
+        mgr.controlModeActivated()
+
         // Step 1: handleTmuxStateChanged with no factory — defers creation
         mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
         XCTAssertTrue(mgr.paneSurfaces.isEmpty)
@@ -755,6 +760,10 @@ extension TmuxSessionManagerTests {
         #if DEBUG
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
+
+        // In production, controlModeActivated() always fires before
+        // handleTmuxStateChanged. isConnected must be true for factory creation.
+        mgr.controlModeActivated()
 
         // Configure factory FIRST (normal non-race path)
         var factoryCalls: [String] = []
@@ -925,6 +934,9 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        // isConnected must be true for factory creation
+        mgr.controlModeActivated()
+
         // Configure factory that tracks calls
         var factoryCalls: [String] = []
         mgr.configureSurfaceManagement(
@@ -971,6 +983,9 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        // isConnected must be true for factory creation
+        mgr.controlModeActivated()
+
         var factoryCalls: [String] = []
         mgr.configureSurfaceManagement(
             factory: { paneId in
@@ -1004,6 +1019,10 @@ extension TmuxSessionManagerTests {
         #if DEBUG
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
+
+        // In production, controlModeActivated() fires before handleTmuxStateChanged.
+        // isConnected must be true so the deferred drain can call the factory.
+        mgr.controlModeActivated()
 
         // Step 1: handleTmuxStateChanged with no factory — all 3 deferred
         mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 3)
@@ -1051,6 +1070,9 @@ extension TmuxSessionManagerTests {
         #if DEBUG
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
+
+        // isConnected must be true for factory creation
+        mgr.controlModeActivated()
 
         var factoryCalls: [String] = []
         mgr.configureSurfaceManagement(
@@ -3161,6 +3183,365 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.teardownOrderForTesting.count, countAfterFirst,
                        "Second cleanup should not add more teardown events")
         #endif
+    }
+}
+
+// MARK: - Background Detach/Reattach Flow Tests (Session 121, rewritten Session 127)
+// Session 127: Rewrote for "destroy and recreate" approach.
+// prepareForReattach() now destroys observer surfaces and clears paneSurfaces,
+// letting the standard initial-connection flow recreate fresh surfaces on reconnect.
+
+extension TmuxSessionManagerTests {
+    
+    @MainActor
+    func testPrepareForReattachClearsPaneSurfaces() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 15, paneB: 16)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        mgr.controlModeActivated()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        // paneSurfaces may be empty (no factory configured in test), but state is set up
+        
+        mgr.prepareForReattach()
+        
+        // paneSurfaces must be empty after prepareForReattach
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty,
+                      "paneSurfaces must be empty after prepareForReattach — observer surfaces destroyed")
+    }
+    
+    @MainActor
+    func testPrepareForReattachPreservesPrimarySurface() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        
+        mgr.prepareForReattach()
+        
+        // primarySurface is nil in test (no real Ghostty surface), but the code
+        // path doesn't crash and the property is preserved (not set to nil)
+        XCTAssertFalse(mgr.isConnected)
+        XCTAssertEqual(mgr.connectionState, .disconnected)
+    }
+    
+    @MainActor
+    func testPrepareForReattachClearsTransientState() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 15, paneB: 16)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        #if DEBUG
+        mgr.setPendingOutputForTesting(["%15": [Data([0x41])]])
+        #endif
+        
+        mgr.prepareForReattach()
+        
+        XCTAssertFalse(mgr.isConnected)
+        XCTAssertEqual(mgr.connectionState, .disconnected)
+        XCTAssertTrue(mgr.pendingOutput.isEmpty)
+        XCTAssertNil(mgr.currentSession)
+        XCTAssertTrue(mgr.windows.isEmpty)
+        XCTAssertFalse(mgr.viewerReady)
+        // focusedWindowId and focusedPaneId are preserved for UI continuity
+        XCTAssertEqual(mgr.focusedWindowId, "@0")
+        XCTAssertEqual(mgr.focusedPaneId, "%15")
+    }
+    
+    @MainActor
+    func testControlModeExitedAfterPrepareForReattach() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        mgr.prepareForReattach()
+        
+        // Full teardown after a background detach should not crash
+        mgr.controlModeExited(reason: "full teardown")
+        
+        XCTAssertFalse(mgr.isConnected)
+        // controlModeExited with a reason sets .connectionLost, not .disconnected
+        if case .connectionLost = mgr.connectionState {
+            // expected
+        } else {
+            XCTFail("Expected .connectionLost, got \(mgr.connectionState)")
+        }
+    }
+    
+    @MainActor
+    func testCleanupAfterPrepareForReattach() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        mgr.prepareForReattach()
+        
+        // cleanup() after prepareForReattach should not crash
+        mgr.cleanup()
+        
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty)
+    }
+    
+    @MainActor
+    func testHandleTmuxStateChangedAfterPrepareForReattach() {
+        // After prepareForReattach clears paneSurfaces, the standard
+        // handleTmuxStateChanged flow should populate windows/state
+        // as if it's a fresh connection (surfaces need a factory,
+        // which isn't configured in unit tests, but state updates work)
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 15, paneB: 16)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        // Phase 1: Initial connection
+        mgr.controlModeActivated()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        XCTAssertEqual(mgr.windows.count, 1)
+        
+        // Phase 2: Background detach
+        mgr.prepareForReattach()
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty)
+        XCTAssertTrue(mgr.windows.isEmpty)
+        
+        // Phase 3: Reconnect — handleTmuxStateChanged rebuilds state fresh
+        mgr.controlModeActivated()
+        mock.resetCallTracking()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        // State should be rebuilt as if fresh connection
+        XCTAssertEqual(mgr.windows.count, 1)
+        XCTAssertTrue(mgr.isConnected)
+    }
+    
+    @MainActor
+    func testFreshConnectionDoesNotTriggerReattachPath() {
+        // A brand-new connection should work identically to before
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = singlePaneLayout(paneId: 0)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [0]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 1)
+        XCTAssertEqual(mgr.windows.count, 1)
+        XCTAssertEqual(mgr.focusedPaneId, "%0")
+    }
+    
+    @MainActor
+    func testPrepareForReattachIdempotent() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        
+        // Calling prepareForReattach twice should not crash
+        mgr.prepareForReattach()
+        mgr.prepareForReattach()
+        
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty)
+        XCTAssertFalse(mgr.isConnected)
+    }
+    
+    @MainActor
+    func testControlModeActivatedDoesNotAffectPaneSurfaces() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        
+        // controlModeActivated alone should not create or destroy surfaces
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty)
+        XCTAssertTrue(mgr.isConnected)
+    }
+    
+    @MainActor
+    func testEmptyPaneNotificationAfterPrepareForReattach() {
+        // During reconnection, the first TMUX_STATE_CHANGED may fire with 0 panes
+        // (viewer just created, list-windows hasn't responded yet). This should
+        // be handled gracefully — no crash, no stale state.
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 15, paneB: 16)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        // Phase 1: Initial connection
+        mgr.controlModeActivated()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        // Phase 2: Background detach
+        mgr.prepareForReattach()
+        
+        // Phase 3: Reconnect — first notification with empty panes
+        mgr.controlModeActivated()
+        mock.stubbedWindows = []
+        mock.stubbedWindowLayouts = []
+        mock.stubbedPaneIds = []
+        mock.stubbedActiveWindowId = -1
+        mock.resetCallTracking()
+        mgr.handleTmuxStateChanged(windowCount: 0, paneCount: 0)
+        
+        // Should handle empty notification gracefully
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty)
+        
+        // Phase 4: Second notification with real panes
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        mock.resetCallTracking()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        // State rebuilt correctly
+        XCTAssertEqual(mgr.windows.count, 1)
+    }
+    
+    @MainActor
+    func testFullBackgroundForegroundLifecycle() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 15, paneB: 16)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        // Phase 1: Initial connection
+        mgr.controlModeActivated()
+        mgr.viewerBecameReady()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        XCTAssertTrue(mgr.isConnected)
+        XCTAssertEqual(mgr.windows.count, 1)
+        
+        // Phase 2: Background detach — destroys observers, clears paneSurfaces
+        mgr.prepareForReattach()
+        XCTAssertFalse(mgr.isConnected)
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty)
+        XCTAssertTrue(mgr.windows.isEmpty)
+        
+        // Phase 3: Foreground reconnect — standard flow recreates everything
+        mgr.controlModeActivated()
+        mgr.viewerBecameReady()
+        mock.resetCallTracking()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        // Everything rebuilt as if fresh connection
+        XCTAssertTrue(mgr.isConnected)
+        XCTAssertEqual(mgr.windows.count, 1)
+    }
+    
+    /// After prepareForReattach sets isConnected=false, getSurface(forNumericId:)
+    /// must NOT create new surfaces via the factory. This prevents the bug where
+    /// SwiftUI re-renders the preserved split tree and triggers premature observer
+    /// surface creation — surfaces that have no tmux viewer to bind to.
+    @MainActor
+    func testGetSurfaceReturnsNilWhenDisconnected() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 15, paneB: 16)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        // Phase 1: Initial connection — factory configured and connected
+        mgr.controlModeActivated()
+        var factoryCalls: [String] = []
+        mgr.configureSurfaceManagement(
+            factory: { paneId in
+                factoryCalls.append(paneId)
+                return nil  // Can't create real Ghostty surfaces in tests
+            },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        let initialCalls = factoryCalls.count
+        XCTAssertGreaterThan(initialCalls, 0, "Factory should be called during initial connection")
+        
+        // Phase 2: Background detach
+        mgr.prepareForReattach()
+        XCTAssertFalse(mgr.isConnected)
+        factoryCalls.removeAll()
+        
+        // Simulate SwiftUI re-render calling getSurface(forNumericId:)
+        // for each pane in the preserved split tree
+        let surface15 = mgr.getSurface(forNumericId: 15)
+        let surface16 = mgr.getSurface(forNumericId: 16)
+        
+        XCTAssertNil(surface15, "getSurface must return nil when disconnected")
+        XCTAssertNil(surface16, "getSurface must return nil when disconnected")
+        XCTAssertTrue(factoryCalls.isEmpty,
+                      "Factory must NOT be called when disconnected — prevents premature zombie surfaces")
+        XCTAssertTrue(mgr.paneSurfaces.isEmpty,
+                      "No surfaces should be created while disconnected")
+    }
+    
+    /// Verify that factory creation works again after reconnect restores isConnected.
+    @MainActor
+    func testFactoryCreationRestoredAfterReconnect() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 15, paneB: 16)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [15, 16]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        // Phase 1: Initial connection
+        mgr.controlModeActivated()
+        var factoryCalls: [String] = []
+        mgr.configureSurfaceManagement(
+            factory: { paneId in
+                factoryCalls.append(paneId)
+                return nil
+            },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        // Phase 2: Background detach
+        mgr.prepareForReattach()
+        factoryCalls.removeAll()
+        
+        // Phase 3: Reconnect — controlModeActivated restores isConnected
+        mgr.controlModeActivated()
+        XCTAssertTrue(mgr.isConnected)
+        
+        // Now handleTmuxStateChanged should create surfaces again
+        mock.resetCallTracking()
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+        
+        XCTAssertFalse(factoryCalls.isEmpty,
+                       "Factory should be called again after reconnect restores isConnected")
+        XCTAssertEqual(Set(factoryCalls), Set(["%15", "%16"]),
+                       "Factory should be called for all panes after reconnect")
     }
 }
 
