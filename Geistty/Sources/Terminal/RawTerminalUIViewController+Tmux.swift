@@ -176,14 +176,14 @@ extension RawTerminalUIViewController {
         // Handle empty tree (all panes closed) - just clean up multi-pane mode
         // The disconnect handler will navigate away when tmux sends %exit
         //
-        // GUARD: If we're detaching for background, do NOT clean up multi-pane mode.
-        // Removing the hosting controller triggers a primary surface resize while the
-        // tmux viewer is dead → renderer use-after-free SIGSEGV. The split tree will
-        // be repopulated by TMUX_STATE_CHANGED when we reattach.
+        // GUARD: If we're backgrounded with an active session, do NOT clean up
+        // multi-pane mode. Removing the hosting controller triggers a primary surface
+        // resize while the tmux viewer is dead → renderer use-after-free SIGSEGV.
+        // The split tree will be repopulated by TMUX_STATE_CHANGED when we reattach.
         if !hasPanes {
             if isMultiPaneMode {
                 if viewModel?.sshSession?.isDetachingForBackground == true {
-                    logger.info("🔄 No panes remaining but detaching for background — preserving multi-pane mode")
+                    logger.info("🔄 No panes remaining but backgrounded with active session — preserving multi-pane mode")
                     return
                 }
                 logger.info("🔄 No panes remaining, cleaning up multi-pane mode")

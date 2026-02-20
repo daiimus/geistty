@@ -164,7 +164,7 @@ class TerminalViewModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             // CRITICAL: Must run synchronously — NOT in a Task wrapper.
-            // The isDetachingForBackground flag must be set BEFORE any other
+            // The backgroundState must be set BEFORE any other
             // willResignActive handlers run (e.g., Ghostty.App's focus-false),
             // because those can trigger tmux_exit which checks the flag.
             // A Task wrapper defers to the next run loop iteration, too late.

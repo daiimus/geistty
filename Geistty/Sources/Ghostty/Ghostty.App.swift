@@ -615,6 +615,14 @@ extension Ghostty {
                 )
                 return true
                 
+            case GHOSTTY_ACTION_QUIT_TIMER:
+                // Ghostty fires quit_timer when all surfaces are gone (e.g., after
+                // tmux viewer teardown on background). On macOS this quits the app.
+                // On iOS we MUST suppress this — iOS manages app lifecycle, and we
+                // need the process alive to reconnect when foregrounded.
+                logger.info("Suppressing quit_timer action (iOS manages app lifecycle)")
+                return true
+                
             default:
                 return false
             }

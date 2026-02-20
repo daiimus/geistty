@@ -104,6 +104,9 @@ class TmuxSessionManager: ObservableObject {
     /// Test-only: tracks the order in which surfaces are closed during teardown.
     /// Each entry is (paneId, isObserver). Observers should always come before primaries.
     var teardownOrderForTesting: [(paneId: String, isObserver: Bool)] = []
+    
+    // ARCHIVED: Session 127 — needsReattach + needsReattachForTesting removed
+    // (destroy-and-recreate approach). See docs/archive/REATTACH_PRESERVED_SURFACES_FEB_2026.swift
     #endif
     
     /// Cell size from the primary surface (for calculating terminal dimensions)
@@ -271,6 +274,7 @@ class TmuxSessionManager: ObservableObject {
         // We close() WITHOUT calling detachTmuxPane() first because detachTmuxPane()
         // chases the same binding.source pointer chain. The ordering guarantee
         // makes ghostty_surface_free's internal cleanup safe.
+        
         let observers = paneSurfaces.filter { $0.value.isMultiPaneObserver }
         let primaries = paneSurfaces.filter { !$0.value.isMultiPaneObserver }
         
@@ -293,21 +297,40 @@ class TmuxSessionManager: ObservableObject {
         primaryCellSize = .zero
     }
     
-    /// Lightweight reset for background detach/reattach.
-    /// Unlike `controlModeExited()` which destroys all surfaces, this preserves
-    /// the surface dictionary (`paneSurfaces`) and `primarySurface` so the UI
-    /// can be restored when we reconnect to tmux. Clears transient state that
-    /// will be re-populated by the new tmux viewer's startup sequence.
+    /// Lightweight reset for background → foreground reconnect.
     ///
     /// Called from SSHSession's TMUX_EXIT handler when `isDetachingForBackground`
-    /// is true — meaning this %exit was the expected response to our detach-client,
-    /// not a real tmux session teardown.
+    /// is true — meaning this exit was triggered by the C1 ST (0x9C) sent in
+    /// `appDidBecomeActive()` to exit the stale DCS passthrough, not a real tmux
+    /// session teardown by the user.
+    ///
+    /// Preserves `primarySurface` (the view controller's surfaceView that owns the
+    /// Ghostty C surface) and `currentSplitTree` (to avoid SIGSEGV from resizing
+    /// into a dead viewer). Clears everything else so the reconnect flow can treat
+    /// this like a fresh initial connection.
     func prepareForReattach() {
-        logger.info("Preparing for reattach — preserving \(paneSurfaces.count) surfaces")
+        logger.info("Preparing for reattach — preserving primarySurface, destroying \(paneSurfaces.count - 1) observer surfaces")
         
         // Clear connection state (will be re-set by controlModeActivated on reattach)
         isConnected = false
         connectionState = .disconnected
+        
+        // Close and remove observer surfaces. The primary surface stays alive —
+        // it's the view controller's surfaceView and will receive DCS 1000p on
+        // reconnect, creating a new Ghostty tmux viewer inside it.
+        //
+        // ORDERING: observers must be freed before primary (binding.source pointer
+        // chase). We're not freeing primary, so just free observers.
+        let observers = paneSurfaces.filter { $0.value !== primarySurface }
+        for (paneId, surface) in observers {
+            surface.close()
+            logger.debug("Closed observer surface for pane \(paneId)")
+        }
+        
+        // Clear paneSurfaces entirely. The primary will be re-registered under its
+        // real pane ID when handleTmuxStateChanged → getSurfaceOrCreate finds
+        // primarySurface not in paneSurfaces (the standard initial-connect path).
+        paneSurfaces.removeAll()
         
         // Clear transient protocol state — the new viewer will rebuild this
         pendingOutput.removeAll()
@@ -339,12 +362,12 @@ class TmuxSessionManager: ObservableObject {
         resizeDebounceTask?.cancel()
         resizeDebounceTask = nil
         
-        // DO NOT clear: paneSurfaces, primarySurface, primaryCellSize,
-        // surfaceFactory, surfaceInputHandler, surfaceResizeHandler, writeToSSH
-        // These are either surfaces we want to preserve or infrastructure that
-        // will be re-wired by reconnectWithAuth().
+        // DO NOT clear: primarySurface, primaryCellSize, surfaceFactory,
+        // surfaceInputHandler, surfaceResizeHandler, writeToSSH.
+        // primarySurface is the view controller's surfaceView — it stays alive.
+        // The factory/handlers are captured closures from the view controller.
         
-        logger.info("prepareForReattach complete: \(paneSurfaces.count) surfaces preserved, focusedWindow=\(focusedWindowId), focusedPane=\(focusedPaneId)")
+        logger.info("prepareForReattach complete: primarySurface preserved, focusedWindow=\(focusedWindowId), focusedPane=\(focusedPaneId)")
     }
     
     /// Called when the Ghostty tmux viewer's startup command queue has fully drained.
@@ -639,6 +662,17 @@ class TmuxSessionManager: ObservableObject {
             }
             
             return primary
+        }
+        
+        // Don't create new surfaces when disconnected.
+        // After prepareForReattach() clears paneSurfaces, SwiftUI re-renders the
+        // preserved split tree and calls getSurface(forNumericId:) for each pane.
+        // Without this guard, the factory creates premature observer surfaces that
+        // have no tmux viewer to bind to — they become zombies that block real
+        // surface creation on reconnect.
+        guard isConnected else {
+            logger.debug("Not creating surface for \(paneId) — not connected")
+            return nil
         }
         
         // Try to create new surface if factory is available
