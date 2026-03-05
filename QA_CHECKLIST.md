@@ -2,7 +2,7 @@
 
 Manual test matrix for device testing. Run through before each release.
 
-**Test Device:** ICarus (iPad Pro) — `<YOUR-DEVICE-UDID>`
+**Test Device:** iPad Pro — `<YOUR-DEVICE-UDID>`
 **Connectivity:** USB, LAN, or Tailscale to Mac test server (localhost)
 
 ---
@@ -50,7 +50,7 @@ Manual test matrix for device testing. Run through before each release.
 - [ ] Auto-reconnect on app resume after background — reconnects
 - [ ] Reconnect button in disconnected overlay — works
 
-### Connectivity Methods (ICarus)
+### Connectivity Methods
 - [ ] USB connection to Mac — connects via `localhost`
 - [ ] LAN connection — connects via Mac's LAN IP
 - [ ] Tailscale connection — connects via Tailscale IP

@@ -2221,8 +2221,8 @@ extension TmuxSessionManagerTests {
                        "Only the select-pane command should be sent")
     }
 
-    /// Fix H: switching between all 3 panes in sequence (simulating the real
-    /// 3-pane tmux layout on Icarus with panes %6, %7, %8).
+    /// Fix H: switching between all 3 panes in sequence (simulating a real
+    /// 3-pane tmux layout with panes %6, %7, %8).
     @MainActor
     func testThreePaneRoundRobinSelection() {
         let (mgr, log) = managerWithCommandLog()

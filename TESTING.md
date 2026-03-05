@@ -212,8 +212,8 @@ xcrun devicectl device process launch --device DEVICE_ID --console com.geistty.a
 
 | Device | UDID | CoreDevice UUID |
 |--------|------|-----------------|
-| Icarus (iPad Pro) | `<YOUR-DEVICE-UDID>` | `<YOUR-COREDEVICE-UUID>` |
-| Athena (iPhone) | `<YOUR-DEVICE-UDID>` | `<YOUR-COREDEVICE-UUID>` |
+| iPad Pro | `<YOUR-DEVICE-UDID>` | `<YOUR-COREDEVICE-UUID>` |
+| iPhone | `<YOUR-DEVICE-UDID>` | `<YOUR-COREDEVICE-UUID>` |
 
 ## Build Artifacts
 
@@ -241,5 +241,5 @@ When working as a coding agent:
 2. **Run `./ci.sh test` after adding/modifying tests** to verify they pass
 3. **Check `/tmp/geistty_build.log` for full error details** if build fails
 4. **Use simulator builds** for quick iteration (no signing delays)
-5. **Device testing** requires user to verify behavior on Icarus/Athena
+5. **Device testing** requires user to verify behavior on physical devices
 6. **New test files** must be added to `project.pbxproj` (see Adding New Test Files above)
