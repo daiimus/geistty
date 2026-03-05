@@ -31,8 +31,16 @@ extension Ghostty {
         /// The app configuration
         @Published private(set) var config: Config?
         
-        /// The underlying ghostty_app_t handle
-        private(set) var app: ghostty_app_t?
+        /// The underlying ghostty_app_t handle.
+        /// Uses didSet to free the old handle, matching upstream Ghostty's pattern.
+        /// This ensures the runtime is freed while `self` is still valid (important
+        /// because Unmanaged.passUnretained userdata must remain valid during teardown).
+        private(set) var app: ghostty_app_t? {
+            didSet {
+                guard let old = oldValue else { return }
+                ghostty_app_free(old)
+            }
+        }
         
         /// Thread-safe flag to track if ghostty_init has been called (H3 fix).
         /// Uses OSAllocatedUnfairLock for safe concurrent access.
@@ -169,9 +177,9 @@ extension Ghostty {
         
         deinit {
             NotificationCenter.default.removeObserver(self)
-            if let app = app {
-                ghostty_app_free(app)
-            }
+            // Setting app to nil triggers the didSet which calls ghostty_app_free.
+            // This ensures the runtime is freed while self (and userdata) is still valid.
+            self.app = nil
         }
         
         /// Tick the app (process pending events)

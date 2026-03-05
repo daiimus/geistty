@@ -645,13 +645,13 @@ extension Ghostty {
         private func showScrollIndicator() {
             scrollIndicatorHideTimer?.invalidate()
             
-            UIView.animate(withDuration: 0.15) {
-                self.scrollIndicator?.alpha = 1
+            UIView.animate(withDuration: 0.15) { [weak self] in
+                self?.scrollIndicator?.alpha = 1
             }
             
             // Hide after delay
             scrollIndicatorHideTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
-                UIView.animate(withDuration: 0.3) {
+                UIView.animate(withDuration: 0.3) { [weak self] in
                     self?.scrollIndicator?.alpha = 0
                 }
             }
@@ -708,6 +708,7 @@ extension Ghostty {
         
         /// Track scroll state for physics-based scrolling
         private var scrollDisplayLink: CADisplayLink?
+        private var scrollDisplayLinkProxy: DisplayLinkProxy?
         private var scrollVelocity: CGFloat = 0
         private var initialMomentumVelocity: CGFloat = 0  // Track initial velocity for dynamic deceleration
         private var momentumFrameCount: Int = 0  // Track frames for initial kick
@@ -834,6 +835,27 @@ extension Ghostty {
         
         // MARK: - Momentum Scrolling
         
+        /// Weak proxy target for CADisplayLink to avoid retain cycles.
+        /// CADisplayLink strongly retains its target — using the SurfaceView directly
+        /// creates a cycle: SurfaceView → displayLink → SurfaceView. This proxy
+        /// holds a weak reference so the SurfaceView can be deallocated normally.
+        private class DisplayLinkProxy {
+            weak var target: SurfaceView?
+            
+            init(_ target: SurfaceView) {
+                self.target = target
+            }
+            
+            @objc func tick(_ displayLink: CADisplayLink) {
+                if let target = target {
+                    target.updateScrollMomentum()
+                } else {
+                    // Target was deallocated — clean up the display link
+                    displayLink.invalidate()
+                }
+            }
+        }
+        
         private func startScrollMomentum(velocity: CGFloat) {
             guard abs(velocity) > scrollMinVelocity else { return }
             
@@ -842,13 +864,16 @@ extension Ghostty {
             momentumFrameCount = 0
             
             scrollDisplayLink?.invalidate()
-            scrollDisplayLink = CADisplayLink(target: self, selector: #selector(updateScrollMomentum))
+            let proxy = DisplayLinkProxy(self)
+            scrollDisplayLinkProxy = proxy
+            scrollDisplayLink = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick))
             scrollDisplayLink?.add(to: .main, forMode: .common)
         }
         
         private func stopScrollMomentum() {
             scrollDisplayLink?.invalidate()
             scrollDisplayLink = nil
+            scrollDisplayLinkProxy = nil
             scrollVelocity = 0
             initialMomentumVelocity = 0
             momentumFrameCount = 0
@@ -940,7 +965,7 @@ extension Ghostty {
         /// Track where mouse was clicked (for determining if it was a click vs drag)
         private var mouseClickPoint: CGPoint = .zero
         
-        @objc private func updateScrollMomentum() {
+        private func updateScrollMomentum() {
             guard let surface = surface else {
                 stopScrollMomentum()
                 return
@@ -1680,6 +1705,11 @@ extension Ghostty {
             // Remove notification observers
             NotificationCenter.default.removeObserver(self)
             
+            // Stop all timers and subscriptions (safety net if close() wasn't called)
+            stopKeyRepeat()
+            scrollIndicatorHideTimer?.invalidate()
+            searchNeedleCancellable = nil
+            
             // Clear callbacks to prevent invocations during/after free
             onWrite = nil
             onResize = nil
@@ -1702,10 +1732,20 @@ extension Ghostty {
             guard let surface = surface else { return }
             
             // Invalidate the display link to break the retain cycle
-            // (CADisplayLink strongly retains its target)
+            // (CADisplayLink strongly retains its target via proxy)
             stopScrollMomentum()
             selectionResetTimer?.invalidate()
             selectionResetTimer = nil
+            
+            // Stop key repeat timers (repeating timer would fire indefinitely)
+            stopKeyRepeat()
+            
+            // Invalidate scroll indicator hide timer
+            scrollIndicatorHideTimer?.invalidate()
+            scrollIndicatorHideTimer = nil
+            
+            // Cancel search subscription to break Combine pipeline references
+            searchNeedleCancellable = nil
             
             // Clear callbacks to prevent invocations during/after free
             onWrite = nil

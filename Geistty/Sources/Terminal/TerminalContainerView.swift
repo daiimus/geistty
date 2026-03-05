@@ -407,7 +407,9 @@ class TerminalViewModel: ObservableObject {
     func clearScreen() {
         guard let surface = surfaceView?.surface else { return }
         let action = "clear_screen"
-        ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+        action.withCString { cstr in
+            ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
+        }
     }
     
     /// Jump to the next or previous shell prompt (requires OSC 133 shell integration).
