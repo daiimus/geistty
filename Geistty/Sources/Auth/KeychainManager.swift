@@ -249,6 +249,86 @@ class KeychainManager {
         logger.info("🗑️ Deleted SSH key '\(name)'")
     }
     
+    // MARK: - Secure Enclave Key Storage
+    
+    /// Save a Secure Enclave key's data representation to the Keychain.
+    ///
+    /// SE key `dataRepresentation` is an opaque blob — NOT raw key material.
+    /// It can only reconstruct the key on the same device's Secure Enclave.
+    /// We store it as a generic password keyed by `se-key:<name>`.
+    func saveSecureEnclaveKey(_ dataRepresentation: Data, name: String) throws {
+        let account = "se-key:\(name)"
+        
+        // Delete existing first
+        try? deleteSecureEnclaveKey(name: name)
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: dataRepresentation,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        
+        let status = SecItemAdd(query as CFDictionary, nil)
+        
+        guard status == errSecSuccess else {
+            logger.error("❌ Failed to save SE key '\(name)': OSStatus \(status)")
+            throw KeychainError.unexpectedStatus(status)
+        }
+        
+        logger.info("💾 Saved Secure Enclave key '\(name)'")
+    }
+    
+    /// Retrieve a Secure Enclave key's data representation from the Keychain.
+    func getSecureEnclaveKey(name: String) throws -> Data {
+        let account = "se-key:\(name)"
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        guard status == errSecSuccess else {
+            if status == errSecItemNotFound {
+                logger.warning("🔑 SE key '\(name)' not found in keychain")
+                throw KeychainError.itemNotFound
+            }
+            throw KeychainError.unexpectedStatus(status)
+        }
+        
+        guard let data = result as? Data else {
+            throw KeychainError.dataConversionError
+        }
+        
+        logger.info("🔑 Retrieved SE key '\(name)'")
+        return data
+    }
+    
+    /// Delete a Secure Enclave key's data representation from the Keychain.
+    func deleteSecureEnclaveKey(name: String) throws {
+        let account = "se-key:\(name)"
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+        
+        logger.info("🗑️ Deleted SE key '\(name)'")
+    }
+    
     /// List all saved SSH key names
     func listSSHKeys() -> [String] {
         var keyNames: Set<String> = []

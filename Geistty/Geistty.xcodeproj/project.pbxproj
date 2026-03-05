@@ -43,6 +43,7 @@
 		A1000022 /* ConnectionProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* ConnectionProfile.swift */; };
 		A1000023 /* CredentialProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* CredentialProvider.swift */; };
 		A1000024 /* SSHKeyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* SSHKeyParser.swift */; };
+		A1000025 /* BiometricGatekeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025 /* BiometricGatekeeper.swift */; };
 		A1000030 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* ConnectionListView.swift */; };
 		A1000031 /* ConnectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* ConnectionEditorView.swift */; };
 		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
@@ -180,6 +181,7 @@
 		A2000022 /* ConnectionProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionProfile.swift; sourceTree = "<group>"; };
 		A2000023 /* CredentialProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialProvider.swift; sourceTree = "<group>"; };
 		A2000024 /* SSHKeyParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyParser.swift; sourceTree = "<group>"; };
+		A2000025 /* BiometricGatekeeper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricGatekeeper.swift; sourceTree = "<group>"; };
 		A2000030 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
 		A2000031 /* ConnectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEditorView.swift; sourceTree = "<group>"; };
 		A2000050 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -373,6 +375,7 @@
 				A2000022 /* ConnectionProfile.swift */,
 				A2000023 /* CredentialProvider.swift */,
 				A2000024 /* SSHKeyParser.swift */,
+				A2000025 /* BiometricGatekeeper.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -660,6 +663,7 @@
 				A1000022 /* ConnectionProfile.swift in Sources */,
 				A1000023 /* CredentialProvider.swift in Sources */,
 				A1000024 /* SSHKeyParser.swift in Sources */,
+				A1000025 /* BiometricGatekeeper.swift in Sources */,
 				A1000030 /* ConnectionListView.swift in Sources */,
 				A1000031 /* ConnectionEditorView.swift in Sources */,
 				A1000050 /* SettingsView.swift in Sources */,
