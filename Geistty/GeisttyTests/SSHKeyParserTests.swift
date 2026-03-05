@@ -565,4 +565,86 @@ final class SSHKeyParserTests: XCTestCase {
         let parsed = try SSHKeyParser.parsePrivateKey(pemData)
         XCTAssertNotNil(parsed, "Should handle whitespace around base64 lines")
     }
+    
+    // MARK: - parsePrivateKeyWithPublicKey Tests
+    
+    func testParseEd25519WithPublicKeyExtraction() throws {
+        // Generate a real Ed25519 key, build PEM, and verify parsePrivateKeyWithPublicKey
+        // returns the correct public key string and key type
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let seed = privateKey.rawRepresentation
+        let publicKey = privateKey.publicKey.rawRepresentation
+        
+        let pubBlob = buildEd25519PublicKeyBlob(publicKey)
+        let privSection = buildEd25519PrivateSection(seed: seed, publicKey: publicKey, comment: "import-test")
+        let pem = buildOpenSSHPEM(keyType: "ssh-ed25519", publicKeyBlob: pubBlob, privateSection: privSection)
+        let pemData = pem.data(using: .utf8)!
+        
+        let result = try SSHKeyParser.parsePrivateKeyWithPublicKey(pemData, comment: "my-key")
+        
+        // Key type should be ed25519
+        XCTAssertEqual(result.keyType, .ed25519, "Should detect Ed25519 key type")
+        
+        // Public key string should be in authorized_keys format
+        XCTAssertTrue(result.publicKeyString.hasPrefix("ssh-ed25519 "),
+                     "Public key should start with 'ssh-ed25519 ', got: \(result.publicKeyString.prefix(30))")
+        
+        // Should have base64 section that decodes
+        let parts = result.publicKeyString.split(separator: " ")
+        XCTAssertGreaterThanOrEqual(parts.count, 2)
+        XCTAssertNotNil(Data(base64Encoded: String(parts[1])))
+        
+        // NIO key should be non-nil
+        XCTAssertNotNil(result.privateKey)
+    }
+    
+    func testParseECDSAP256WithPublicKeyExtraction() throws {
+        // Generate ECDSA P-256 key, build PEM, verify parsePrivateKeyWithPublicKey
+        let privateKey = P256.Signing.PrivateKey()
+        
+        let pubBlob = buildECDSAP256PublicKeyBlob(privateKey.publicKey)
+        let privSection = buildECDSAP256PrivateSection(privateKey: privateKey, comment: "ecdsa-test")
+        let pem = buildOpenSSHPEM(keyType: "ecdsa-sha2-nistp256", publicKeyBlob: pubBlob, privateSection: privSection)
+        let pemData = pem.data(using: .utf8)!
+        
+        let result = try SSHKeyParser.parsePrivateKeyWithPublicKey(pemData, comment: "ecdsa-import")
+        
+        // Key type should be ecdsa
+        XCTAssertEqual(result.keyType, .ecdsa, "Should detect ECDSA key type")
+        
+        // Public key string should be in authorized_keys format
+        XCTAssertTrue(result.publicKeyString.hasPrefix("ecdsa-sha2-nistp256 "),
+                     "Public key should start with 'ecdsa-sha2-nistp256 ', got: \(result.publicKeyString.prefix(40))")
+        
+        // Should have base64 section that decodes
+        let parts = result.publicKeyString.split(separator: " ")
+        XCTAssertGreaterThanOrEqual(parts.count, 2)
+        XCTAssertNotNil(Data(base64Encoded: String(parts[1])))
+    }
+    
+    func testParseECDSAP256PEMWithPublicKeyExtraction() throws {
+        // Test the EC PRIVATE KEY PEM path (CryptoKit's native format)
+        let privateKey = P256.Signing.PrivateKey()
+        let pemString = privateKey.pemRepresentation
+        let pemData = pemString.data(using: .utf8)!
+        
+        let result = try SSHKeyParser.parsePrivateKeyWithPublicKey(pemData, comment: "pem-import")
+        
+        XCTAssertEqual(result.keyType, .ecdsa, "EC PRIVATE KEY PEM should be detected as ECDSA")
+        XCTAssertTrue(result.publicKeyString.hasPrefix("ecdsa-sha2-nistp256 "),
+                     "Should extract ECDSA public key from PEM format")
+    }
+    
+    func testParseWithPublicKeyRejectsEncryptedKey() {
+        // parsePrivateKeyWithPublicKey should throw on encrypted keys without passphrase
+        let encryptedPEM = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", "ENCRYPTED-b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0")
+        let pemData = encryptedPEM.data(using: .utf8)!
+        
+        XCTAssertThrowsError(try SSHKeyParser.parsePrivateKeyWithPublicKey(pemData, comment: "test")) { error in
+            guard case SSHKeyParseError.encryptedKeyNoPassphrase = error else {
+                XCTFail("Expected encryptedKeyNoPassphrase error, got \(error)")
+                return
+            }
+        }
+    }
 }
