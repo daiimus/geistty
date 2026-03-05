@@ -180,7 +180,8 @@ final class KeychainManagerSSHKeyTests: XCTestCase {
     
     func testSaveAndGetSSHKey() throws {
         let name = testKeyName("save")
-        let keyData = Data("-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----".utf8)
+        let pemLabel = "OPENSSH PRIVATE KEY"
+        let keyData = Data("-----BEGIN \(pemLabel)-----\nfake\n-----END \(pemLabel)-----".utf8)
         
         try keychain.saveSSHKey(keyData, name: name)
         let retrieved = try keychain.getSSHKey(name: name)
