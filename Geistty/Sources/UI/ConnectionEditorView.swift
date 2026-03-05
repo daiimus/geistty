@@ -468,6 +468,8 @@ struct PublicKeyView: View {
     
     let keyInfo: SSHKeyPair
     @State private var publicKey: String
+    @State private var copied = false
+    @State private var showingInstaller = false
     
     init(keyInfo: SSHKeyPair) {
         self.keyInfo = keyInfo
@@ -478,6 +480,28 @@ struct PublicKeyView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // Key info header
+                    HStack {
+                        Image(systemName: keyInfo.isSecureEnclave ? "lock.shield.fill" : "key.fill")
+                            .foregroundColor(keyInfo.isSecureEnclave ? .green : .accentColor)
+                            .font(.title2)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(keyInfo.name)
+                                .font(.headline)
+                            HStack(spacing: 4) {
+                                Text(keyInfo.type.displayName)
+                                if keyInfo.isSecureEnclave {
+                                    Text("• Secure Enclave")
+                                        .foregroundColor(.green)
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                    
                     Text("Add this public key to your server's ~/.ssh/authorized_keys file:")
                         .foregroundColor(.secondary)
                     
@@ -488,13 +512,31 @@ struct PublicKeyView: View {
                         .cornerRadius(8)
                         .textSelection(.enabled)
                     
-                    Button {
-                        UIPasteboard.general.string = publicKey
-                    } label: {
-                        Label("Copy to Clipboard", systemImage: "doc.on.doc")
-                            .frame(maxWidth: .infinity)
+                    // Action buttons
+                    VStack(spacing: 12) {
+                        Button {
+                            UIPasteboard.general.string = publicKey
+                            copied = true
+                            // Reset after 2 seconds
+                            Task {
+                                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                copied = false
+                            }
+                        } label: {
+                            Label(copied ? "Copied!" : "Copy to Clipboard", systemImage: copied ? "checkmark" : "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(copied ? .green : .accentColor)
+                        
+                        Button {
+                            showingInstaller = true
+                        } label: {
+                            Label("Install on Server...", systemImage: "server.rack")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .padding()
             }
@@ -507,7 +549,11 @@ struct PublicKeyView: View {
                     }
                 }
             }
-
+            .sheet(isPresented: $showingInstaller) {
+                NavigationStack {
+                    PublicKeyInstallerView(publicKey: publicKey, keyName: keyInfo.name)
+                }
+            }
         }
     }
 }
@@ -811,6 +857,210 @@ struct SSHKeyImportPicker: UIViewControllerRepresentable {
         
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             // Just dismiss, no action needed
+        }
+    }
+}
+
+// MARK: - Public Key Installer View
+
+struct PublicKeyInstallerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var profileManager = ConnectionProfileManager.shared
+    
+    let publicKey: String
+    let keyName: String
+    
+    // Server fields
+    @State private var host = ""
+    @State private var port = "22"
+    @State private var username = ""
+    @State private var password = ""
+    
+    // State
+    @State private var installState: InstallState = .idle
+    @State private var selectedProfileId: UUID?
+    
+    enum InstallState: Equatable {
+        case idle
+        case connecting
+        case installing
+        case success
+        case failed(String)
+    }
+    
+    var body: some View {
+        Form {
+            // Quick fill from existing profiles
+            if !profileManager.profiles.isEmpty {
+                Section {
+                    Picker("Fill from profile", selection: $selectedProfileId) {
+                        Text("Manual entry").tag(nil as UUID?)
+                        ForEach(profileManager.profiles) { profile in
+                            Text(profile.displayString).tag(profile.id as UUID?)
+                        }
+                    }
+                    .onChange(of: selectedProfileId) { _, newValue in
+                        if let id = newValue,
+                           let profile = profileManager.profiles.first(where: { $0.id == id }) {
+                            host = profile.host
+                            port = String(profile.port)
+                            username = profile.username
+                        }
+                    }
+                } header: {
+                    Text("Quick Fill")
+                } footer: {
+                    Text("Select a saved connection to auto-fill server details.")
+                }
+            }
+            
+            Section {
+                TextField("Host", text: $host)
+                    .textContentType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .disabled(isWorking)
+                
+                TextField("Port", text: $port)
+                    .keyboardType(.numberPad)
+                    .disabled(isWorking)
+                
+                TextField("Username", text: $username)
+                    .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .disabled(isWorking)
+                
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+                    .disabled(isWorking)
+            } header: {
+                Text("Server")
+            } footer: {
+                Text("Password is required because the key is not yet installed on this server. It is used only for this operation and is not saved.")
+            }
+            
+            Section {
+                Text(publicKey)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(3)
+            } header: {
+                Text("Key to Install")
+            } footer: {
+                Text("This key will be appended to ~/.ssh/authorized_keys on the server.")
+            }
+            
+            Section {
+                Button {
+                    installKey()
+                } label: {
+                    HStack {
+                        switch installState {
+                        case .idle, .failed:
+                            Label("Install Key", systemImage: "arrow.up.circle.fill")
+                        case .connecting:
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Connecting...")
+                        case .installing:
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Installing...")
+                        case .success:
+                            Label("Installed!", systemImage: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .disabled(!canInstall)
+                
+                if case .failed(let message) = installState {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+                
+                if case .success = installState {
+                    Text("Public key has been added to the server. You can now connect using key-based authentication.")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+            }
+        }
+        .navigationTitle("Install on Server")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(installState == .success ? "Done" : "Cancel") {
+                    dismiss()
+                }
+            }
+        }
+    }
+    
+    private var isWorking: Bool {
+        installState == .connecting || installState == .installing
+    }
+    
+    private var canInstall: Bool {
+        !host.isEmpty && !username.isEmpty && !password.isEmpty &&
+        (Int(port) ?? 0) > 0 && (Int(port) ?? 0) <= 65535 &&
+        !isWorking && installState != .success
+    }
+    
+    private func installKey() {
+        guard canInstall else { return }
+        
+        let targetHost = host
+        let targetPort = Int(port) ?? 22
+        let targetUsername = username
+        let targetPassword = password
+        let keyToInstall = publicKey
+        
+        // Shell-escape the public key to prevent injection.
+        // Single quotes prevent all shell interpretation; any literal single quotes
+        // in the key (unlikely but possible in comments) are handled by ending the
+        // single-quoted string, adding an escaped single quote, and resuming.
+        let escapedKey = keyToInstall.replacingOccurrences(of: "'", with: "'\\''")
+        
+        // The install command:
+        // 1. Create ~/.ssh if it doesn't exist (with correct permissions)
+        // 2. Append the public key
+        // 3. Ensure correct permissions on authorized_keys
+        // 4. Echo a marker so we can verify success even without exit status
+        let installCommand = """
+            mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+            echo '\(escapedKey)' >> ~/.ssh/authorized_keys && \
+            chmod 600 ~/.ssh/authorized_keys && \
+            echo 'GEISTTY_KEY_INSTALLED'
+            """
+        
+        installState = .connecting
+        
+        Task {
+            do {
+                let runner = SSHCommandRunner(
+                    host: targetHost,
+                    port: targetPort,
+                    username: targetUsername
+                )
+                
+                await MainActor.run { installState = .installing }
+                
+                let result = try await runner.run(command: installCommand, password: targetPassword)
+                
+                if result.succeeded || result.stdout.contains("GEISTTY_KEY_INSTALLED") {
+                    installState = .success
+                } else {
+                    let errorMsg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    installState = .failed(errorMsg.isEmpty
+                        ? "Command failed with exit code \(result.exitStatus ?? -1)"
+                        : errorMsg)
+                }
+            } catch {
+                installState = .failed(error.localizedDescription)
+            }
         }
     }
 }
