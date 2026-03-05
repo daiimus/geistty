@@ -56,8 +56,8 @@ struct TerminalContainerView: View {
         if let existingSession = appState.sshSession {
             logger.info("🔌 Using pre-connected session")
             terminalViewModel.useExistingSession(existingSession)
-        } else if case .connected = appState.connectionStatus,
-           let host = appState.currentHost,
+            appState.connectionStatus = .connected
+        } else if let host = appState.currentHost,
            let port = appState.currentPort,
            let username = appState.currentUsername {
             logger.info("🔌 Initiating SSH connection to \(host):\(port) as \(username)")
@@ -65,7 +65,13 @@ struct TerminalContainerView: View {
                 host: host,
                 port: port,
                 username: username,
-                password: appState.currentPassword
+                password: appState.currentPassword,
+                onConnected: { [weak appState] in
+                    appState?.connectionStatus = .connected
+                },
+                onError: { [weak appState] error in
+                    appState?.connectionStatus = .error(error)
+                }
             )
         } else {
             logger.warning("🔌 Not connecting - no session or params available")
@@ -185,7 +191,9 @@ class TerminalViewModel: ObservableObject {
         lifecycleObservers.append(activeObserver)
     }
     
-    func connect(host: String, port: Int, username: String, password: String?) {
+    func connect(host: String, port: Int, username: String, password: String?,
+                 onConnected: @escaping @MainActor () -> Void = {},
+                 onError: @escaping @MainActor (String) -> Void = { _ in }) {
         logger.info("TerminalViewModel.connect called - \(host):\(port) user=\(username)")
         Task {
             do {
@@ -205,6 +213,7 @@ class TerminalViewModel: ObservableObject {
                 
                 logger.info("SSH connected successfully!")
                 isConnected = true
+                onConnected()
                 
                 // Auto-start wire diagnostics for tmux sessions
                 if sshSession?.isTmuxSession == true {
@@ -228,6 +237,7 @@ class TerminalViewModel: ObservableObject {
             } catch {
                 logger.error("❌ SSH connection failed: \(error.localizedDescription)")
                 isConnected = false
+                onError(error.localizedDescription)
             }
         }
     }
@@ -1025,6 +1035,7 @@ class RawTerminalUIViewController: UIViewController {
         transitionToSingleSurfaceMode()
         
         viewModel?.disconnect()
+        viewModel?.surfaceView?.close()
         viewModel?.surfaceView = nil
     }
     

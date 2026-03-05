@@ -1388,6 +1388,8 @@ extension Ghostty {
         /// Uses proper Ghostty keyboard API for correct terminal encoding
         /// Implements Ghostty macOS keybindings for splits/tabs/windows
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            var handledPresses = Set<UIPress>()
+            
             for press in presses {
                 guard let uiKey = press.key else { continue }
                 
@@ -1478,7 +1480,8 @@ extension Ghostty {
                     if let action = action {
                         if delegate.handleShortcut(action) {
                             // Action was handled, don't process further
-                            return
+                            handledPresses.insert(press)
+                            continue
                         }
                     }
                 }
@@ -1496,7 +1499,8 @@ extension Ghostty {
                                 ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
                             }
                         }
-                        return
+                        handledPresses.insert(press)
+                        continue
                     } else if keyCode == .keyboardDownArrow {
                         if let surface = surface {
                             let action = "jump_to_prompt:1"
@@ -1504,7 +1508,8 @@ extension Ghostty {
                                 ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
                             }
                         }
-                        return
+                        handledPresses.insert(press)
+                        continue
                     }
                 }
                 
@@ -1518,32 +1523,37 @@ extension Ghostty {
                                 ghostty_surface_binding_action(surface, cstr, UInt(action.utf8.count))
                             }
                         }
-                        return
+                        handledPresses.insert(press)
+                        continue
                     case "0":
                         // Cmd+0 - Reset Font Size
                         resetFontSize()
-                        return
+                        handledPresses.insert(press)
+                        continue
                     case "+", "=":
                         // Cmd++ - Increase Font Size
                         if !hasShift {
                             increaseFontSize()
-                            return
+                            handledPresses.insert(press)
+                            continue
                         }
                     case "-":
                         // Cmd+- - Decrease Font Size
                         decreaseFontSize()
-                        return
+                        handledPresses.insert(press)
+                        continue
                     case "p":
                         // Cmd+Shift+P - Toggle Command Palette
                         if hasShift {
                             NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
-                            return
+                            handledPresses.insert(press)
+                            continue
                         }
                     case "c", "v", "a", "f", "g", "w", "n", ",":
                         // These are handled by SwiftUI menu system - let them pass through
                         // Copy, Paste, Select All, Find, Find Next, Disconnect, New Connection, Preferences
-                        super.pressesBegan(presses, with: event)
-                        return
+                        // Don't mark as handled — will be passed to super below
+                        continue
                     default:
                         break
                     }
@@ -1585,12 +1595,16 @@ extension Ghostty {
                     
                     // Start key repeat timer
                     startKeyRepeat(for: finalEvent)
-                    return
+                    handledPresses.insert(press)
+                    continue
                 }
             }
             
             // Pass unhandled keys to super (system shortcuts, etc.)
-            super.pressesBegan(presses, with: event)
+            let unhandled = presses.subtracting(handledPresses)
+            if !unhandled.isEmpty {
+                super.pressesBegan(unhandled, with: event)
+            }
         }
         
         /// Start key repeat after initial delay
@@ -1702,6 +1716,11 @@ extension Ghostty {
         }
         
         deinit {
+            // Assert that close() was called before deinit — surface should already
+            // be freed synchronously on the main thread. If this fires, we have a
+            // code path that drops SurfaceView without calling close() first.
+            assert(surface == nil, "SurfaceView.deinit reached with live surface — close() was not called")
+            
             // Remove notification observers
             NotificationCenter.default.removeObserver(self)
             

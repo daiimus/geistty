@@ -284,7 +284,12 @@ extension Ghostty {
                     return false
                 }
                 
-                let urlStr = String(cString: urlPtr)
+                // Use length-bounded construction — urlPtr may not be null-terminated
+                let urlLen = Int(urlData.len)
+                let urlStr = urlPtr.withMemoryRebound(to: UInt8.self, capacity: urlLen) { ptr in
+                    String(bytes: UnsafeBufferPointer(start: ptr, count: urlLen), encoding: .utf8)
+                } ?? ""
+                guard !urlStr.isEmpty else { return false }
                 logger.info("🔗 Opening URL: \(urlStr)")
                 
                 DispatchQueue.main.async {

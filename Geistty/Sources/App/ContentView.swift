@@ -60,7 +60,7 @@ struct ContentView: View {
         // When connected, show ONLY the terminal - no NavigationStack, no chrome
         // This ensures the DisconnectedView is completely removed from hierarchy
         Group {
-            if appState.connectionStatus == .connected {
+            if appState.connectionStatus == .connected || appState.connectionStatus == .connecting {
                 TerminalContainerView()
                     .background(themeBackground)
                     .ignoresSafeArea()
@@ -75,10 +75,8 @@ struct ContentView: View {
                                 showConnectionList: $showConnectionList,
                                 backgroundColor: themeBackground
                             )
-                        case .connecting:
-                            ConnectingView(backgroundColor: themeBackground)
-                        case .connected:
-                            // Unreachable: handled by outer `if` — required for exhaustiveness
+                        case .connecting, .connected:
+                            // Both handled by outer `if` — required for exhaustiveness
                             EmptyView()
                         case .error(let message):
                             ErrorView(
@@ -157,14 +155,18 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalReconnect)) { _ in
             guard scenePhase == .active else { return }
-            // Reconnect using stored credentials via SSHSession
+            // Reconnect using stored credentials via SSHSession.
+            // Setting .connecting mounts TerminalContainerView, which wires up
+            // the existing session via setupConnection() → useExistingSession().
+            // The actual reconnect happens on the session; state transitions to
+            // .connected once the terminal view mounts and finds the session.
             if let session = appState.sshSession, session.canReconnect {
                 appState.connectionStatus = .connecting
                 Task {
                     await session.attemptReconnect()
-                    if session.state != .disconnected {
-                        appState.connectionStatus = .connected
-                    } else {
+                    // If reconnect failed and we're still in .connecting, transition
+                    // to error. If it succeeded, setupConnection() already set .connected.
+                    if session.state == .disconnected && appState.connectionStatus == .connecting {
                         appState.connectionStatus = .error("Reconnect failed")
                     }
                 }
@@ -205,23 +207,11 @@ struct ContentView: View {
             password: connectionInfo.password
         )
         
-        // Route through .connecting state (C4 fix) — TerminalContainerView handles
-        // the actual SSH handshake and transitions to .connected on success,
-        // or .error on failure.
+        // Transition to .connecting — TerminalContainerView mounts immediately
+        // and initiates the SSH handshake. It transitions to .connected on success
+        // or .error on failure via setupConnection().
         appState.connectionStatus = .connecting
         showConnectionSheet = false
-        
-        // Transition to .connected after a brief moment to show connecting UI.
-        // The terminal view shows its own connecting indicator while SSH handshake happens.
-        // We move to .connected quickly so TerminalContainerView gets mounted and can
-        // begin the SSH connection internally.
-        Task { @MainActor in
-            // Small delay so the .connecting UI is visible
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            if appState.connectionStatus == .connecting {
-                appState.connectionStatus = .connected
-            }
-        }
     }
     
     /// Disconnect the active SSH session and reset to disconnected state (C3 fix).

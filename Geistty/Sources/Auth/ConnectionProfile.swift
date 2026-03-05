@@ -257,8 +257,13 @@ class ConnectionProfileManager: ObservableObject {
         saveProfiles()
     }
     
-    /// Delete profiles by ID
+    /// Delete profiles by index set
     func deleteProfiles(at offsets: IndexSet) {
+        // Record tombstones before removal so iCloud sync won't resurrect them
+        for index in offsets {
+            deletedProfileIds.insert(profiles[index].id)
+        }
+        saveDeletedProfileIds()
         profiles.remove(atOffsets: offsets)
         saveProfiles()
     }
@@ -310,9 +315,11 @@ class ConnectionProfileManager: ObservableObject {
         // Try loading from iCloud first if available
         if iCloudSyncEnabled, let data = iCloudStore.data(forKey: iCloudStorageKey),
            let decoded = try? JSONDecoder().decode([ConnectionProfile].self, from: data) {
-            profiles = decoded
+            // Filter out tombstoned profiles — they were deleted locally but may
+            // still exist in iCloud until the next sync pushes our deletion.
+            profiles = decoded.filter { !deletedProfileIds.contains($0.id) }
             // Also save to local as backup
-            saveToLocal(decoded)
+            saveToLocal(profiles)
             return
         }
         
