@@ -135,6 +135,7 @@ build_device() {
         -project "$PROJECT" \
         -scheme "$SCHEME" \
         -destination "platform=iOS,name=$DEVICE_NAME" \
+        -derivedDataPath "$DERIVED_DATA" \
         -allowProvisioningUpdates \
         CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION=YES \
         2>&1 | tee /tmp/geistty_device_build.log | tail -30
@@ -161,11 +162,11 @@ install_device() {
         return 1
     fi
     
-    # Find the built app
-    APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Geistty.app" -path "*/Debug-iphoneos/*" 2>/dev/null | head -1)
+    # Find the built app in the CI derived data directory
+    APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphoneos/Geistty.app"
     
-    if [ -z "$APP_PATH" ]; then
-        log_error "No built app found. Run 'build_device' first."
+    if [ ! -d "$APP_PATH" ]; then
+        log_error "No built app found at $APP_PATH. Run 'device-build' first."
         return 1
     fi
     
@@ -191,11 +192,11 @@ deploy_device() {
     resolve_packages
     build_device "$DEVICE_NAME" || return 1
 
-    # Find the built app
-    APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Geistty.app" -path "*/Debug-iphoneos/*" 2>/dev/null | head -1)
+    # Find the built app in the CI derived data directory
+    APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphoneos/Geistty.app"
 
-    if [ -z "$APP_PATH" ]; then
-        log_error "No built app found after successful build"
+    if [ ! -d "$APP_PATH" ]; then
+        log_error "No built app found at $APP_PATH after successful build"
         return 1
     fi
 
