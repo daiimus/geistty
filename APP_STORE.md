@@ -128,7 +128,7 @@ Content: See PRIVACY.md in this repository
 
 ## Support URL
 
-GitHub repository: https://github.com/yourusername/geistty
+GitHub repository: https://github.com/daiimus/geistty
 Or create a simple landing page
 
 ## App Review Information
