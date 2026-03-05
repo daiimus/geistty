@@ -278,8 +278,9 @@ class AppState: ObservableObject {
     @Published var currentHost: String?
     @Published var currentPort: Int?
     @Published var currentUsername: String?
-    // Not @Published — password should not be observable or persisted in Combine buffers
-    var currentPassword: String?
+    // Not @Published — password should not be observable or persisted in Combine buffers.
+    // Stored as Data for explicit zeroing on clear. See #28.
+    var currentPassword: Data?
     
     enum ConnectionStatus: Equatable {
         case disconnected
@@ -295,15 +296,23 @@ class AppState: ObservableObject {
         currentHost = host
         currentPort = port
         currentUsername = username
-        currentPassword = password
+        currentPassword = password.flatMap { $0.data(using: .utf8) }
     }
     
-    /// Clear connection parameters
+    /// Clear connection parameters — zeroes password bytes before releasing. See #28.
     func clearConnectionParams() {
         currentHost = nil
         currentPort = nil
         currentUsername = nil
-        currentPassword = nil
+        zeroAndClearPassword()
         sshSession = nil
+    }
+    
+    /// Zero the password buffer in-place before releasing. Data is a value type —
+    /// mutating it directly ensures the backing store is overwritten. See #28.
+    func zeroAndClearPassword() {
+        guard currentPassword != nil else { return }
+        currentPassword!.resetBytes(in: 0..<currentPassword!.count)
+        currentPassword = nil
     }
 }
