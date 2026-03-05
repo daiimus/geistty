@@ -371,8 +371,8 @@ extension Ghostty {
                 if let userdata = ghostty_surface_userdata(surface) {
                     let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
                     DispatchQueue.main.async {
-                        surfaceView.healthy = (health == GHOSTTY_RENDERER_HEALTH_OK)
-                        if health != GHOSTTY_RENDERER_HEALTH_OK {
+                        surfaceView.healthy = (health == GHOSTTY_RENDERER_HEALTH_HEALTHY)
+                        if health != GHOSTTY_RENDERER_HEALTH_HEALTHY {
                             logger.warning("⚠️ Renderer health issue: \(health.rawValue)")
                         }
                     }
