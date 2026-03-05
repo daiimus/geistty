@@ -19,7 +19,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the deep dive on how everything fits 
 
 ## Current State
 
-**Tag: `v0.1-stable`** -- deployed and confirmed working on iPad Pro (Icarus).
+**Tag: `v0.1-stable`** -- deployed and confirmed working on iOS.
 
 Everything below is implemented and functional:
 
