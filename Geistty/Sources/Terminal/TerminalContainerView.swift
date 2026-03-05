@@ -65,9 +65,12 @@ struct TerminalContainerView: View {
                 host: host,
                 port: port,
                 username: username,
-                password: appState.currentPassword,
+                password: appState.currentPassword.flatMap { String(data: $0, encoding: .utf8) },
                 onConnected: { [weak appState] in
                     appState?.connectionStatus = .connected
+                    // Zero and release password immediately after successful handshake.
+                    // It's no longer needed — reconnect uses SSHSession's stored creds. See #28.
+                    appState?.zeroAndClearPassword()
                 },
                 onError: { [weak appState] error in
                     appState?.connectionStatus = .error(error)

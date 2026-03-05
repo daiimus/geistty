@@ -82,7 +82,8 @@ struct ContentView: View {
                             ErrorView(
                                 message: message,
                                 showConnectionSheet: $showConnectionSheet,
-                                backgroundColor: themeBackground
+                                backgroundColor: themeBackground,
+                                onReconnect: reconnect
                             )
                         }
                     }
@@ -155,24 +156,7 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalReconnect)) { _ in
             guard scenePhase == .active else { return }
-            // Reconnect using stored credentials via SSHSession.
-            // Setting .connecting mounts TerminalContainerView, which wires up
-            // the existing session via setupConnection() → useExistingSession().
-            // The actual reconnect happens on the session; state transitions to
-            // .connected once the terminal view mounts and finds the session.
-            if let session = appState.sshSession, session.canReconnect {
-                appState.connectionStatus = .connecting
-                Task {
-                    await session.attemptReconnect()
-                    // If reconnect failed and we're still in .connecting, transition
-                    // to error. If it succeeded, setupConnection() already set .connected.
-                    if session.state == .disconnected && appState.connectionStatus == .connecting {
-                        appState.connectionStatus = .error("Reconnect failed")
-                    }
-                }
-            } else {
-                appState.connectionStatus = .error("No session available for reconnect")
-            }
+            reconnect()
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
             guard scenePhase == .active else { return }
@@ -220,6 +204,25 @@ struct ContentView: View {
         appState.sshSession?.disconnect()
         appState.clearConnectionParams()
         appState.connectionStatus = .disconnected
+    }
+    
+    /// Shared reconnect logic — used by both the notification handler and ErrorView
+    /// button. Checks canReconnect, transitions to .connecting, awaits reconnect,
+    /// and sets final state based on session outcome. See #27.
+    private func reconnect() {
+        guard let session = appState.sshSession, session.canReconnect else {
+            appState.connectionStatus = .error("No session available for reconnect")
+            return
+        }
+        appState.connectionStatus = .connecting
+        Task {
+            await session.attemptReconnect()
+            // If reconnect failed and we're still in .connecting, transition
+            // to error. If it succeeded, setupConnection() already set .connected.
+            if session.state == .disconnected && appState.connectionStatus == .connecting {
+                appState.connectionStatus = .error("Reconnect failed")
+            }
+        }
     }
 }
 
@@ -285,6 +288,8 @@ struct ErrorView: View {
     let message: String
     @Binding var showConnectionSheet: Bool
     let backgroundColor: Color
+    /// Shared reconnect action provided by ContentView. See #27.
+    let onReconnect: () -> Void
     @EnvironmentObject var appState: AppState
     
     /// Formatted connection info for display
@@ -324,18 +329,10 @@ struct ErrorView: View {
                 .padding(.horizontal)
             
             VStack(spacing: 12) {
-                // Reconnect button (uses stored SSH credentials)
+                // Reconnect button — delegates to shared reconnect() via closure. See #27.
                 if let session = appState.sshSession, session.canReconnect {
                     Button {
-                        Task {
-                            appState.connectionStatus = .connecting
-                            await session.attemptReconnect()
-                            if session.state != .disconnected {
-                                appState.connectionStatus = .connected
-                            } else {
-                                appState.connectionStatus = .error("Reconnect failed")
-                            }
-                        }
+                        onReconnect()
                     } label: {
                         Label("Reconnect", systemImage: "arrow.clockwise")
                             .frame(maxWidth: 200)
