@@ -29,8 +29,81 @@ enum SSHKeyParseError: LocalizedError {
     }
 }
 
+/// Result of parsing a private key, carrying both the NIO key and the extracted public key string
+struct SSHKeyParseResult {
+    let privateKey: NIOSSHPrivateKey
+    /// Public key in SSH authorized_keys format (e.g. "ssh-ed25519 AAAA... comment")
+    let publicKeyString: String
+    /// Detected key type for metadata
+    let keyType: SSHKeyType
+}
+
 /// Utility for parsing SSH private keys
 enum SSHKeyParser {
+    
+    /// Parse a private key from PEM data and extract public key + key type.
+    /// This is the preferred entry point for key import — it returns everything
+    /// needed to populate SSHKeyPair metadata without placeholder strings.
+    static func parsePrivateKeyWithPublicKey(_ data: Data, comment: String, passphrase: String? = nil) throws -> SSHKeyParseResult {
+        guard let pemString = String(data: data, encoding: .utf8) else {
+            throw SSHKeyParseError.invalidKey("Unable to read key as UTF-8")
+        }
+        
+        // Encrypted keys require passphrase handling
+        if pemString.contains("ENCRYPTED") && passphrase == nil {
+            throw SSHKeyParseError.encryptedKeyNoPassphrase
+        }
+        
+        // Try OpenSSH format first (most common modern format from ssh-keygen)
+        if pemString.contains("OPENSSH PRIVATE KEY") {
+            return try parseOpenSSHPrivateKeyFull(pemString, comment: comment, passphrase: passphrase)
+        }
+        
+        // Try RSA (common for cloud providers)
+        if pemString.contains("RSA PRIVATE KEY") || pemString.contains("BEGIN PRIVATE KEY") {
+            do {
+                let rsaKey = try _RSA.Signing.PrivateKey(pemRepresentation: pemString)
+                let nioKey = NIOSSHPrivateKey(rsaKey: rsaKey)
+                
+                // Determine key size from modulus bit count
+                let keySizeBits = rsaKey.keySizeInBits
+                let keyType: SSHKeyType = keySizeBits <= 2048 ? .rsa2048 : .rsa4096
+                
+                // Extract public key in SSH format
+                let publicKeyString = formatRSAPublicKeyFromCrypto(rsaKey, comment: comment)
+                
+                return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: keyType)
+            } catch {
+                if pemString.contains("BEGIN PRIVATE KEY") {
+                    logger.debug("[KeyParse] PKCS#8 key is not RSA, trying ECDSA...")
+                } else {
+                    throw SSHKeyParseError.invalidKey("Failed to parse RSA key: \(error.localizedDescription)")
+                }
+            }
+        }
+        
+        // Try ECDSA — matches both SEC1 ("EC PRIVATE KEY") and PKCS#8 ("BEGIN PRIVATE KEY")
+        if pemString.contains("EC PRIVATE KEY") || pemString.contains("BEGIN PRIVATE KEY") {
+            if let p256Key = try? P256.Signing.PrivateKey(pemRepresentation: pemString) {
+                let nioKey = NIOSSHPrivateKey(p256Key: p256Key)
+                let publicKeyString = formatP256PublicKeyStatic(p256Key.publicKey, comment: comment)
+                return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: .ecdsa)
+            }
+            if let p384Key = try? P384.Signing.PrivateKey(pemRepresentation: pemString) {
+                let nioKey = NIOSSHPrivateKey(p384Key: p384Key)
+                let publicKeyString = formatP384PublicKeyStatic(p384Key.publicKey, comment: comment)
+                return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: .ecdsa)
+            }
+            if let p521Key = try? P521.Signing.PrivateKey(pemRepresentation: pemString) {
+                let nioKey = NIOSSHPrivateKey(p521Key: p521Key)
+                let publicKeyString = formatP521PublicKeyStatic(p521Key.publicKey, comment: comment)
+                return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: .ecdsa)
+            }
+            throw SSHKeyParseError.unsupportedFormat("ECDSA key curve not supported")
+        }
+        
+        throw SSHKeyParseError.unsupportedFormat("Supported formats: RSA, ECDSA, Ed25519 (OpenSSH)")
+    }
     
     /// Parse a private key from PEM data
     static func parsePrivateKey(_ data: Data, passphrase: String? = nil) throws -> NIOSSHPrivateKey {
@@ -322,5 +395,330 @@ enum SSHKeyParser {
         default:
             throw SSHKeyParseError.unsupportedFormat("Key type \(keyType)")
         }
+    }
+    
+    // MARK: - Full Parse (with public key extraction)
+    
+    /// Parse OpenSSH private key and extract public key string + key type for import metadata.
+    private static func parseOpenSSHPrivateKeyFull(_ pemString: String, comment: String, passphrase: String?) throws -> SSHKeyParseResult {
+        logger.debug("[KeyParse] parseOpenSSHPrivateKeyFull: Starting")
+        
+        // Extract base64 content between PEM headers
+        let lines = pemString.components(separatedBy: .newlines)
+        var base64Content = ""
+        var inKey = false
+        
+        for line in lines {
+            if line.contains("BEGIN OPENSSH PRIVATE KEY") {
+                inKey = true
+                continue
+            }
+            if line.contains("END OPENSSH PRIVATE KEY") {
+                break
+            }
+            if inKey {
+                base64Content += line.trimmingCharacters(in: .whitespaces)
+            }
+        }
+        
+        guard let keyData = Data(base64Encoded: base64Content) else {
+            throw SSHKeyParseError.invalidKey("Failed to decode base64 key data")
+        }
+        
+        let authMagic = "openssh-key-v1\0"
+        guard let authMagicData = authMagic.data(using: .utf8),
+              keyData.starts(with: authMagicData) else {
+            throw SSHKeyParseError.invalidKey("Invalid OpenSSH key magic")
+        }
+        
+        var offset = authMagic.count
+        
+        let cipherName = try readString(from: keyData, at: &offset)
+        let _ = try readString(from: keyData, at: &offset) // kdfname
+        let _ = try readString(from: keyData, at: &offset) // kdfoptions
+        
+        let numKeys = try readUInt32(from: keyData, at: &offset)
+        guard numKeys == 1 else {
+            throw SSHKeyParseError.invalidKey("Multiple keys not supported")
+        }
+        
+        // Skip public key blob
+        let _ = try readBytes(from: keyData, at: &offset)
+        
+        // Read private key section
+        var privateData = try readBytes(from: keyData, at: &offset)
+        
+        if cipherName != "none" {
+            guard let passphrase = passphrase else {
+                throw SSHKeyParseError.encryptedKeyNoPassphrase
+            }
+            privateData = try decryptPrivateData(privateData, cipher: cipherName, kdf: "bcrypt", passphrase: passphrase)
+        }
+        
+        return try parsePrivateKeyDataFull(privateData, comment: comment)
+    }
+    
+    /// Parse unencrypted private key data section and extract public key + key type.
+    private static func parsePrivateKeyDataFull(_ data: Data, comment: String) throws -> SSHKeyParseResult {
+        var offset = 0
+        
+        let check1 = try readUInt32(from: data, at: &offset)
+        let check2 = try readUInt32(from: data, at: &offset)
+        guard check1 == check2 else {
+            throw SSHKeyParseError.invalidKey("Check bytes mismatch - wrong passphrase?")
+        }
+        
+        let keyType = try readString(from: data, at: &offset)
+        logger.debug("[KeyParse] Key type (full parse): \(keyType)")
+        
+        switch keyType {
+        case "ssh-ed25519":
+            let pubKey = try readBytes(from: data, at: &offset)
+            let privKey = try readBytes(from: data, at: &offset)
+            
+            guard pubKey.count == 32 else {
+                throw SSHKeyParseError.invalidKey("Invalid Ed25519 public key length: \(pubKey.count)")
+            }
+            guard privKey.count == 64 else {
+                throw SSHKeyParseError.invalidKey("Invalid Ed25519 private key length: \(privKey.count)")
+            }
+            
+            let seed = privKey.prefix(32)
+            let ed25519Key = try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+            let nioKey = NIOSSHPrivateKey(ed25519Key: ed25519Key)
+            
+            // Format public key: ssh-ed25519 <base64(keyblob)> comment
+            var pubBlob = Data()
+            appendSSHString(&pubBlob, "ssh-ed25519")
+            appendSSHBytes(&pubBlob, pubKey)
+            let publicKeyString = "ssh-ed25519 \(pubBlob.base64EncodedString()) \(comment)"
+            
+            return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: .ed25519)
+            
+        case "ecdsa-sha2-nistp256":
+            let curveName = try readString(from: data, at: &offset)
+            let pubKey = try readBytes(from: data, at: &offset)
+            let privKey = try readBytes(from: data, at: &offset)
+            
+            let strippedPriv = stripMPIntPadding(privKey)
+            let p256Key = try P256.Signing.PrivateKey(rawRepresentation: strippedPriv)
+            let nioKey = NIOSSHPrivateKey(p256Key: p256Key)
+            
+            var pubBlob = Data()
+            appendSSHString(&pubBlob, "ecdsa-sha2-nistp256")
+            appendSSHString(&pubBlob, curveName)
+            appendSSHBytes(&pubBlob, pubKey)
+            let publicKeyString = "ecdsa-sha2-nistp256 \(pubBlob.base64EncodedString()) \(comment)"
+            
+            return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: .ecdsa)
+            
+        case "ecdsa-sha2-nistp384":
+            let curveName = try readString(from: data, at: &offset)
+            let pubKey = try readBytes(from: data, at: &offset)
+            let privKey = try readBytes(from: data, at: &offset)
+            
+            let strippedPriv = stripMPIntPadding(privKey)
+            let p384Key = try P384.Signing.PrivateKey(rawRepresentation: strippedPriv)
+            let nioKey = NIOSSHPrivateKey(p384Key: p384Key)
+            
+            var pubBlob = Data()
+            appendSSHString(&pubBlob, "ecdsa-sha2-nistp384")
+            appendSSHString(&pubBlob, curveName)
+            appendSSHBytes(&pubBlob, pubKey)
+            let publicKeyString = "ecdsa-sha2-nistp384 \(pubBlob.base64EncodedString()) \(comment)"
+            
+            return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: .ecdsa)
+            
+        case "ecdsa-sha2-nistp521":
+            let curveName = try readString(from: data, at: &offset)
+            let pubKey = try readBytes(from: data, at: &offset)
+            let privKey = try readBytes(from: data, at: &offset)
+            
+            let strippedPriv = stripMPIntPadding(privKey)
+            let p521Key = try P521.Signing.PrivateKey(rawRepresentation: strippedPriv)
+            let nioKey = NIOSSHPrivateKey(p521Key: p521Key)
+            
+            var pubBlob = Data()
+            appendSSHString(&pubBlob, "ecdsa-sha2-nistp521")
+            appendSSHString(&pubBlob, curveName)
+            appendSSHBytes(&pubBlob, pubKey)
+            let publicKeyString = "ecdsa-sha2-nistp521 \(pubBlob.base64EncodedString()) \(comment)"
+            
+            return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: .ecdsa)
+            
+        case "ssh-rsa":
+            let n = try readBytes(from: data, at: &offset)
+            let e = try readBytes(from: data, at: &offset)
+            let d = try readBytes(from: data, at: &offset)
+            let _ = try readBytes(from: data, at: &offset) // iqmp
+            let p = try readBytes(from: data, at: &offset)
+            let q = try readBytes(from: data, at: &offset)
+            
+            let rsaKey = try _RSA.Signing.PrivateKey(
+                n: stripMPIntPadding(n),
+                e: stripMPIntPadding(e),
+                d: stripMPIntPadding(d),
+                p: stripMPIntPadding(p),
+                q: stripMPIntPadding(q)
+            )
+            let nioKey = NIOSSHPrivateKey(rsaKey: rsaKey)
+            
+            // Determine RSA key size from modulus
+            let modulusBytes = stripMPIntPadding(n)
+            let keySizeBits = modulusBytes.count * 8
+            let sshKeyType: SSHKeyType = keySizeBits <= 2048 ? .rsa2048 : .rsa4096
+            
+            // Format public key: ssh-rsa <base64(keyblob)> comment
+            // SSH wire format: string "ssh-rsa" + mpint e + mpint n
+            var pubBlob = Data()
+            appendSSHString(&pubBlob, "ssh-rsa")
+            appendSSHMPInt(&pubBlob, stripMPIntPadding(e))
+            appendSSHMPInt(&pubBlob, modulusBytes)
+            let publicKeyString = "ssh-rsa \(pubBlob.base64EncodedString()) \(comment)"
+            
+            return SSHKeyParseResult(privateKey: nioKey, publicKeyString: publicKeyString, keyType: sshKeyType)
+            
+        default:
+            throw SSHKeyParseError.unsupportedFormat("Key type \(keyType)")
+        }
+    }
+    
+    // MARK: - Static Public Key Formatting
+    
+    /// Format RSA public key in SSH authorized_keys format from a _CryptoExtras RSA key.
+    private static func formatRSAPublicKeyFromCrypto(_ rsaKey: _RSA.Signing.PrivateKey, comment: String) -> String {
+        // Get the PKCS#1 DER representation of the public key
+        let publicKeyDER = rsaKey.publicKey.pkcs1DERRepresentation
+        
+        // Parse the DER to extract n and e
+        guard let (modulus, exponent) = parseRSAPublicKeyDERStatic(publicKeyDER) else {
+            logger.error("[KeyParse] Failed to parse RSA public key DER for import")
+            return "# ERROR: Failed to extract RSA public key"
+        }
+        
+        var keyBlob = Data()
+        appendSSHString(&keyBlob, "ssh-rsa")
+        appendSSHMPInt(&keyBlob, exponent)
+        appendSSHMPInt(&keyBlob, modulus)
+        
+        return "ssh-rsa \(keyBlob.base64EncodedString()) \(comment)"
+    }
+    
+    /// Format a P-256 public key in SSH authorized_keys format (static version for parser use).
+    private static func formatP256PublicKeyStatic(_ publicKey: P256.Signing.PublicKey, comment: String) -> String {
+        let pointData = publicKey.x963Representation
+        var keyBlob = Data()
+        appendSSHString(&keyBlob, "ecdsa-sha2-nistp256")
+        appendSSHString(&keyBlob, "nistp256")
+        appendSSHBytes(&keyBlob, pointData)
+        return "ecdsa-sha2-nistp256 \(keyBlob.base64EncodedString()) \(comment)"
+    }
+    
+    /// Format a P-384 public key in SSH authorized_keys format.
+    private static func formatP384PublicKeyStatic(_ publicKey: P384.Signing.PublicKey, comment: String) -> String {
+        let pointData = publicKey.x963Representation
+        var keyBlob = Data()
+        appendSSHString(&keyBlob, "ecdsa-sha2-nistp384")
+        appendSSHString(&keyBlob, "nistp384")
+        appendSSHBytes(&keyBlob, pointData)
+        return "ecdsa-sha2-nistp384 \(keyBlob.base64EncodedString()) \(comment)"
+    }
+    
+    /// Format a P-521 public key in SSH authorized_keys format.
+    private static func formatP521PublicKeyStatic(_ publicKey: P521.Signing.PublicKey, comment: String) -> String {
+        let pointData = publicKey.x963Representation
+        var keyBlob = Data()
+        appendSSHString(&keyBlob, "ecdsa-sha2-nistp521")
+        appendSSHString(&keyBlob, "nistp521")
+        appendSSHBytes(&keyBlob, pointData)
+        return "ecdsa-sha2-nistp521 \(keyBlob.base64EncodedString()) \(comment)"
+    }
+    
+    // MARK: - Static SSH Wire Format Helpers
+    
+    /// Append SSH wire-format string (uint32 length + bytes) — static version for parser use.
+    private static func appendSSHString(_ data: inout Data, _ string: String) {
+        let bytes = Array(string.utf8)
+        var length = UInt32(bytes.count).bigEndian
+        data.append(Data(bytes: &length, count: 4))
+        data.append(contentsOf: bytes)
+    }
+    
+    /// Append SSH wire-format bytes (uint32 length + raw bytes) — static version for parser use.
+    private static func appendSSHBytes(_ data: inout Data, _ bytes: Data) {
+        var length = UInt32(bytes.count).bigEndian
+        data.append(Data(bytes: &length, count: 4))
+        data.append(bytes)
+    }
+    
+    /// Append SSH wire-format mpint (uint32 length + big-endian bytes with sign padding).
+    private static func appendSSHMPInt(_ data: inout Data, _ value: Data) {
+        var bytes = [UInt8](value)
+        
+        // Strip leading zeros (but keep at least one byte)
+        while bytes.count > 1 && bytes.first == 0x00 {
+            bytes.removeFirst()
+        }
+        
+        // If high bit is set, prepend a zero byte (positive sign)
+        let needsPadding = (bytes.first ?? 0) & 0x80 != 0
+        let totalLength = bytes.count + (needsPadding ? 1 : 0)
+        
+        var length = UInt32(totalLength).bigEndian
+        data.append(Data(bytes: &length, count: 4))
+        if needsPadding {
+            data.append(0x00)
+        }
+        data.append(contentsOf: bytes)
+    }
+    
+    /// Parse PKCS#1 DER-encoded RSA public key — static version for parser use.
+    private static func parseRSAPublicKeyDERStatic(_ data: Data) -> (modulus: Data, exponent: Data)? {
+        var offset = 0
+        let bytes = [UInt8](data)
+        
+        // SEQUENCE tag (0x30)
+        guard offset < bytes.count, bytes[offset] == 0x30 else { return nil }
+        offset += 1
+        guard let _ = readDERLengthStatic(bytes, offset: &offset) else { return nil }
+        
+        // First INTEGER: modulus (n)
+        guard offset < bytes.count, bytes[offset] == 0x02 else { return nil }
+        offset += 1
+        guard let modulusLength = readDERLengthStatic(bytes, offset: &offset) else { return nil }
+        guard offset + modulusLength <= bytes.count else { return nil }
+        var modulus = Data(bytes[offset..<offset + modulusLength])
+        offset += modulusLength
+        if modulus.first == 0x00 && modulus.count > 1 { modulus = modulus.dropFirst() }
+        
+        // Second INTEGER: exponent (e)
+        guard offset < bytes.count, bytes[offset] == 0x02 else { return nil }
+        offset += 1
+        guard let exponentLength = readDERLengthStatic(bytes, offset: &offset) else { return nil }
+        guard offset + exponentLength <= bytes.count else { return nil }
+        var exponent = Data(bytes[offset..<offset + exponentLength])
+        if exponent.first == 0x00 && exponent.count > 1 { exponent = exponent.dropFirst() }
+        
+        return (modulus, exponent)
+    }
+    
+    /// Read a DER length field — static version for parser use.
+    private static func readDERLengthStatic(_ bytes: [UInt8], offset: inout Int) -> Int? {
+        guard offset < bytes.count else { return nil }
+        let first = bytes[offset]
+        offset += 1
+        
+        if first < 0x80 { return Int(first) }
+        
+        let numLengthBytes = Int(first & 0x7F)
+        guard numLengthBytes > 0, numLengthBytes <= 4 else { return nil }
+        guard offset + numLengthBytes <= bytes.count else { return nil }
+        
+        var length = 0
+        for i in 0..<numLengthBytes {
+            length = (length << 8) | Int(bytes[offset + i])
+        }
+        offset += numLengthBytes
+        return length
     }
 }

@@ -145,7 +145,7 @@ class KeychainManager {
     // MARK: - SSH Key Storage
     
     /// Save an SSH private key PEM data to the Keychain
-    func saveSSHKey(_ privateKey: Data, name: String, useSecureEnclave: Bool = false) throws {
+    func saveSSHKey(_ privateKey: Data, name: String) throws {
         let account = "ssh-key:\(name)"
         
         // Delete existing key with same name (all formats)
@@ -232,19 +232,40 @@ class KeychainManager {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
         
         // Also delete old kSecClassKey format
         let tag = "com.geistty.key.\(name)"
         guard let tagData = tag.data(using: .utf8) else {
             logger.warning("Failed to encode tag for old-format key deletion: \(name)")
-            return
+            // If we successfully deleted the new format, that's still fine
+            if status == errSecSuccess || status == errSecItemNotFound {
+                return
+            }
+            throw KeychainError.dataConversionError
         }
         let oldQuery: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: tagData
         ]
-        SecItemDelete(oldQuery as CFDictionary)
+        let oldStatus = SecItemDelete(oldQuery as CFDictionary)
+        
+        // Check if at least one deletion found the key. If both return errSecItemNotFound,
+        // the key doesn't exist in any format — report it.
+        if status == errSecItemNotFound && oldStatus == errSecItemNotFound {
+            logger.warning("🗑️ SSH key '\(name)' not found in keychain (neither format)")
+            throw KeychainError.itemNotFound
+        }
+        
+        // Check for unexpected errors (anything other than success or not-found)
+        if status != errSecSuccess && status != errSecItemNotFound {
+            logger.error("❌ Failed to delete SSH key '\(name)' (new format): OSStatus \(status)")
+            throw KeychainError.unexpectedStatus(status)
+        }
+        if oldStatus != errSecSuccess && oldStatus != errSecItemNotFound {
+            logger.error("❌ Failed to delete SSH key '\(name)' (old format): OSStatus \(oldStatus)")
+            throw KeychainError.unexpectedStatus(oldStatus)
+        }
         
         logger.info("🗑️ Deleted SSH key '\(name)'")
     }

@@ -107,7 +107,7 @@ class SSHKeyManager: ObservableObject {
         case .ed25519:
             (privateKey, publicKey) = try generateEd25519Key(name: name)
         case .ecdsa:
-            throw SSHKeyError.notSupported
+            (privateKey, publicKey) = try generateECDSAKey(name: name)
         case .secureEnclaveP256:
             // SE keys use a completely different flow — they cannot be exported as Data.
             // Use generateSecureEnclaveKey() instead.
@@ -154,14 +154,14 @@ class SSHKeyManager: ObservableObject {
         
         // Serialize private key in openssh-key-v1 PEM format so SSHKeyParser can parse it.
         // Format: https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.key
-        let pemData = serializeOpenSSHEd25519(seed: privateKeyData, publicKey: publicKeyData, comment: "\(name)@ghostty-ssh")
+        let pemData = try serializeOpenSSHEd25519(seed: privateKeyData, publicKey: publicKeyData, comment: "\(name)@ghostty-ssh")
         
         return (pemData, publicKeyString)
     }
     
     /// Serialize an Ed25519 key pair in openssh-key-v1 format (unencrypted).
     /// This produces the same binary format as `ssh-keygen -t ed25519` with no passphrase.
-    private func serializeOpenSSHEd25519(seed: Data, publicKey: Data, comment: String) -> Data {
+    private func serializeOpenSSHEd25519(seed: Data, publicKey: Data, comment: String) throws -> Data {
         // Build the public key blob: string "ssh-ed25519" + string pubkey
         var pubBlob = Data()
         appendSSHString(&pubBlob, "ssh-ed25519")
@@ -220,8 +220,84 @@ class SSHKeyManager: ObservableObject {
         
         guard let pemData = pem.data(using: .utf8) else {
             // This should never happen — PEM contains only ASCII/base64 characters
-            logger.error("Failed to encode PEM as UTF-8 — returning empty data")
-            return Data()
+            logger.error("Failed to encode Ed25519 PEM as UTF-8")
+            throw SSHKeyError.keyGenerationFailed
+        }
+        return pemData
+    }
+    
+    /// Generate a software ECDSA P-256 key pair using CryptoKit.
+    /// Returns (privateKeyPEM, publicKeyString) where privateKeyPEM is in openssh-key-v1
+    /// format and publicKeyString is in authorized_keys format.
+    private func generateECDSAKey(name: String) throws -> (Data, String) {
+        let privateKey = P256.Signing.PrivateKey()
+        
+        // Format public key in SSH authorized_keys format
+        let publicKeyString = formatP256PublicKey(privateKey.publicKey, name: name)
+        
+        // Serialize in openssh-key-v1 format
+        let pemData = try serializeOpenSSHECDSA(privateKey: privateKey, comment: "\(name)@ghostty-ssh")
+        
+        return (pemData, publicKeyString)
+    }
+    
+    /// Serialize an ECDSA P-256 key pair in openssh-key-v1 format (unencrypted).
+    private func serializeOpenSSHECDSA(privateKey: P256.Signing.PrivateKey, comment: String) throws -> Data {
+        let pointData = privateKey.publicKey.x963Representation  // 65 bytes (0x04 || x || y)
+        let rawPriv = privateKey.rawRepresentation  // 32 bytes scalar
+        
+        // Build the public key blob: string "ecdsa-sha2-nistp256" + string "nistp256" + string Q
+        var pubBlob = Data()
+        appendSSHString(&pubBlob, "ecdsa-sha2-nistp256")
+        appendSSHString(&pubBlob, "nistp256")
+        appendSSHBytes(&pubBlob, pointData)
+        
+        // Build the private section (unencrypted):
+        // uint32 checkint1 (random, must match checkint2)
+        // uint32 checkint2
+        // string keytype ("ecdsa-sha2-nistp256")
+        // string curve name ("nistp256")
+        // string Q (public key point)
+        // string private scalar (as mpint-like bytes)
+        // string comment
+        // padding
+        let checkInt = UInt32.random(in: 0...UInt32.max)
+        var privSection = Data()
+        appendUInt32(&privSection, checkInt)
+        appendUInt32(&privSection, checkInt)
+        appendSSHString(&privSection, "ecdsa-sha2-nistp256")
+        appendSSHString(&privSection, "nistp256")
+        appendSSHBytes(&privSection, pointData)
+        appendSSHBytes(&privSection, rawPriv)
+        appendSSHString(&privSection, comment)
+        
+        // Padding to block size (8 for unencrypted)
+        let blockSize = 8
+        let paddingNeeded = blockSize - (privSection.count % blockSize)
+        if paddingNeeded < blockSize {
+            for i in 1...paddingNeeded {
+                privSection.append(UInt8(i))
+            }
+        }
+        
+        // Build the full openssh-key-v1 binary
+        var keyData = Data()
+        let magic = "openssh-key-v1\0"
+        keyData.append(contentsOf: Array(magic.utf8))
+        appendSSHString(&keyData, "none")       // ciphername
+        appendSSHString(&keyData, "none")       // kdfname
+        appendSSHString(&keyData, "")           // kdfoptions (empty)
+        appendUInt32(&keyData, 1)               // number of keys
+        appendSSHBytes(&keyData, pubBlob)       // public key blob
+        appendSSHBytes(&keyData, privSection)   // private key section
+        
+        // Wrap in PEM armor
+        let base64 = keyData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
+        let pem = Self.pemArmor("OPENSSH PRIVATE KEY", base64)
+        
+        guard let pemData = pem.data(using: .utf8) else {
+            logger.error("Failed to encode ECDSA PEM as UTF-8")
+            throw SSHKeyError.keyGenerationFailed
         }
         return pemData
     }
@@ -501,43 +577,28 @@ class SSHKeyManager: ObservableObject {
         
         logger.debug("📥 PEM preview: \(String(pemString.prefix(100)))...")
         
-        // Detect key type from PEM header and content
-        let type: SSHKeyType
-        if pemString.contains("OPENSSH PRIVATE KEY") {
-            logger.info("📥 Detected OpenSSH format, parsing binary...")
-            // Parse OpenSSH format to detect actual key type
-            if let detected = detectOpenSSHKeyType(pemString) {
-                type = detected
-                logger.info("📥 ✅ Detected key type: \(type.rawValue) (\(type.displayName))")
-            } else {
-                logger.error("📥 ❌ Failed to detect OpenSSH key type from binary content")
-                throw SSHKeyError.unsupportedKeyType
-            }
-        } else if pemString.contains("RSA PRIVATE KEY") {
-            type = .rsa4096
-            logger.info("📥 Detected RSA PEM format")
-        } else if pemString.contains("EC PRIVATE KEY") {
-            type = .ecdsa
-            logger.info("📥 Detected EC PEM format (ECDSA)")
-        } else {
-            logger.error("📥 Unknown key format! Headers: \(pemString.prefix(200))")
-            throw SSHKeyError.unsupportedKeyType
+        // Parse the key to extract both type and public key in one pass.
+        // This replaces the old flow that detected type separately and used a placeholder
+        // for the public key string.
+        let comment = "\(name)@ghostty-ssh"
+        let parseResult: SSHKeyParseResult
+        do {
+            parseResult = try SSHKeyParser.parsePrivateKeyWithPublicKey(pemData, comment: comment, passphrase: passphrase)
+            logger.info("📥 ✅ Parsed key: type=\(parseResult.keyType.rawValue), publicKey extracted")
+        } catch {
+            logger.error("📥 ❌ Failed to parse key: \(error.localizedDescription)")
+            throw error
         }
-        
-        logger.info("📥 Final key type: \(type.rawValue)")
         
         // Save to Keychain
         try keychain.saveSSHKey(pemData, name: name)
         logger.info("📥 Saved to keychain")
         
-        // Extract public key (simplified - real implementation would parse the key)
-        let publicKey = "Imported key - run `ssh-keygen -y -f` to extract public key"
-        
         let keyPair = SSHKeyPair(
             id: UUID(),
             name: name,
-            type: type,
-            publicKey: publicKey,
+            type: parseResult.keyType,
+            publicKey: parseResult.publicKeyString,
             createdAt: Date(),
             isSecureEnclave: false,
             requiresBiometric: false
@@ -548,107 +609,6 @@ class SSHKeyManager: ObservableObject {
         
         logger.info("✅ Imported key: \(name)")
         return keyPair
-    }
-    
-    /// Detect key type from OpenSSH format by parsing the binary content
-    private func detectOpenSSHKeyType(_ pemString: String) -> SSHKeyType? {
-        logger.info("🔍 detectOpenSSHKeyType: Starting parse")
-        
-        // Extract base64 content
-        let lines = pemString.components(separatedBy: .newlines)
-        var base64Content = ""
-        var inKey = false
-        
-        for line in lines {
-            if line.contains("BEGIN OPENSSH PRIVATE KEY") {
-                inKey = true
-                continue
-            }
-            if line.contains("END OPENSSH PRIVATE KEY") {
-                break
-            }
-            if inKey {
-                base64Content += line.trimmingCharacters(in: .whitespaces)
-            }
-        }
-        
-        logger.info("🔍 Base64 content length: \(base64Content.count)")
-        
-        guard let keyData = Data(base64Encoded: base64Content),
-              keyData.count > 50 else {
-            logger.error("🔍 Failed to decode base64 or data too short")
-            return nil
-        }
-        
-        logger.info("🔍 Decoded \(keyData.count) bytes")
-        logger.info("🔍 First 30 bytes: \(keyData.prefix(30).map { String(format: "%02x", $0) }.joined(separator: " "))")
-        
-        // OpenSSH format: magic + ciphername + kdfname + kdfoptions + numkeys + pubkey
-        // The public key blob contains the key type as a string
-        // Skip to public key section and read the key type
-        
-        let magic = "openssh-key-v1\0"
-        let magicBytes = Array(magic.utf8)
-        guard keyData.count > magicBytes.count else { return nil }
-        
-        var offset = magicBytes.count
-        logger.debug("🔍 After magic, offset=\(offset)")
-        
-        // Helper to read uint32 big-endian
-        func readUInt32() -> UInt32? {
-            guard offset + 4 <= keyData.count else { return nil }
-            let value = keyData.withUnsafeBytes { ptr in
-                ptr.loadUnaligned(fromByteOffset: offset, as: UInt32.self).bigEndian
-            }
-            offset += 4
-            return value
-        }
-        
-        // Helper to read string
-        func readString() -> String? {
-            guard let length = readUInt32(), length < 1000 else { return nil }
-            guard offset + Int(length) <= keyData.count else { return nil }
-            let data = keyData[offset..<(offset + Int(length))]
-            offset += Int(length)
-            return String(data: data, encoding: .utf8)
-        }
-        
-        // Skip: ciphername, kdfname, kdfoptions
-        let cipher = readString()
-        let kdf = readString()
-        logger.debug("🔍 cipher='\(cipher ?? "nil")', kdf='\(kdf ?? "nil")'")
-        
-        guard let kdfOptionsLen = readUInt32() else { return nil }
-        offset += Int(kdfOptionsLen) // skip kdf options
-        logger.debug("🔍 After kdf options, offset=\(offset)")
-        
-        // Number of keys
-        guard let numKeys = readUInt32(), numKeys >= 1 else { return nil }
-        logger.debug("🔍 numKeys=\(numKeys)")
-        
-        // Public key blob length
-        guard let pubKeyLen = readUInt32(), pubKeyLen > 4 else { return nil }
-        logger.debug("🔍 pubKeyLen=\(pubKeyLen), offset=\(offset)")
-        
-        // First field in public key blob is the key type
-        guard let keyType = readString() else {
-            logger.error("🔍 Failed to read key type string")
-            return nil
-        }
-        
-        logger.info("🔍 OpenSSH key type from binary: '\(keyType)'")
-        
-        switch keyType {
-        case "ssh-ed25519":
-            return .ed25519
-        case "ssh-rsa":
-            return .rsa4096
-        case "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521":
-            return .ecdsa
-        default:
-            logger.warning("📥 Unknown key type: \(keyType)")
-            return nil
-        }
     }
     
     // MARK: - Key Retrieval
