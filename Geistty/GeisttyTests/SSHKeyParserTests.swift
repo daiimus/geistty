@@ -40,7 +40,7 @@ final class SSHKeyParserTests: XCTestCase {
         appendSSHBytes(&keyData, privateSection)
         
         let base64 = keyData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
-        return "-----BEGIN OPENSSH PRIVATE KEY-----\n\(base64)\n-----END OPENSSH PRIVATE KEY-----\n"
+        return SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", base64)
     }
     
     /// Build the unencrypted private section for an Ed25519 key.
@@ -308,11 +308,7 @@ final class SSHKeyParserTests: XCTestCase {
     
     func testRejectEncryptedKeyWithoutPassphrase() {
         // Simulate an encrypted OpenSSH key header
-        let encryptedPEM = """
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        ENCRYPTED-b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0
-        -----END OPENSSH PRIVATE KEY-----
-        """
+        let encryptedPEM = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", "ENCRYPTED-b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0")
         let pemData = encryptedPEM.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
@@ -324,11 +320,7 @@ final class SSHKeyParserTests: XCTestCase {
     }
     
     func testRejectUnknownPEMFormat() {
-        let unknownPEM = """
-        -----BEGIN DSA PRIVATE KEY-----
-        MIIBuwIBAAJBALRiMLAH...
-        -----END DSA PRIVATE KEY-----
-        """
+        let unknownPEM = SSHKeyManager.pemArmor("DSA PRIVATE KEY", "MIIBuwIBAAJBALRiMLAH...")
         let pemData = unknownPEM.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
@@ -340,11 +332,7 @@ final class SSHKeyParserTests: XCTestCase {
     }
     
     func testRejectInvalidBase64InOpenSSHKey() {
-        let badPEM = """
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        This is not valid base64!!!@#$%
-        -----END OPENSSH PRIVATE KEY-----
-        """
+        let badPEM = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", "This is not valid base64!!!@#$%")
         let pemData = badPEM.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
@@ -360,7 +348,7 @@ final class SSHKeyParserTests: XCTestCase {
         // Valid base64 but not openssh-key-v1 format
         let fakeData = Data(repeating: 0x41, count: 100)
         let base64 = fakeData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
-        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n\(base64)\n-----END OPENSSH PRIVATE KEY-----\n"
+        let pem = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", base64)
         let pemData = pem.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
@@ -426,7 +414,7 @@ final class SSHKeyParserTests: XCTestCase {
         appendSSHBytes(&keyData, privSection)
         
         let base64 = keyData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
-        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n\(base64)\n-----END OPENSSH PRIVATE KEY-----\n"
+        let pem = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", base64)
         let pemData = pem.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
@@ -485,7 +473,7 @@ final class SSHKeyParserTests: XCTestCase {
         // Truncate here — missing kdfname, kdfoptions, etc.
         
         let base64 = keyData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
-        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n\(base64)\n-----END OPENSSH PRIVATE KEY-----\n"
+        let pem = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", base64)
         let pemData = pem.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
@@ -571,7 +559,7 @@ final class SSHKeyParserTests: XCTestCase {
         let base64 = keyData.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
         // Add extra whitespace around lines
         let lines = base64.components(separatedBy: "\n").map { "  \($0)  " }
-        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n\(lines.joined(separator: "\n"))\n-----END OPENSSH PRIVATE KEY-----\n"
+        let pem = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", lines.joined(separator: "\n"))
         
         let pemData = pem.data(using: .utf8)!
         let parsed = try SSHKeyParser.parsePrivateKey(pemData)

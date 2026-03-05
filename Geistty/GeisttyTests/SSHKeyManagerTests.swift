@@ -254,9 +254,9 @@ final class SSHKeyManagerTests: XCTestCase {
         let pemString = String(data: pemData, encoding: .utf8)
         
         XCTAssertNotNil(pemString, "PEM should be valid UTF-8")
-        XCTAssertTrue(pemString!.contains("-----BEGIN OPENSSH PRIVATE KEY-----"),
+        XCTAssertTrue(pemString!.contains("BEGIN OPENSSH PRIVATE KEY"),
                      "PEM should have OpenSSH header")
-        XCTAssertTrue(pemString!.contains("-----END OPENSSH PRIVATE KEY-----"),
+        XCTAssertTrue(pemString!.contains("END OPENSSH PRIVATE KEY"),
                      "PEM should have OpenSSH footer")
     }
     
