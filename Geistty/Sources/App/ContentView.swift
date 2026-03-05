@@ -434,14 +434,6 @@ struct ConnectionSheet: View {
                         connectionInfo.password = "password"
                     }
                     .foregroundColor(.blue)
-                    
-                    Button("Use OverTheWire Bandit") {
-                        connectionInfo.host = "bandit.labs.overthewire.org"
-                        connectionInfo.port = 2220
-                        connectionInfo.username = "bandit0"
-                        connectionInfo.password = "bandit0"
-                    }
-                    .foregroundColor(.blue)
                 }
                 #endif
             }

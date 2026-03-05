@@ -118,7 +118,7 @@ build_device() {
 
     log_info "Building for iOS Device..."
     
-    local DEVICE_NAME="${1:-Icarus}"
+    local DEVICE_NAME="${1:-iPad}"
     
     # If a CoreDevice UUID was passed, resolve it to a device name
     if [[ "$DEVICE_NAME" =~ ^[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}$ ]]; then
@@ -152,7 +152,7 @@ build_device() {
 install_device() {
     unlock_ci_keychain || return 1
 
-    local DEVICE_NAME="${1:-Icarus}"
+    local DEVICE_NAME="${1:-iPad}"
     local DEVICE_UUID
     DEVICE_UUID=$(xcrun devicectl list devices 2>/dev/null | grep "$DEVICE_NAME" | awk '{print $3}')
 
@@ -178,7 +178,7 @@ install_device() {
 
 # Build, install, and launch with console output (full deploy workflow)
 deploy_device() {
-    local DEVICE_NAME="${1:-Icarus}"
+    local DEVICE_NAME="${1:-iPad}"
     local DEVICE_UUID
     DEVICE_UUID=$(xcrun devicectl list devices 2>/dev/null | grep "$DEVICE_NAME" | awk '{print $3}')
 
@@ -343,7 +343,7 @@ show_help() {
     echo "Commands:"
     echo "  build           Build for iOS Simulator (no signing required)"
     echo "  device-build    Build for iOS device (auto-unlocks CI keychain)"
-    echo "  install [NAME]  Install and launch on device (default: Icarus)"
+    echo "  install [NAME]  Install and launch on device (default: iPad)"
     echo "  deploy [NAME]   Build, install, and launch with console output"
     echo "  test            Run unit tests on simulator"
     echo "  ui-test         Run UI tests on simulator"
@@ -354,9 +354,9 @@ show_help() {
     echo ""
     echo "Examples:"
     echo "  $0 build                              # Build for simulator"
-    echo "  $0 install Icarus                         # Install on Icarus"
-    echo "  $0 deploy                                  # Full deploy to Icarus (default)"
-    echo "  $0 deploy Athena                            # Full deploy to Athena"
+    echo "  $0 install MyiPad                         # Install on device named MyiPad"
+    echo "  $0 deploy                                  # Full deploy to default device"
+    echo "  $0 deploy MyiPhone                          # Full deploy to device named MyiPhone"
     echo "  $0 all                                # Full CI run"
 }
 

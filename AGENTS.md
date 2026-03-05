@@ -42,9 +42,9 @@ These are behavioral rules established by the user. Follow them strictly.
 
 ## Devices
 
-- **Icarus** = iPad Pro (primary test device)
-- **Athena** = iPhone (secondary test device)
-- **Dionysus** = Mac (dev machine + SSH target)
+- iPad Pro (primary test device)
+- iPhone (secondary test device)
+- Mac (dev machine + SSH target)
 
 ## Commands
 
