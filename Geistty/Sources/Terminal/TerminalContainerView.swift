@@ -82,11 +82,15 @@ struct TerminalContainerView: View {
 /// ViewModel that bridges Ghostty with SSH connection
 @MainActor
 class TerminalViewModel: ObservableObject {
-    @Published var title: String = ""
+    // T2: title and currentFontSize are read imperatively — not @Published
+    // to avoid unnecessary objectWillChange churn. isConnected stays @Published
+    // because it's consumed via Combine $isConnected sink in +Tmux.swift.
+    // disconnectedByRemote and disconnectError drive SwiftUI view updates. See #42.
+    var title: String = ""
     @Published var isConnected: Bool = false
     @Published var disconnectedByRemote: Bool = false
         @Published var disconnectError: String? = nil
-        @Published var currentFontSize: Float = 14.0
+        var currentFontSize: Float = 14.0
     
     /// Buffer for data received before surface is ready
     private var preSurfaceBuffer: [Data] = []
@@ -526,6 +530,13 @@ struct RawTerminalViewController: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: RawTerminalUIViewController, context: Context) {
         // No updates needed
     }
+    
+    /// T3: Guaranteed cleanup when SwiftUI removes this representable.
+    /// Catches cases where viewWillDisappear is not called (e.g., conditional
+    /// view removal, navigation pop without animation). See #42.
+    static func dismantleUIViewController(_ uiViewController: RawTerminalUIViewController, coordinator: ()) {
+        uiViewController.performTeardown()
+    }
 }
 
 /// Pure UIKit view controller that directly hosts the Ghostty SurfaceView
@@ -534,6 +545,10 @@ class RawTerminalUIViewController: UIViewController {
     var viewModel: TerminalViewModel?
     var onSetup: (() -> Void)?
     var surfaceView: Ghostty.SurfaceView?
+    
+    /// T3: Idempotency guard — prevents double teardown when both
+    /// viewWillDisappear and dismantleUIViewController fire. See #42.
+    private var tornDown = false
     
     // Constraint for top edge - adjusted based on status bar visibility
     var surfaceTopConstraint: NSLayoutConstraint?
@@ -994,6 +1009,15 @@ class RawTerminalUIViewController: UIViewController {
         // presented over it — presenting a pageSheet triggers viewWillDisappear
         // on the presenting VC.
         guard isMovingFromParent || isBeingDismissed else { return }
+        
+        performTeardown()
+    }
+    
+    /// Shared teardown for both viewWillDisappear and dismantleUIViewController.
+    /// Idempotent — safe to call multiple times (guarded by `tornDown`). See #42 T3.
+    func performTeardown() {
+        guard !tornDown else { return }
+        tornDown = true
         
         // Remove settings observer
         if let observer = settingsObserver {

@@ -464,10 +464,10 @@ class SSHSession: ObservableObject, Identifiable {
             }
             
             // H8: Only process notifications for our surface (multi-window safety)
-            if let notifSurface = notification.object as? Ghostty.SurfaceView,
-               let ourSurface = self.ghosttySurface,
-               notifSurface !== ourSurface {
-                return
+            // If notification carries a surface, require it matches ours.
+            // If our surface is nil (teardown), the === check fails → skip.
+            if let notifSurface = notification.object as? Ghostty.SurfaceView {
+                guard notifSurface === self.ghosttySurface else { return }
             }
             
             let windowCount = notification.userInfo?["windowCount"] as? UInt ?? 0
@@ -506,10 +506,10 @@ class SSHSession: ObservableObject, Identifiable {
             guard let self = self else { return }
             
             // H8: Only process notifications for our surface (multi-window safety)
-            if let notifSurface = notification.object as? Ghostty.SurfaceView,
-               let ourSurface = self.ghosttySurface,
-               notifSurface !== ourSurface {
-                return
+            // If notification carries a surface, require it matches ours.
+            // If our surface is nil (teardown), the === check fails → skip.
+            if let notifSurface = notification.object as? Ghostty.SurfaceView {
+                guard notifSurface === self.ghosttySurface else { return }
             }
             
             logger.info("tmux control mode exited via TMUX_EXIT")
@@ -543,10 +543,10 @@ class SSHSession: ObservableObject, Identifiable {
             guard let self = self else { return }
             
             // H8: Only process notifications for our surface (multi-window safety)
-            if let notifSurface = notification.object as? Ghostty.SurfaceView,
-               let ourSurface = self.ghosttySurface,
-               notifSurface !== ourSurface {
-                return
+            // If notification carries a surface, require it matches ours.
+            // If our surface is nil (teardown), the === check fails → skip.
+            if let notifSurface = notification.object as? Ghostty.SurfaceView {
+                guard notifSurface === self.ghosttySurface else { return }
             }
             
             logger.info("tmux viewer startup complete (TMUX_READY), safe to send user input")
