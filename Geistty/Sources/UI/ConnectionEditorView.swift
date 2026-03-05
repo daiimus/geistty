@@ -527,6 +527,8 @@ struct SSHKeyListView: View {
     @State private var importError: String?
     @State private var biometricError: String?
     @State private var showingBiometricError = false
+    @State private var showingClearClipboard = false
+    @State private var importedFromClipboard = false
     
     var body: some View {
         List {
@@ -621,22 +623,34 @@ struct SSHKeyListView: View {
         }
         .alert("Import Key", isPresented: $showingImportAlert) {
             TextField("Key Name", text: $importKeyName)
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {
+                importedFromClipboard = false
+            }
             Button("Import") {
                 if let data = importKeyData {
                     Task {
                         do {
                             _ = try keyManager.importKey(name: importKeyName, pemData: data)
+                            if importedFromClipboard {
+                                await MainActor.run {
+                                    showingClearClipboard = true
+                                }
+                            }
                         } catch {
                             logger.error("Failed to import SSH key '\(importKeyName)': \(error.localizedDescription)")
                             importError = error.localizedDescription
                             showingImportError = true
+                            importedFromClipboard = false
                         }
                     }
                 }
             }
         } message: {
-            Text("Enter a name for the imported key")
+            if importedFromClipboard {
+                Text("Enter a name for the imported key.\n\nNote: If you copied this key via Universal Clipboard, it may still be on other iCloud devices' clipboards.")
+            } else {
+                Text("Enter a name for the imported key")
+            }
         }
         .alert("Import Error", isPresented: $showingImportError) {
             Button("OK", role: .cancel) { }
@@ -647,6 +661,18 @@ struct SSHKeyListView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(biometricError ?? "Unknown error")
+        }
+        .alert("Clear Clipboard?", isPresented: $showingClearClipboard) {
+            Button("Clear", role: .destructive) {
+                UIPasteboard.general.string = ""
+                importedFromClipboard = false
+                logger.info("Clipboard cleared after key import")
+            }
+            Button("Keep", role: .cancel) {
+                importedFromClipboard = false
+            }
+        } message: {
+            Text("Your private key is still on the clipboard. Clear it for security?")
         }
     }
     
@@ -681,6 +707,7 @@ struct SSHKeyListView: View {
         if clipboardString.contains("PRIVATE KEY") {
             importKeyData = data
             importKeyName = "Imported-\(Date().formatted(date: .numeric, time: .omitted))"
+            importedFromClipboard = true
             showingImportAlert = true
         } else {
             importError = "Clipboard doesn't contain a private key. Keys should start with '-----BEGIN'"
@@ -700,6 +727,7 @@ struct SSHKeyListView: View {
             let data = try Data(contentsOf: url)
             importKeyData = data
             importKeyName = url.deletingPathExtension().lastPathComponent
+            importedFromClipboard = false
             showingImportAlert = true
         } catch {
             logger.error("Failed to read key file \(url.lastPathComponent): \(error.localizedDescription)")
@@ -755,8 +783,8 @@ struct SSHKeyImportPicker: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
     
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        // Allow any file type since SSH keys can have various extensions (.pem, .key, no extension, etc.)
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data, .text, .plainText])
+        // .data (public.data) covers all flat files including extensionless SSH keys (id_rsa, id_ed25519)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data])
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = false
         return picker
