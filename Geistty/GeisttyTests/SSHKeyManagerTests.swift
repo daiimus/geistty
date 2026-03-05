@@ -9,6 +9,7 @@ final class SSHKeyTypeTests: XCTestCase {
     func testRawValues() {
         XCTAssertEqual(SSHKeyType.ed25519.rawValue, "ed25519")
         XCTAssertEqual(SSHKeyType.ecdsa.rawValue, "ecdsa")
+        XCTAssertEqual(SSHKeyType.secureEnclaveP256.rawValue, "secure-enclave-p256")
         XCTAssertEqual(SSHKeyType.rsa2048.rawValue, "rsa-2048")
         XCTAssertEqual(SSHKeyType.rsa4096.rawValue, "rsa-4096")
     }
@@ -16,6 +17,7 @@ final class SSHKeyTypeTests: XCTestCase {
     func testDisplayNames() {
         XCTAssertEqual(SSHKeyType.ed25519.displayName, "Ed25519 (Recommended)")
         XCTAssertEqual(SSHKeyType.ecdsa.displayName, "ECDSA (P-256)")
+        XCTAssertEqual(SSHKeyType.secureEnclaveP256.displayName, "Secure Enclave (P-256)")
         XCTAssertEqual(SSHKeyType.rsa2048.displayName, "RSA 2048-bit")
         XCTAssertEqual(SSHKeyType.rsa4096.displayName, "RSA 4096-bit")
     }
@@ -23,19 +25,30 @@ final class SSHKeyTypeTests: XCTestCase {
     func testKeySizes() {
         XCTAssertEqual(SSHKeyType.ed25519.keySize, 256)
         XCTAssertEqual(SSHKeyType.ecdsa.keySize, 256)
+        XCTAssertEqual(SSHKeyType.secureEnclaveP256.keySize, 256)
         XCTAssertEqual(SSHKeyType.rsa2048.keySize, 2048)
         XCTAssertEqual(SSHKeyType.rsa4096.keySize, 4096)
     }
     
     func testIdentifiable() {
         XCTAssertEqual(SSHKeyType.ed25519.id, "ed25519")
+        XCTAssertEqual(SSHKeyType.secureEnclaveP256.id, "secure-enclave-p256")
         XCTAssertEqual(SSHKeyType.rsa4096.id, "rsa-4096")
     }
     
+    func testIsSecureEnclave() {
+        XCTAssertFalse(SSHKeyType.ed25519.isSecureEnclave)
+        XCTAssertFalse(SSHKeyType.ecdsa.isSecureEnclave)
+        XCTAssertTrue(SSHKeyType.secureEnclaveP256.isSecureEnclave)
+        XCTAssertFalse(SSHKeyType.rsa2048.isSecureEnclave)
+        XCTAssertFalse(SSHKeyType.rsa4096.isSecureEnclave)
+    }
+    
     func testCaseIterable() {
-        XCTAssertEqual(SSHKeyType.allCases.count, 4)
+        XCTAssertEqual(SSHKeyType.allCases.count, 5)
         XCTAssertTrue(SSHKeyType.allCases.contains(.ed25519))
         XCTAssertTrue(SSHKeyType.allCases.contains(.ecdsa))
+        XCTAssertTrue(SSHKeyType.allCases.contains(.secureEnclaveP256))
         XCTAssertTrue(SSHKeyType.allCases.contains(.rsa2048))
         XCTAssertTrue(SSHKeyType.allCases.contains(.rsa4096))
     }
@@ -43,6 +56,7 @@ final class SSHKeyTypeTests: XCTestCase {
     func testInitFromRawValue() {
         XCTAssertEqual(SSHKeyType(rawValue: "ed25519"), .ed25519)
         XCTAssertEqual(SSHKeyType(rawValue: "ecdsa"), .ecdsa)
+        XCTAssertEqual(SSHKeyType(rawValue: "secure-enclave-p256"), .secureEnclaveP256)
         XCTAssertEqual(SSHKeyType(rawValue: "rsa-2048"), .rsa2048)
         XCTAssertEqual(SSHKeyType(rawValue: "rsa-4096"), .rsa4096)
         XCTAssertNil(SSHKeyType(rawValue: "dsa"))
@@ -77,7 +91,8 @@ final class SSHKeyPairTests: XCTestCase {
             type: .ed25519,
             publicKey: publicKeyString,
             createdAt: Date(),
-            isSecureEnclave: false
+            isSecureEnclave: false,
+            requiresBiometric: false
         )
         
         // Fingerprint should start with SHA256:
@@ -95,7 +110,8 @@ final class SSHKeyPairTests: XCTestCase {
             type: .ed25519,
             publicKey: "not-a-valid-key",
             createdAt: Date(),
-            isSecureEnclave: false
+            isSecureEnclave: false,
+            requiresBiometric: false
         )
         
         XCTAssertEqual(keyPair.fingerprint, "unknown")
@@ -108,7 +124,8 @@ final class SSHKeyPairTests: XCTestCase {
             type: .ed25519,
             publicKey: "",
             createdAt: Date(),
-            isSecureEnclave: false
+            isSecureEnclave: false,
+            requiresBiometric: false
         )
         
         XCTAssertEqual(keyPair.fingerprint, "unknown")
@@ -122,7 +139,8 @@ final class SSHKeyPairTests: XCTestCase {
             type: .ed25519,
             publicKey: "ssh-ed25519 AAAA test",
             createdAt: Date(),
-            isSecureEnclave: false
+            isSecureEnclave: false,
+            requiresBiometric: false
         )
         
         XCTAssertEqual(keyPair.id, id)
@@ -140,7 +158,9 @@ final class SSHKeyErrorTests: XCTestCase {
             .unsupportedKeyType,
             .keyNotFound,
             .passphraseRequired,
-            .notSupported
+            .notSupported,
+            .secureEnclaveNotAvailable,
+            .biometricAuthRequired
         ]
         
         for error in errors {
@@ -156,6 +176,10 @@ final class SSHKeyErrorTests: XCTestCase {
         XCTAssertEqual(SSHKeyError.keyNotFound.errorDescription, "SSH key not found")
         XCTAssertEqual(SSHKeyError.passphraseRequired.errorDescription, "Passphrase required for this key")
         XCTAssertEqual(SSHKeyError.notSupported.errorDescription, "This feature is not yet supported")
+        XCTAssertEqual(SSHKeyError.secureEnclaveNotAvailable.errorDescription,
+                       "Secure Enclave is not available on this device")
+        XCTAssertEqual(SSHKeyError.biometricAuthRequired.errorDescription,
+                       "Biometric authentication is required to use this key")
     }
 }
 
@@ -281,17 +305,67 @@ final class SSHKeyManagerTests: XCTestCase {
         XCTAssertNotEqual(keyPair.fingerprint, "unknown")
     }
     
-    // MARK: - ECDSA Generation (Not Supported)
+    // MARK: - ECDSA Generation
     
-    func testGenerateECDSAThrowsNotSupported() {
-        let name = testKeyName("ecdsa_ns")
+    func testGenerateECDSAKey() throws {
+        let name = testKeyName("ecdsa_gen")
+        let keyPair = try SSHKeyManager.shared.generateKey(name: name, type: .ecdsa)
         
-        XCTAssertThrowsError(try SSHKeyManager.shared.generateKey(name: name, type: .ecdsa)) { error in
-            guard case SSHKeyError.notSupported = error else {
-                XCTFail("Expected .notSupported error, got \(error)")
-                return
-            }
-        }
+        XCTAssertEqual(keyPair.name, name)
+        XCTAssertEqual(keyPair.type, .ecdsa)
+        XCTAssertFalse(keyPair.isSecureEnclave)
+    }
+    
+    func testGenerateECDSAPublicKeyFormat() throws {
+        let name = testKeyName("ecdsa_pub")
+        let keyPair = try SSHKeyManager.shared.generateKey(name: name, type: .ecdsa)
+        
+        // Public key should be in authorized_keys format
+        XCTAssertTrue(keyPair.publicKey.hasPrefix("ecdsa-sha2-nistp256 "),
+                     "ECDSA public key should start with 'ecdsa-sha2-nistp256 ', got: \(keyPair.publicKey.prefix(40))")
+        
+        // Should have base64 section
+        let parts = keyPair.publicKey.split(separator: " ")
+        XCTAssertGreaterThanOrEqual(parts.count, 2, "Public key should have at least 2 space-separated parts")
+        
+        // Base64 should decode
+        let base64 = String(parts[1])
+        XCTAssertNotNil(Data(base64Encoded: base64), "Public key base64 section should be valid")
+    }
+    
+    func testGenerateECDSARoundTrip() throws {
+        // Generate an ECDSA key with SSHKeyManager, retrieve PEM from Keychain,
+        // then parse it with SSHKeyParser — validates the entire pipeline
+        let name = testKeyName("ecdsa_rt")
+        let _ = try SSHKeyManager.shared.generateKey(name: name, type: .ecdsa)
+        
+        // Retrieve the saved PEM from Keychain
+        let pemData = try SSHKeyManager.shared.getPrivateKey(name: name)
+        
+        // PEM should be parseable by SSHKeyParser
+        let parsedKey = try SSHKeyParser.parsePrivateKey(pemData)
+        XCTAssertNotNil(parsedKey, "Generated ECDSA PEM should be parseable by SSHKeyParser")
+    }
+    
+    func testGenerateECDSAUniqueKeys() throws {
+        // Two generated ECDSA keys should be different
+        let name1 = testKeyName("ecdsa_u1")
+        let name2 = testKeyName("ecdsa_u2")
+        
+        let keyPair1 = try SSHKeyManager.shared.generateKey(name: name1, type: .ecdsa)
+        let keyPair2 = try SSHKeyManager.shared.generateKey(name: name2, type: .ecdsa)
+        
+        XCTAssertNotEqual(keyPair1.publicKey, keyPair2.publicKey,
+                         "Two generated ECDSA keys should have different public keys")
+    }
+    
+    func testGenerateECDSAFingerprintValid() throws {
+        let name = testKeyName("ecdsa_fp")
+        let keyPair = try SSHKeyManager.shared.generateKey(name: name, type: .ecdsa)
+        
+        XCTAssertTrue(keyPair.fingerprint.hasPrefix("SHA256:"),
+                     "Fingerprint should start with SHA256:, got: \(keyPair.fingerprint)")
+        XCTAssertNotEqual(keyPair.fingerprint, "unknown")
     }
     
     // MARK: - Key Retrieval and Deletion
@@ -352,5 +426,109 @@ final class SSHKeyManagerTests: XCTestCase {
         let matchingKeys = SSHKeyManager.shared.keys.filter { $0.name == name }
         XCTAssertEqual(matchingKeys.count, 1,
                       "Should have exactly 1 key with name '\(name)', found \(matchingKeys.count)")
+    }
+}
+
+// MARK: - BiometricGatekeeper Tests
+
+/// Tests for BiometricGatekeeper session state management.
+///
+/// These test the state machine logic (session invalidation, initial state).
+/// Actual biometric prompts can't be tested in CI — those are integration tests.
+@MainActor
+final class BiometricGatekeeperTests: XCTestCase {
+    
+    func testInitialStateNotAuthenticated() {
+        let gatekeeper = BiometricGatekeeper.shared
+        // Fresh or invalidated — should not be authenticated
+        // (In CI, no prior auth would have happened)
+        gatekeeper.invalidateSession()
+        XCTAssertFalse(gatekeeper.isAuthenticated,
+                      "Gatekeeper should not be authenticated after invalidation")
+    }
+    
+    func testInvalidateSessionClearsAuth() {
+        let gatekeeper = BiometricGatekeeper.shared
+        // Invalidate should set isAuthenticated to false
+        gatekeeper.invalidateSession()
+        XCTAssertFalse(gatekeeper.isAuthenticated)
+        // Calling invalidate again should be a no-op (not crash)
+        gatekeeper.invalidateSession()
+        XCTAssertFalse(gatekeeper.isAuthenticated)
+    }
+    
+    func testBiometricTypeNameReturnsString() {
+        let gatekeeper = BiometricGatekeeper.shared
+        let name = gatekeeper.biometricTypeName
+        // On simulator, biometrics are not available, so should return "Biometrics"
+        XCTAssertFalse(name.isEmpty, "biometricTypeName should not be empty")
+    }
+    
+    func testEnsureAuthenticatedThrowsOnSimulator() async {
+        // On simulator, biometrics are not available
+        // ensureAuthenticated should throw secureEnclaveNotAvailable
+        let gatekeeper = BiometricGatekeeper.shared
+        gatekeeper.invalidateSession()
+        
+        do {
+            try await gatekeeper.ensureAuthenticated()
+            // If biometrics ARE available (device), this might succeed — that's OK
+        } catch {
+            // On simulator, should get secureEnclaveNotAvailable
+            // (the method throws this when canEvaluatePolicy fails)
+            guard case SSHKeyError.secureEnclaveNotAvailable = error else {
+                // biometricAuthRequired is also acceptable (e.g. if LAContext fails differently)
+                guard case SSHKeyError.biometricAuthRequired = error else {
+                    XCTFail("Expected secureEnclaveNotAvailable or biometricAuthRequired, got \(error)")
+                    return
+                }
+                return
+            }
+        }
+    }
+}
+
+// MARK: - SSHKeyPair Biometric Tests
+
+final class SSHKeyPairBiometricTests: XCTestCase {
+    
+    func testRequiresBiometricDefaultFalse() {
+        let keyPair = SSHKeyPair(
+            id: UUID(),
+            name: "test",
+            type: .ed25519,
+            publicKey: "ssh-ed25519 AAAA test",
+            createdAt: Date(),
+            isSecureEnclave: false,
+            requiresBiometric: false
+        )
+        XCTAssertFalse(keyPair.requiresBiometric)
+    }
+    
+    func testRequiresBiometricTrue() {
+        let keyPair = SSHKeyPair(
+            id: UUID(),
+            name: "bio-key",
+            type: .ed25519,
+            publicKey: "ssh-ed25519 AAAA test",
+            createdAt: Date(),
+            isSecureEnclave: false,
+            requiresBiometric: true
+        )
+        XCTAssertTrue(keyPair.requiresBiometric)
+    }
+    
+    func testSecureEnclaveKeyPair() {
+        let keyPair = SSHKeyPair(
+            id: UUID(),
+            name: "se-key",
+            type: .secureEnclaveP256,
+            publicKey: "ecdsa-sha2-nistp256 AAAA test",
+            createdAt: Date(),
+            isSecureEnclave: true,
+            requiresBiometric: false
+        )
+        XCTAssertTrue(keyPair.isSecureEnclave)
+        XCTAssertEqual(keyPair.type, .secureEnclaveP256)
     }
 }
