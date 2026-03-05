@@ -199,6 +199,6 @@ geistty/
 
 ## License
 
-Geistty is a hobby.
+MIT License -- see [LICENSE](LICENSE).
 
 Third-party dependencies are used under their respective licenses -- see [LICENSES.md](LICENSES.md).
