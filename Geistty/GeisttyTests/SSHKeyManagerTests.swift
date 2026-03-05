@@ -532,3 +532,66 @@ final class SSHKeyPairBiometricTests: XCTestCase {
         XCTAssertEqual(keyPair.type, .secureEnclaveP256)
     }
 }
+
+// MARK: - SSHCommandResult Tests
+
+final class SSHCommandResultTests: XCTestCase {
+    
+    func testSucceededWithExitZero() {
+        let result = SSHCommandResult(exitStatus: 0, stdout: "ok", stderr: "")
+        XCTAssertTrue(result.succeeded)
+    }
+    
+    func testNotSucceededWithNonZeroExit() {
+        let result = SSHCommandResult(exitStatus: 1, stdout: "", stderr: "error")
+        XCTAssertFalse(result.succeeded)
+    }
+    
+    func testNotSucceededWithNilExit() {
+        // No exit status (e.g. channel closed without exit)
+        let result = SSHCommandResult(exitStatus: nil, stdout: "", stderr: "")
+        XCTAssertFalse(result.succeeded)
+    }
+    
+    func testStdoutAndStderrCaptured() {
+        let result = SSHCommandResult(exitStatus: 0, stdout: "hello world", stderr: "warning: something")
+        XCTAssertEqual(result.stdout, "hello world")
+        XCTAssertEqual(result.stderr, "warning: something")
+    }
+}
+
+// MARK: - NIOSSHError Tests
+
+final class NIOSSHErrorTests: XCTestCase {
+    
+    func testAllErrorDescriptionsNonEmpty() {
+        let errors: [NIOSSHError] = [
+            .notConnected,
+            .alreadyConnected,
+            .connectionFailed("test"),
+            .authenticationFailed("test"),
+            .channelError("test"),
+            .sessionError("test"),
+            .timeout,
+            .networkUnavailable
+        ]
+        
+        for error in errors {
+            XCTAssertNotNil(error.errorDescription, "Error \(error) should have a description")
+            XCTAssertFalse(error.errorDescription!.isEmpty, "Error description for \(error) should not be empty")
+        }
+    }
+    
+    func testSpecificErrorMessages() {
+        XCTAssertEqual(NIOSSHError.notConnected.errorDescription, "Not connected to server")
+        XCTAssertEqual(NIOSSHError.timeout.errorDescription, "Operation timed out")
+        XCTAssertEqual(NIOSSHError.networkUnavailable.errorDescription, "Network unavailable")
+    }
+    
+    func testErrorMessagesIncludeReason() {
+        XCTAssertTrue(NIOSSHError.connectionFailed("host unreachable").errorDescription!.contains("host unreachable"))
+        XCTAssertTrue(NIOSSHError.authenticationFailed("bad password").errorDescription!.contains("bad password"))
+        XCTAssertTrue(NIOSSHError.channelError("rejected").errorDescription!.contains("rejected"))
+        XCTAssertTrue(NIOSSHError.sessionError("pty failed").errorDescription!.contains("pty failed"))
+    }
+}
