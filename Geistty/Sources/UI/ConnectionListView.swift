@@ -178,13 +178,8 @@ struct ConnectionListView: View {
                     Text("\(profile.username)@\(profile.host)")
                 }
             }
-            // Keyboard shortcut handlers (Cmd+N, Cmd+O)
-            .onReceive(NotificationCenter.default.publisher(for: .showNewConnection)) { _ in
-                showingAddConnection = true
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .showQuickConnect)) { _ in
-                showingQuickConnect = true
-            }
+            // Keyboard shortcut handlers (Cmd+N, Cmd+O) are owned by ContentView
+            // to avoid double sheet presentation. See #47.
         }
     }
     
