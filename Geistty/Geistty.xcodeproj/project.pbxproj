@@ -44,6 +44,7 @@
 		A1000023 /* CredentialProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* CredentialProvider.swift */; };
 		A1000024 /* SSHKeyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* SSHKeyParser.swift */; };
 		A1000025 /* BiometricGatekeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025 /* BiometricGatekeeper.swift */; };
+		A1000026 /* SSHCommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026 /* SSHCommandRunner.swift */; };
 		A1000030 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* ConnectionListView.swift */; };
 		A1000031 /* ConnectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* ConnectionEditorView.swift */; };
 		A1000050 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* SettingsView.swift */; };
@@ -210,6 +211,7 @@
 		A2000087 /* TmuxMultiPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiPaneView.swift; sourceTree = "<group>"; };
 		A2000088 /* TmuxWindowPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowPickerView.swift; sourceTree = "<group>"; };
 		A2000090 /* NIOSSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NIOSSHConnection.swift; sourceTree = "<group>"; };
+		A2000026 /* SSHCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHCommandRunner.swift; sourceTree = "<group>"; };
 		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
 		A20000A2 /* KeyTableIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTableIndicatorView.swift; sourceTree = "<group>"; };
 		A2000096 /* TmuxSessionNameResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolver.swift; sourceTree = "<group>"; };
@@ -331,6 +333,7 @@
 			children = (
 				A2000004 /* SSHSession.swift */,
 				A2000090 /* NIOSSHConnection.swift */,
+				A2000026 /* SSHCommandRunner.swift */,
 				A2000084 /* TmuxLayout.swift */,
 				A2000082 /* TmuxModels.swift */,
 				A2000083 /* TmuxSessionManager.swift */,
@@ -649,6 +652,7 @@
 				A10000A9 /* RawTerminalUIViewController+WindowPicker.swift in Sources */,
 				A1000004 /* SSHSession.swift in Sources */,
 				A1000090 /* NIOSSHConnection.swift in Sources */,
+				A1000026 /* SSHCommandRunner.swift in Sources */,
 				A1000084 /* TmuxLayout.swift in Sources */,
 				A1000082 /* TmuxModels.swift in Sources */,
 				A1000083 /* TmuxSessionManager.swift in Sources */,
