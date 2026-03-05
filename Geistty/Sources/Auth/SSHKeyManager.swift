@@ -16,6 +16,7 @@ private let logger = Logger(subsystem: "com.geistty", category: "SSHKey")
 enum SSHKeyType: String, CaseIterable, Identifiable {
     case ed25519 = "ed25519"
     case ecdsa = "ecdsa"
+    case secureEnclaveP256 = "secure-enclave-p256"
     case rsa2048 = "rsa-2048"
     case rsa4096 = "rsa-4096"
     
@@ -25,6 +26,7 @@ enum SSHKeyType: String, CaseIterable, Identifiable {
         switch self {
         case .ed25519: return "Ed25519 (Recommended)"
         case .ecdsa: return "ECDSA (P-256)"
+        case .secureEnclaveP256: return "Secure Enclave (P-256)"
         case .rsa2048: return "RSA 2048-bit"
         case .rsa4096: return "RSA 4096-bit"
         }
@@ -34,9 +36,16 @@ enum SSHKeyType: String, CaseIterable, Identifiable {
         switch self {
         case .ed25519: return 256
         case .ecdsa: return 256
+        case .secureEnclaveP256: return 256
         case .rsa2048: return 2048
         case .rsa4096: return 4096
         }
+    }
+    
+    /// Whether this key type uses the Secure Enclave for storage and signing.
+    /// SE keys are device-bound, non-exportable, and the private key never leaves hardware.
+    var isSecureEnclave: Bool {
+        self == .secureEnclaveP256
     }
 }
 
@@ -48,6 +57,8 @@ struct SSHKeyPair: Identifiable {
     let publicKey: String
     let createdAt: Date
     let isSecureEnclave: Bool
+    /// Whether biometric auth is required to use this key
+    let requiresBiometric: Bool
     
     /// The fingerprint of the public key (SHA256)
     var fingerprint: String {
@@ -97,6 +108,10 @@ class SSHKeyManager: ObservableObject {
             (privateKey, publicKey) = try generateEd25519Key(name: name)
         case .ecdsa:
             throw SSHKeyError.notSupported
+        case .secureEnclaveP256:
+            // SE keys use a completely different flow — they cannot be exported as Data.
+            // Use generateSecureEnclaveKey() instead.
+            return try generateSecureEnclaveKey(name: name)
         case .rsa2048, .rsa4096:
             (privateKey, publicKey) = try generateRSAKey(name: name, bits: type.keySize)
         }
@@ -111,7 +126,8 @@ class SSHKeyManager: ObservableObject {
             type: type,
             publicKey: publicKey,
             createdAt: Date(),
-            isSecureEnclave: false
+            isSecureEnclave: false,
+            requiresBiometric: false
         )
         
         saveKeyMetadata(keyPair)
@@ -210,6 +226,82 @@ class SSHKeyManager: ObservableObject {
         return pemData
     }
     
+    /// Generate a Secure Enclave P-256 key.
+    ///
+    /// Unlike software keys, SE keys cannot be exported — the private key never leaves
+    /// the hardware. We store the key in the Keychain with `kSecAttrTokenIDSecureEnclave`
+    /// and retrieve it by application tag. The public key is formatted as
+    /// `ecdsa-sha2-nistp256` for SSH `authorized_keys`.
+    private func generateSecureEnclaveKey(name: String) throws -> SSHKeyPair {
+        logger.info("🔐 Generating Secure Enclave P-256 key: \(name)")
+        
+        // Generate the SE key — CryptoKit handles Keychain storage automatically
+        // when using SecureEnclave.P256.Signing.PrivateKey()
+        let seKey: SecureEnclave.P256.Signing.PrivateKey
+        do {
+            seKey = try SecureEnclave.P256.Signing.PrivateKey()
+        } catch {
+            logger.error("🔐 Secure Enclave key generation failed: \(error.localizedDescription)")
+            throw SSHKeyError.secureEnclaveNotAvailable
+        }
+        
+        // Store the SE key's data representation in Keychain so we can reconstruct it later.
+        // SecureEnclave.P256 keys have a `dataRepresentation` that is an opaque blob
+        // (NOT the raw private key) — it can only be used to reconstruct the key on the
+        // same device's Secure Enclave.
+        try keychain.saveSecureEnclaveKey(seKey.dataRepresentation, name: name)
+        
+        // Format the public key in SSH authorized_keys format
+        let publicKeyString = formatP256PublicKey(seKey.publicKey, name: name)
+        
+        let keyPair = SSHKeyPair(
+            id: UUID(),
+            name: name,
+            type: .secureEnclaveP256,
+            publicKey: publicKeyString,
+            createdAt: Date(),
+            isSecureEnclave: true,
+            requiresBiometric: false
+        )
+        
+        saveKeyMetadata(keyPair)
+        loadKeys()
+        
+        logger.info("✅ Generated Secure Enclave key: \(name)")
+        return keyPair
+    }
+    
+    /// Format a P-256 public key in SSH authorized_keys format: `ecdsa-sha2-nistp256 <base64> <comment>`
+    ///
+    /// SSH wire format for ECDSA (RFC 5656):
+    /// - string "ecdsa-sha2-nistp256"
+    /// - string "nistp256" (curve identifier)
+    /// - string Q (uncompressed point: 0x04 || x || y, 65 bytes for P-256)
+    private func formatP256PublicKey(_ publicKey: P256.Signing.PublicKey, name: String) -> String {
+        // Get the uncompressed point representation (0x04 || x || y)
+        let pointData = publicKey.x963Representation
+        
+        var keyBlob = Data()
+        appendSSHString(&keyBlob, "ecdsa-sha2-nistp256")
+        appendSSHString(&keyBlob, "nistp256")
+        appendSSHBytes(&keyBlob, pointData)
+        
+        return "ecdsa-sha2-nistp256 \(keyBlob.base64EncodedString()) \(name)@ghostty-ssh"
+    }
+    
+    /// Retrieve a Secure Enclave P-256 private key by name.
+    /// Returns the reconstructed SE key for signing — the actual private material
+    /// never leaves the Secure Enclave.
+    func getSecureEnclaveKey(name: String) throws -> SecureEnclave.P256.Signing.PrivateKey {
+        let dataRep = try keychain.getSecureEnclaveKey(name: name)
+        do {
+            return try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: dataRep)
+        } catch {
+            logger.error("🔐 Failed to reconstruct SE key '\(name)': \(error.localizedDescription)")
+            throw SSHKeyError.keyGenerationFailed
+        }
+    }
+
     /// Construct a PEM-armored string from a label and base64 body.
     /// The header/footer are assembled from parts so the full pattern
     /// never appears as a contiguous string literal in source — this
@@ -447,7 +539,8 @@ class SSHKeyManager: ObservableObject {
             type: type,
             publicKey: publicKey,
             createdAt: Date(),
-            isSecureEnclave: false
+            isSecureEnclave: false,
+            requiresBiometric: false
         )
         
         saveKeyMetadata(keyPair)
@@ -567,10 +660,48 @@ class SSHKeyManager: ObservableObject {
     
     /// Delete a key
     func deleteKey(name: String) throws {
-        try keychain.deleteSSHKey(name: name)
+        // Check if this is an SE key (need to delete from SE keychain entry too)
+        let metadata = loadKeyMetadata()
+        let isSecureEnclave = metadata.first { $0.name == name }?.isSecureEnclave ?? false
+        
+        if isSecureEnclave {
+            try? keychain.deleteSecureEnclaveKey(name: name)
+        } else {
+            try keychain.deleteSSHKey(name: name)
+        }
+        
         deleteKeyMetadata(name: name)
         loadKeys()
         logger.info("🗑️ Deleted key: \(name)")
+    }
+    
+    /// Update whether biometric authentication is required for a key.
+    /// This modifies only the metadata — no keychain re-keying needed since
+    /// biometric gating is handled at the app level via LAContext.
+    func setBiometricRequired(_ required: Bool, for keyName: String) {
+        var metadata = loadKeyMetadata()
+        guard let index = metadata.firstIndex(where: { $0.name == keyName }) else {
+            logger.warning("Cannot set biometric for key '\(keyName)': not found in metadata")
+            return
+        }
+        
+        let old = metadata[index]
+        metadata[index] = SSHKeyMetadata(
+            id: old.id,
+            name: old.name,
+            type: old.type,
+            publicKey: old.publicKey,
+            createdAt: old.createdAt,
+            isSecureEnclave: old.isSecureEnclave,
+            requiresBiometric: required
+        )
+        
+        if let data = try? JSONEncoder().encode(metadata) {
+            UserDefaults.standard.set(data, forKey: "ssh_key_metadata")
+        }
+        loadKeys()
+        
+        logger.info("🔐 Biometric \(required ? "enabled" : "disabled") for key '\(keyName)'")
     }
     
     // MARK: - Key Metadata Persistence
@@ -590,7 +721,8 @@ class SSHKeyManager: ObservableObject {
                 type: SSHKeyType(rawValue: meta.type) ?? .ed25519,
                 publicKey: meta.publicKey,
                 createdAt: meta.createdAt,
-                isSecureEnclave: meta.isSecureEnclave
+                isSecureEnclave: meta.isSecureEnclave,
+                requiresBiometric: meta.requiresBiometric
             )
         }
     }
@@ -607,7 +739,8 @@ class SSHKeyManager: ObservableObject {
             type: keyPair.type.rawValue,
             publicKey: keyPair.publicKey,
             createdAt: keyPair.createdAt,
-            isSecureEnclave: keyPair.isSecureEnclave
+            isSecureEnclave: keyPair.isSecureEnclave,
+            requiresBiometric: keyPair.requiresBiometric
         ))
         
         if let data = try? JSONEncoder().encode(metadata) {
@@ -642,6 +775,8 @@ enum SSHKeyError: LocalizedError {
     case keyNotFound
     case passphraseRequired
     case notSupported
+    case secureEnclaveNotAvailable
+    case biometricAuthRequired
     
     var errorDescription: String? {
         switch self {
@@ -657,6 +792,10 @@ enum SSHKeyError: LocalizedError {
             return "Passphrase required for this key"
         case .notSupported:
             return "This feature is not yet supported"
+        case .secureEnclaveNotAvailable:
+            return "Secure Enclave is not available on this device"
+        case .biometricAuthRequired:
+            return "Biometric authentication is required to use this key"
         }
     }
 }
@@ -669,4 +808,29 @@ private struct SSHKeyMetadata: Codable {
     let publicKey: String
     let createdAt: Date
     let isSecureEnclave: Bool
+    /// Whether biometric authentication is required before using this key.
+    /// Defaults to false for backwards compatibility with existing stored metadata.
+    let requiresBiometric: Bool
+    
+    init(id: UUID, name: String, type: String, publicKey: String, createdAt: Date, isSecureEnclave: Bool, requiresBiometric: Bool = false) {
+        self.id = id
+        self.name = name
+        self.type = type
+        self.publicKey = publicKey
+        self.createdAt = createdAt
+        self.isSecureEnclave = isSecureEnclave
+        self.requiresBiometric = requiresBiometric
+    }
+    
+    // Custom decoding to handle metadata saved before requiresBiometric existed
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        type = try container.decode(String.self, forKey: .type)
+        publicKey = try container.decode(String.self, forKey: .publicKey)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        isSecureEnclave = try container.decode(Bool.self, forKey: .isSecureEnclave)
+        requiresBiometric = try container.decodeIfPresent(Bool.self, forKey: .requiresBiometric) ?? false
+    }
 }

@@ -319,18 +319,18 @@ struct SSHKeyGeneratorView: View {
     
     enum KeyType: String, CaseIterable, Identifiable {
         case ed25519 = "Ed25519"
+        case secureEnclave = "Secure Enclave (P-256)"
         case rsa2048 = "RSA-2048"
         case rsa4096 = "RSA-4096"
-        case secureEnclave = "Secure Enclave"
         
         var id: String { rawValue }
         
         var description: String {
             switch self {
             case .ed25519: return "Modern, fast, recommended"
+            case .secureEnclave: return "Hardware-backed, device-bound, non-exportable"
             case .rsa2048: return "Compatible with older systems"
             case .rsa4096: return "Higher security, slower"
-            case .secureEnclave: return "Hardware-backed, most secure"
             }
         }
     }
@@ -342,8 +342,7 @@ struct SSHKeyGeneratorView: View {
                     .textInputAutocapitalization(.never)
                 
                 Picker("Key Type", selection: $keyType) {
-                    // Note: .secureEnclave excluded — not yet implemented (throws .notSupported)
-                    ForEach(KeyType.allCases.filter { $0 != .secureEnclave }) { type in
+                    ForEach(KeyType.allCases) { type in
                         VStack(alignment: .leading) {
                             Text(type.rawValue)
                             Text(type.description)
@@ -351,6 +350,23 @@ struct SSHKeyGeneratorView: View {
                                 .foregroundColor(.secondary)
                         }
                         .tag(type)
+                    }
+                }
+            }
+            
+            if keyType == .secureEnclave {
+                Section {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Device-Bound Key")
+                                .font(.subheadline.bold())
+                            Text("The private key is stored in the Secure Enclave and can never be exported or backed up. If you lose this device, you'll need to add a new key to your servers.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "lock.shield.fill")
+                            .foregroundColor(.green)
                     }
                 }
             }
@@ -422,8 +438,7 @@ struct SSHKeyGeneratorView: View {
                 case .rsa4096:
                     key = try keyManager.generateKey(name: keyName, type: .rsa4096)
                 case .secureEnclave:
-                    // Secure Enclave uses different API - not yet implemented
-                    throw SSHKeyError.notSupported
+                    key = try keyManager.generateKey(name: keyName, type: .secureEnclaveP256)
                 }
                 
                 await MainActor.run {
@@ -501,6 +516,7 @@ struct PublicKeyView: View {
 
 struct SSHKeyListView: View {
     @ObservedObject private var keyManager = SSHKeyManager.shared
+    @ObservedObject private var biometricGatekeeper = BiometricGatekeeper.shared
     @State private var showingGenerator = false
     @State private var showingFilePicker = false
     @State private var selectedKey: SSHKeyPair?
@@ -509,6 +525,8 @@ struct SSHKeyListView: View {
     @State private var importKeyName = ""
     @State private var importKeyData: Data?
     @State private var importError: String?
+    @State private var biometricError: String?
+    @State private var showingBiometricError = false
     
     var body: some View {
         List {
@@ -532,6 +550,18 @@ struct SSHKeyListView: View {
                                 UIPasteboard.general.string = key.publicKey
                             } label: {
                                 Label("Copy Public Key", systemImage: "doc.on.doc")
+                            }
+                            
+                            if biometricGatekeeper.isBiometricAvailable {
+                                Button {
+                                    toggleBiometric(for: key)
+                                } label: {
+                                    if key.requiresBiometric {
+                                        Label("Disable \(biometricGatekeeper.biometricTypeName)", systemImage: "faceid")
+                                    } else {
+                                        Label("Require \(biometricGatekeeper.biometricTypeName)", systemImage: "faceid")
+                                    }
+                                }
                             }
                             
                             Divider()
@@ -613,6 +643,30 @@ struct SSHKeyListView: View {
         } message: {
             Text(importError ?? "Unknown error")
         }
+        .alert("Biometric Error", isPresented: $showingBiometricError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(biometricError ?? "Unknown error")
+        }
+    }
+    
+    private func toggleBiometric(for key: SSHKeyPair) {
+        if key.requiresBiometric {
+            // Disabling biometric requires successful biometric auth first —
+            // prevents silent downgrade on a briefly unlocked device.
+            Task {
+                do {
+                    try await biometricGatekeeper.ensureAuthenticated()
+                    keyManager.setBiometricRequired(false, for: key.name)
+                } catch {
+                    biometricError = "Authenticate with \(biometricGatekeeper.biometricTypeName) to disable biometric protection"
+                    showingBiometricError = true
+                }
+            }
+        } else {
+            // Enabling biometric doesn't require auth — it's an additive security step
+            keyManager.setBiometricRequired(true, for: key.name)
+        }
     }
     
     private func importFromClipboard() {
@@ -679,6 +733,10 @@ struct SSHKeyRow: View {
                     if keyInfo.isSecureEnclave {
                         Text("• Secure Enclave")
                             .foregroundColor(.green)
+                    }
+                    if keyInfo.requiresBiometric {
+                        Text("• \(BiometricGatekeeper.shared.biometricTypeName)")
+                            .foregroundColor(.blue)
                     }
                 }
                 .font(.caption2)

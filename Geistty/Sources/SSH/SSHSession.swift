@@ -388,6 +388,7 @@ class SSHSession: ObservableObject, Identifiable {
     
     /// Build an SSHAuthMethod from an SSHCredential.
     /// Key parsing is delegated to SSHKeyParser (Sources/Auth/SSHKeyParser.swift).
+    /// Secure Enclave keys arrive pre-built as NIOSSHPrivateKey and bypass parsing.
     private func buildAuthMethod(from credential: SSHCredential) throws -> SSHAuthMethod {
         switch credential.authType {
         case .password(let password):
@@ -401,6 +402,10 @@ class SSHSession: ObservableObject, Identifiable {
         case .privateKeyData(let keyData, let passphrase):
             let privateKey = try SSHKeyParser.parsePrivateKey(keyData, passphrase: passphrase)
             return .publicKey(privateKey: privateKey)
+            
+        case .sshPrivateKey(let nioKey):
+            // Pre-built key (Secure Enclave) — no parsing needed
+            return .publicKey(privateKey: nioKey)
         }
     }
     

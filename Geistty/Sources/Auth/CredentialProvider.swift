@@ -20,6 +20,7 @@
 //
 
 import Foundation
+import NIOSSH
 import os.log
 
 private let logger = Logger(subsystem: "com.geistty", category: "Credentials")
@@ -42,6 +43,9 @@ struct SSHCredential {
         case password(String)
         case privateKey(path: String, passphrase: String?)
         case privateKeyData(Data, passphrase: String?)
+        /// Pre-built NIOSSHPrivateKey — used for Secure Enclave keys that bypass SSHKeyParser.
+        /// The NIOSSHPrivateKey wraps the SE key and handles signing internally.
+        case sshPrivateKey(NIOSSHPrivateKey)
     }
     
     let authType: AuthType
@@ -86,9 +90,27 @@ class SSHKeyCredentialProvider: CredentialProvider {
             throw SSHKeyError.keyNotFound
         }
         
-        // Get key data directly from keychain - no temp files needed for SwiftNIO-SSH
-        let keyData = try keyManager.getPrivateKey(name: keyName)
-        return SSHCredential(authType: .privateKeyData(keyData, passphrase: nil), source: "SSH Key: \(keyName)")
+        // Look up the key metadata to determine if it's a Secure Enclave key
+        guard let keyPair = keyManager.keys.first(where: { $0.name == keyName }) else {
+            throw SSHKeyError.keyNotFound
+        }
+        
+        // Biometric gate: if the key requires biometric auth, ensure the session is valid
+        if keyPair.requiresBiometric {
+            try await BiometricGatekeeper.shared.ensureAuthenticated()
+        }
+        
+        if keyPair.isSecureEnclave {
+            // SE key path: reconstruct the SE key and wrap in NIOSSHPrivateKey directly.
+            // This bypasses SSHKeyParser entirely — SE keys have no PEM representation.
+            let seKey = try keyManager.getSecureEnclaveKey(name: keyName)
+            let nioKey = NIOSSHPrivateKey(secureEnclaveP256Key: seKey)
+            return SSHCredential(authType: .sshPrivateKey(nioKey), source: "SSH Key (Secure Enclave): \(keyName)")
+        } else {
+            // Software key path: get raw PEM data for SSHKeyParser
+            let keyData = try keyManager.getPrivateKey(name: keyName)
+            return SSHCredential(authType: .privateKeyData(keyData, passphrase: nil), source: "SSH Key: \(keyName)")
+        }
     }
 }
 
