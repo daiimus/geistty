@@ -289,4 +289,35 @@ final class ConfigSyncThemeTests: XCTestCase {
         XCTAssertFalse(ConfigSyncManager.inlineColorKeys.contains("theme"))
         XCTAssertFalse(ConfigSyncManager.inlineColorKeys.contains("bold-color"))
     }
+    
+    // MARK: - Line ending preservation (#39)
+    
+    func testApplyThemePreservesCRLFLineEndings() {
+        let config = "font-family = Hack\r\ntheme = OldTheme\r\ncursor-style = block\r\n"
+        let result = ConfigSyncManager.applyTheme("Nord", to: config)
+        // Must preserve CRLF throughout
+        XCTAssertTrue(result.contains("\r\n"), "CRLF line endings should be preserved")
+        XCTAssertTrue(result.contains("theme = Nord"))
+        XCTAssertTrue(result.contains("font-family = Hack"))
+    }
+    
+    func testApplyThemePreservesLFLineEndings() {
+        let config = "font-family = Hack\ntheme = OldTheme\ncursor-style = block\n"
+        let result = ConfigSyncManager.applyTheme("Nord", to: config)
+        // Must NOT introduce CRLF
+        XCTAssertFalse(result.contains("\r\n"), "LF-only endings should not gain CR")
+        XCTAssertTrue(result.contains("theme = Nord"))
+    }
+    
+    func testApplyThemeCRLFWithInlineColorStripping() {
+        let config = "background = #000000\r\nforeground = #ffffff\r\nfont-family = Hack\r\n"
+        let result = ConfigSyncManager.applyTheme("Dracula+", to: config)
+        // Inline colors stripped, CRLF preserved
+        XCTAssertFalse(result.contains("#000000"))
+        XCTAssertFalse(result.contains("#ffffff"))
+        XCTAssertTrue(result.contains("theme = Dracula+"))
+        // All remaining line breaks should be CRLF
+        let withoutCRLF = result.replacingOccurrences(of: "\r\n", with: "CRLF")
+        XCTAssertFalse(withoutCRLF.contains("\n"), "No bare LF should exist when source uses CRLF")
+    }
 }

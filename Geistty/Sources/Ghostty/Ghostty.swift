@@ -240,6 +240,12 @@ extension Ghostty {
         /// Pinch gesture state
         private var pinchStartFontSize: Float = 14.0
         
+        /// Shared haptic feedback generators — reuse across gestures to avoid
+        /// per-tap allocation overhead (Apple recommends long-lived instances).
+        private let hapticLight = UIImpactFeedbackGenerator(style: .light)
+        private let hapticMedium = UIImpactFeedbackGenerator(style: .medium)
+        private let hapticNotification = UINotificationFeedbackGenerator()
+        
         /// Scroll indicator view
         private var scrollIndicator: UIView?
         private var scrollIndicatorHideTimer: Timer?
@@ -1103,8 +1109,7 @@ extension Ghostty {
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
             
             // Provide haptic feedback
-            let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
-            feedbackGenerator.impactOccurred()
+            hapticLight.impactOccurred()
         }
         
         /// Handle triple-tap for line selection
@@ -1124,8 +1129,7 @@ extension Ghostty {
             }
             
             // Provide haptic feedback
-            let feedbackGenerator = UIImpactFeedbackGenerator(style: .medium)
-            feedbackGenerator.impactOccurred()
+            hapticMedium.impactOccurred()
         }
         
         /// Handle two-finger double-tap to reset font size
@@ -1133,8 +1137,7 @@ extension Ghostty {
             resetFontSize()
             
             // Provide haptic feedback
-            let feedbackGenerator = UINotificationFeedbackGenerator()
-            feedbackGenerator.notificationOccurred(.success)
+            hapticNotification.notificationOccurred(.success)
         }
         
         // MARK: - UIGestureRecognizerDelegate
@@ -1380,8 +1383,7 @@ extension Ghostty {
             ctrlToggleActive = active
             
             // Haptic feedback when Ctrl toggle changes
-            let feedbackGenerator = UIImpactFeedbackGenerator(style: active ? .medium : .light)
-            feedbackGenerator.impactOccurred()
+            (active ? hapticMedium : hapticLight).impactOccurred()
         }
         
         /// Handle hardware keyboard key presses (Magic Keyboard, etc.)
@@ -2286,8 +2288,7 @@ extension Ghostty {
                 
             case .ended, .cancelled:
                 // Provide haptic feedback at end of gesture
-                let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
-                feedbackGenerator.impactOccurred()
+                hapticLight.impactOccurred()
                 
             default:
                 break
