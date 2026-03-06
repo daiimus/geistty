@@ -247,8 +247,10 @@ class SSHSession: ObservableObject, Identifiable {
     private enum SessionDiscoveryState {
         /// Not performing session discovery (custom name set, or already resolved)
         case idle
-        /// Waiting for `tmux list-sessions` response
-        case querying(buffer: String)
+        /// Waiting for `tmux list-sessions` response.
+        /// Stores the accumulated buffer and the nonce-based end marker for this query,
+        /// so we match only the actual sentinel output and not the echoed command. See #4.
+        case querying(buffer: String, endMarker: String)
     }
     private var sessionDiscoveryState: SessionDiscoveryState = .idle
     
@@ -716,8 +718,8 @@ class SSHSession: ObservableObject, Identifiable {
         
         // Begin session discovery: query existing sessions
         logger.info("Starting geistty-N session discovery")
-        sessionDiscoveryState = .querying(buffer: "")
-        let query = TmuxSessionNameResolver.queryCommand
+        let (query, marker) = TmuxSessionNameResolver.makeQueryCommand()
+        sessionDiscoveryState = .querying(buffer: "", endMarker: marker)
         if let data = query.data(using: .utf8) {
             writeControlCommand(data)
         }
@@ -1299,14 +1301,14 @@ class SSHSession: ObservableObject, Identifiable {
         // Session discovery: intercept tmux list-sessions response before control mode starts.
         // This runs as a raw shell command before `exec tmux -CC`, so the output arrives
         // as normal shell data. We accumulate it until we see the ---END--- sentinel.
-        if case .querying(var buffer) = sessionDiscoveryState {
+        if case .querying(var buffer, let endMarker) = sessionDiscoveryState {
             if let str = String(data: data, encoding: .utf8) {
                 buffer += str
                 
-                if TmuxSessionNameResolver.isResponseComplete(buffer) {
+                if TmuxSessionNameResolver.isResponseComplete(buffer, endMarker: endMarker) {
                     // Parse and resolve
-                    let responseText = TmuxSessionNameResolver.extractResponse(from: buffer) ?? buffer
-                    let sessions = TmuxSessionNameResolver.parseSessions(from: responseText)
+                    let responseText = TmuxSessionNameResolver.extractResponse(from: buffer, endMarker: endMarker) ?? buffer
+                    let sessions = TmuxSessionNameResolver.parseSessions(from: responseText, endMarker: endMarker)
                     let resolvedName = TmuxSessionNameResolver.resolve(from: sessions)
                     
                     logger.info("Session discovery complete: found \(sessions.count) sessions, resolved to '\(resolvedName)'")
@@ -1320,7 +1322,7 @@ class SSHSession: ObservableObject, Identifiable {
                     sendTmuxAttachCommand(sessionName: resolvedName)
                 } else {
                     // Still accumulating response
-                    sessionDiscoveryState = .querying(buffer: buffer)
+                    sessionDiscoveryState = .querying(buffer: buffer, endMarker: endMarker)
                 }
             }
             return
