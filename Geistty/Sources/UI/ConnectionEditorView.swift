@@ -37,24 +37,50 @@ struct ConnectionEditorView: View {
     // SSH Key manager
     @ObservedObject private var keyManager = SSHKeyManager.shared
     
+    // U9: Keyboard field navigation via @FocusState
+    private enum Field: Hashable {
+        case name, host, port, username, password, tmuxSession
+    }
+    @FocusState private var focusedField: Field?
+    
     var body: some View {
         Form {
             // Basic Info
             Section("Connection") {
                 TextField("Name", text: $name)
                     .textContentType(.name)
+                    .focused($focusedField, equals: .name)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .host }
+                    .accessibilityLabel("Connection name")
                 
                 TextField("Host", text: $host)
                     .textContentType(.URL)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
+                    .focused($focusedField, equals: .host)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .port }
+                    .accessibilityLabel("Host address")
                 
                 TextField("Port", text: $port)
                     .keyboardType(.numberPad)
+                    .focused($focusedField, equals: .port)
+                    .accessibilityLabel("Port number")
                 
                 TextField("Username", text: $username)
                     .textContentType(.username)
                     .textInputAutocapitalization(.never)
+                    .focused($focusedField, equals: .username)
+                    .submitLabel(authMethod == .password ? .next : .done)
+                    .onSubmit {
+                        if authMethod == .password {
+                            focusedField = .password
+                        } else {
+                            focusedField = nil
+                        }
+                    }
+                    .accessibilityLabel("SSH username")
             }
             
             // Authentication
@@ -69,6 +95,10 @@ struct ConnectionEditorView: View {
                 if authMethod == .password {
                     SecureField("Password", text: $password)
                         .textContentType(.password)
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.done)
+                        .onSubmit { focusedField = nil }
+                        .accessibilityLabel("SSH password")
                 }
                 
                 Text(authMethod.description)
@@ -162,6 +192,10 @@ struct ConnectionEditorView: View {
                     TextField("Session Name", text: $tmuxSessionName)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .focused($focusedField, equals: .tmuxSession)
+                        .submitLabel(.done)
+                        .onSubmit { focusedField = nil }
+                        .accessibilityLabel("tmux session name")
                 }
             } header: {
                 Text("tmux")
@@ -170,6 +204,15 @@ struct ConnectionEditorView: View {
                     Text("Automatically attach to or create a tmux session on connect. Leave session name empty to use \"main\".")
                 } else {
                     Text("Enable to automatically start or attach to a tmux session.")
+                }
+            }
+            
+            // Validation feedback — shown only when there's an error
+            if let message = validationMessage {
+                Section {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .foregroundColor(.red)
+                        .font(.callout)
                 }
             }
         }
@@ -205,9 +248,26 @@ struct ConnectionEditorView: View {
     }
     
     private var isValid: Bool {
-        !name.isEmpty && !host.isEmpty && !username.isEmpty && (Int(port) ?? 0) > 0 && (Int(port) ?? 0) <= 65535 &&
-        (authMethod == .password ? !password.isEmpty : true) &&
-        (authMethod == .sshKey ? selectedKeyName != nil : true)
+        validationMessage == nil
+    }
+    
+    /// Returns a human-readable validation error, or nil if the form is valid.
+    ///
+    /// U2: For edits, empty password means "keep existing keychain entry" — only
+    /// require a password on new connections.
+    /// U3: Provides specific field-level feedback instead of a silent disabled Save.
+    private var validationMessage: String? {
+        if name.isEmpty { return "Name is required" }
+        if host.isEmpty { return "Host is required" }
+        if username.isEmpty { return "Username is required" }
+        let portNum = Int(port) ?? 0
+        if portNum <= 0 || portNum > 65535 { return "Port must be 1\u{2013}65535" }
+        if authMethod == .sshKey && selectedKeyName == nil { return "Select an SSH key" }
+        // Only require password on new connections — edits keep the existing keychain entry
+        if authMethod == .password && password.isEmpty && profile == nil {
+            return "Password is required"
+        }
+        return nil
     }
     
     private func importKey(from url: URL) {

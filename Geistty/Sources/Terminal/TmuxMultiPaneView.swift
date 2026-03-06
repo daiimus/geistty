@@ -664,6 +664,7 @@ class DividerOverlayView: UIView {
         dividerView.direction = split.direction == .horizontal ? .horizontal : .vertical
         dividerView.hitAreaSize = hitAreaSize
         dividerView.containerRect = rect
+        dividerView.updateAccessibilityLabel()
         
         // Thin visual divider (2pt) — matches TmuxSplitNodeView and focus border.
         // tmux's 1-character-cell divider is accounted for in the split *ratio*,
@@ -833,6 +834,17 @@ class DividerHitAreaView: UIView {
         
         panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         addGestureRecognizer(panGesture)
+        
+        // Accessibility: make dividers discoverable by VoiceOver
+        isAccessibilityElement = true
+        accessibilityTraits = .adjustable
+        accessibilityHint = "Swipe up or down to resize panes"
+    }
+    
+    /// Update the accessibility label when paneId or direction changes.
+    func updateAccessibilityLabel() {
+        let directionText = direction == .horizontal ? "vertical" : "horizontal"
+        accessibilityLabel = "Pane \(paneId) \(directionText) divider"
     }
     
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {

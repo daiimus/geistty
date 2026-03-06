@@ -113,6 +113,10 @@ struct CommandPaletteView: View {
                 Button { moveSelection(by: 1) } label: { Color.clear }
                     .buttonStyle(.plain)
                     .keyboardShortcut(.init("n"), modifiers: [.control])
+                // Escape to dismiss (T10)
+                Button { dismiss() } label: { Color.clear }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.escape, modifiers: [])
             }
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
@@ -234,6 +238,8 @@ private struct CommandRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(command.title)
+        .accessibilityHint(command.description)
     }
 }
 
