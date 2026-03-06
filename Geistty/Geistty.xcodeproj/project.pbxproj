@@ -32,6 +32,13 @@
 		B1000014 /* TmuxWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000024 /* TmuxWindowTests.swift */; };
 		B1000015 /* OrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000025 /* OrientationTests.swift */; };
 		B1000016 /* StressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000026 /* StressTests.swift */; };
+		B1000017 /* ThemePickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000027 /* ThemePickerTests.swift */; };
+		B1000018 /* FontPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000028 /* FontPickerTests.swift */; };
+		B1000019 /* SettingsValueChangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000029 /* SettingsValueChangeTests.swift */; };
+		B100001A /* ProfileCRUDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200002A /* ProfileCRUDTests.swift */; };
+		B100001B /* ConnectionEditorValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200002B /* ConnectionEditorValidationTests.swift */; };
+		B100001C /* SSHKeyGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200002C /* SSHKeyGeneratorTests.swift */; };
+		B100001D /* QuickConnectInlineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200002D /* QuickConnectInlineTests.swift */; };
 		A1000001 /* GeisttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* GeisttyApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
@@ -185,6 +192,13 @@
 		B2000024 /* TmuxWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowTests.swift; sourceTree = "<group>"; };
 		B2000025 /* OrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrientationTests.swift; sourceTree = "<group>"; };
 		B2000026 /* StressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StressTests.swift; sourceTree = "<group>"; };
+		B2000027 /* ThemePickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePickerTests.swift; sourceTree = "<group>"; };
+		B2000028 /* FontPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontPickerTests.swift; sourceTree = "<group>"; };
+		B2000029 /* SettingsValueChangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsValueChangeTests.swift; sourceTree = "<group>"; };
+		B200002A /* ProfileCRUDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileCRUDTests.swift; sourceTree = "<group>"; };
+		B200002B /* ConnectionEditorValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEditorValidationTests.swift; sourceTree = "<group>"; };
+		B200002C /* SSHKeyGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyGeneratorTests.swift; sourceTree = "<group>"; };
+		B200002D /* QuickConnectInlineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickConnectInlineTests.swift; sourceTree = "<group>"; };
 		B2000010 /* GeisttyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000001 /* GeisttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyApp.swift; sourceTree = "<group>"; };
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -471,6 +485,13 @@
 				B200000B /* SettingsTests.swift */,
 				B200000C /* SSHKeyManagerTests.swift */,
 				B200000D /* ErrorViewTests.swift */,
+				B2000027 /* ThemePickerTests.swift */,
+				B2000028 /* FontPickerTests.swift */,
+				B2000029 /* SettingsValueChangeTests.swift */,
+				B200002A /* ProfileCRUDTests.swift */,
+				B200002B /* ConnectionEditorValidationTests.swift */,
+				B200002C /* SSHKeyGeneratorTests.swift */,
+				B200002D /* QuickConnectInlineTests.swift */,
 			);
 			path = DisconnectedTests;
 			sourceTree = "<group>";
@@ -777,6 +798,13 @@
 				B1000014 /* TmuxWindowTests.swift in Sources */,
 				B1000015 /* OrientationTests.swift in Sources */,
 				B1000016 /* StressTests.swift in Sources */,
+				B1000017 /* ThemePickerTests.swift in Sources */,
+				B1000018 /* FontPickerTests.swift in Sources */,
+				B1000019 /* SettingsValueChangeTests.swift in Sources */,
+				B100001A /* ProfileCRUDTests.swift in Sources */,
+				B100001B /* ConnectionEditorValidationTests.swift in Sources */,
+				B100001C /* SSHKeyGeneratorTests.swift in Sources */,
+				B100001D /* QuickConnectInlineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

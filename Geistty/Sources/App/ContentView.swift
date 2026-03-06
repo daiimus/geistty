@@ -105,15 +105,18 @@ struct ContentView: View {
                                 } label: {
                                     Label("Quick Connect", systemImage: "bolt.fill")
                                 }
+                                .accessibilityIdentifier("ConnectionMenuQuickConnect")
                                 
                                 Button {
                                     showConnectionList = true
                                 } label: {
                                     Label("Saved Connections", systemImage: "list.bullet")
                                 }
+                                .accessibilityIdentifier("ConnectionMenuSavedConnections")
                             } label: {
                                 Image(systemName: "plus.circle")
                             }
+                            .accessibilityIdentifier("ConnectionMenu")
                         }
                     }
                 }
@@ -280,10 +283,12 @@ struct ConnectingView: View {
         VStack(spacing: 20) {
             ProgressView()
                 .scaleEffect(1.5)
+                .accessibilityIdentifier("ConnectingSpinner")
             
             Text("Connecting...")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("ConnectingLabel")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backgroundColor)
@@ -327,6 +332,7 @@ struct ErrorView: View {
                 Text(conn)
                     .font(.headline)
                     .foregroundStyle(.primary)
+                    .accessibilityIdentifier("ErrorConnectionDescription")
             }
             
             Text(message)
@@ -404,6 +410,7 @@ struct ConnectionSheet: View {
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
                     }
+                    .accessibilityIdentifier("SheetPortField")
                 }
                 
                 Section("Authentication") {
@@ -445,6 +452,7 @@ struct ConnectionSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("SheetCancelButton")
                 }
             }
         }

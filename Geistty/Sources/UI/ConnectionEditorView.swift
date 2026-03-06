@@ -155,6 +155,7 @@ struct ConnectionEditorView: View {
                                 .tag(key.name as String?)
                             }
                         }
+                        .accessibilityIdentifier("SSHKeyPicker")
                         
                         HStack {
                             Button {
@@ -164,6 +165,7 @@ struct ConnectionEditorView: View {
                                     .font(.caption)
                             }
                             .buttonStyle(.bordered)
+                            .accessibilityIdentifier("ImportKeyButton")
                             
                             NavigationLink {
                                 SSHKeyGeneratorView()
@@ -172,6 +174,7 @@ struct ConnectionEditorView: View {
                                     .font(.caption)
                             }
                             .buttonStyle(.bordered)
+                            .accessibilityIdentifier("GenerateKeyLink")
                             
                             NavigationLink {
                                 SSHKeyListView()
@@ -180,6 +183,7 @@ struct ConnectionEditorView: View {
                                     .font(.caption)
                             }
                             .buttonStyle(.bordered)
+                            .accessibilityIdentifier("ManageKeysLink")
                         }
                     }
                 }
@@ -222,6 +226,7 @@ struct ConnectionEditorView: View {
                     Label(message, systemImage: "exclamationmark.triangle")
                         .foregroundColor(.red)
                         .font(.callout)
+                        .accessibilityIdentifier("ValidationMessage")
                 }
             }
         }
@@ -411,6 +416,7 @@ struct SSHKeyGeneratorView: View {
             Section("Key Details") {
                 TextField("Key Name", text: $keyName)
                     .textInputAutocapitalization(.never)
+                    .accessibilityIdentifier("KeyNameField")
                 
                 Picker("Key Type", selection: $keyType) {
                     ForEach(KeyType.allCases) { type in
@@ -423,6 +429,7 @@ struct SSHKeyGeneratorView: View {
                         .tag(type)
                     }
                 }
+                .accessibilityIdentifier("KeyTypePicker")
             }
             
             if keyType == .secureEnclave {
@@ -460,12 +467,14 @@ struct SSHKeyGeneratorView: View {
                         } label: {
                             Label("View Public Key", systemImage: "eye")
                         }
+                        .accessibilityIdentifier("ViewPublicKeyButton")
                         
                         Button {
                             copyPublicKey(key)
                         } label: {
                             Label("Copy Public Key", systemImage: "doc.on.doc")
                         }
+                        .accessibilityIdentifier("CopyPublicKeyButton")
                     }
                 }
             }
@@ -484,6 +493,7 @@ struct SSHKeyGeneratorView: View {
                     }
                 }
                 .disabled(keyName.isEmpty || isGenerating || generatedKey != nil)
+                .accessibilityIdentifier("GenerateButton")
             }
         }
         .sheet(isPresented: $showingPublicKey) {
@@ -582,6 +592,7 @@ struct PublicKeyView: View {
                         .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(8)
                         .textSelection(.enabled)
+                        .accessibilityIdentifier("PublicKeyText")
                     
                     // Action buttons
                     VStack(spacing: 12) {
@@ -599,6 +610,7 @@ struct PublicKeyView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(copied ? .green : .accentColor)
+                        .accessibilityIdentifier("PublicKeyCopyButton")
                         
                         Button {
                             showingInstaller = true
@@ -607,6 +619,7 @@ struct PublicKeyView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityIdentifier("InstallOnServerButton")
                     }
                 }
                 .padding()
@@ -618,6 +631,7 @@ struct PublicKeyView: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("PublicKeyDoneButton")
                 }
             }
             .sheet(isPresented: $showingInstaller) {
@@ -888,6 +902,7 @@ struct SSHKeyRow: View {
                 .foregroundColor(.secondary)
             }
         }
+        .accessibilityIdentifier("SSHKeyRow-\(keyInfo.name)")
     }
 }
 
@@ -970,6 +985,7 @@ struct PublicKeyInstallerView: View {
                             Text(profile.displayString).tag(profile.id as UUID?)
                         }
                     }
+                    .accessibilityIdentifier("InstallerProfilePicker")
                     .onChange(of: selectedProfileId) { _, newValue in
                         if let id = newValue,
                            let profile = profileManager.profiles.first(where: { $0.id == id }) {
@@ -991,19 +1007,23 @@ struct PublicKeyInstallerView: View {
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                     .disabled(isWorking)
+                    .accessibilityIdentifier("InstallerHostField")
                 
                 TextField("Port", text: $port)
                     .keyboardType(.numberPad)
                     .disabled(isWorking)
+                    .accessibilityIdentifier("InstallerPortField")
                 
                 TextField("Username", text: $username)
                     .textContentType(.username)
                     .textInputAutocapitalization(.never)
                     .disabled(isWorking)
+                    .accessibilityIdentifier("InstallerUsernameField")
                 
                 SecureField("Password", text: $password)
                     .textContentType(.password)
                     .disabled(isWorking)
+                    .accessibilityIdentifier("InstallerPasswordField")
             } header: {
                 Text("Server")
             } footer: {
@@ -1045,6 +1065,7 @@ struct PublicKeyInstallerView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .disabled(!canInstall)
+                .accessibilityIdentifier("InstallKeyButton")
                 
                 if case .failed(let message) = installState {
                     Text(message)

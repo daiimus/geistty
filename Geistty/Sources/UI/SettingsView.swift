@@ -250,6 +250,7 @@ struct SettingsView: View {
                         Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")
                             .foregroundStyle(.secondary)
                     }
+                    .accessibilityIdentifier("VersionLabel")
                     
                     HStack {
                         Text("Terminal Engine")
@@ -257,6 +258,7 @@ struct SettingsView: View {
                         Text("Ghostty")
                             .foregroundStyle(.secondary)
                     }
+                    .accessibilityIdentifier("TerminalEngineLabel")
                 }
             }
             .listStyle(.insetGrouped)
@@ -386,6 +388,7 @@ struct ThemeRow: View {
             }
             .padding(.vertical, 4)
         }
+        .accessibilityIdentifier("ThemeRow-\(theme.name)")
     }
 }
 
@@ -464,6 +467,7 @@ struct FontPickerView: View {
                         }
                     }
                 }
+                .accessibilityIdentifier("FontRow-\(font)")
             }
         }
         .listStyle(.insetGrouped)
@@ -507,6 +511,7 @@ struct ConfigEditorView: View {
                 text: $configText,
                 theme: theme
             )
+            .accessibilityIdentifier("ConfigTextEditor")
             
             // Status bar
             HStack {
@@ -537,6 +542,7 @@ struct ConfigEditorView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
             .background(Color(theme.background).opacity(0.8))
+            .accessibilityIdentifier("ConfigStatusBar")
         }
         .background(Color(theme.background))
         .preferredColorScheme(theme.isDark ? .dark : .light)
@@ -549,6 +555,7 @@ struct ConfigEditorView: View {
                         configText = originalText
                         saveResult = nil
                     }
+                    .accessibilityIdentifier("ConfigDiscardButton")
                 }
             }
             
@@ -560,12 +567,14 @@ struct ConfigEditorView: View {
                         Label("Save", systemImage: "square.and.arrow.down")
                     }
                     .disabled(!hasChanges)
+                    .accessibilityIdentifier("ConfigSaveButton")
                     
                     Button {
                         showResetConfirmation = true
                     } label: {
                         Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
                     }
+                    .accessibilityIdentifier("ConfigResetButton")
                     
                     Divider()
                     
@@ -574,9 +583,11 @@ struct ConfigEditorView: View {
                     } label: {
                         Label("Copy All", systemImage: "doc.on.doc")
                     }
+                    .accessibilityIdentifier("ConfigCopyButton")
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityIdentifier("ConfigMenuButton")
             }
         }
         .alert("Reset Configuration?", isPresented: $showResetConfirmation) {
