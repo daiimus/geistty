@@ -41,6 +41,22 @@ struct SSHKeyParseResult {
 /// Utility for parsing SSH private keys
 enum SSHKeyParser {
     
+    /// Check whether a PEM string indicates an encrypted private key.
+    /// Matches specific PEM header patterns rather than a blanket `contains("ENCRYPTED")`
+    /// to avoid false positives from key data or comments that happen to contain that word.
+    ///
+    /// Recognized patterns:
+    /// - `-----BEGIN ENCRYPTED PRIVATE KEY-----` (PKCS#8 encrypted)
+    /// - `Proc-Type: 4,ENCRYPTED` (traditional PEM encrypted header)
+    ///
+    /// OpenSSH format (`-----BEGIN OPENSSH PRIVATE KEY-----`) stores encryption info
+    /// in the binary payload (`cipherName != "none"`), not in the PEM header — those
+    /// keys are detected during parsing, not here.
+    private static func isPEMEncrypted(_ pemString: String) -> Bool {
+        pemString.contains("BEGIN ENCRYPTED PRIVATE KEY") ||
+        pemString.contains("Proc-Type: 4,ENCRYPTED")
+    }
+    
     /// Parse a private key from PEM data and extract public key + key type.
     /// This is the preferred entry point for key import — it returns everything
     /// needed to populate SSHKeyPair metadata without placeholder strings.
@@ -50,7 +66,7 @@ enum SSHKeyParser {
         }
         
         // Encrypted keys require passphrase handling
-        if pemString.contains("ENCRYPTED") && passphrase == nil {
+        if isPEMEncrypted(pemString) && passphrase == nil {
             throw SSHKeyParseError.encryptedKeyNoPassphrase
         }
         
@@ -114,7 +130,7 @@ enum SSHKeyParser {
         }
         
         // Encrypted keys require passphrase handling
-        if pemString.contains("ENCRYPTED") && passphrase == nil {
+        if isPEMEncrypted(pemString) && passphrase == nil {
             throw SSHKeyParseError.encryptedKeyNoPassphrase
         }
         

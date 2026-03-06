@@ -307,8 +307,65 @@ final class SSHKeyParserTests: XCTestCase {
     }
     
     func testRejectEncryptedKeyWithoutPassphrase() {
-        // Simulate an encrypted OpenSSH key header
-        let encryptedPEM = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", "ENCRYPTED-b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0")
+        // Construct a minimal encrypted OpenSSH key binary:
+        // openssh-key-v1\0 + cipher="aes256-ctr" + kdf="bcrypt" + kdfoptions + nkeys=1 + pubkey + privkey
+        var payload = Data()
+        payload.append("openssh-key-v1\0".data(using: .utf8)!)
+        
+        func appendString(_ s: String) {
+            var len = UInt32(s.utf8.count).bigEndian
+            payload.append(Data(bytes: &len, count: 4))
+            payload.append(s.data(using: .utf8)!)
+        }
+        func appendBytes(_ d: Data) {
+            var len = UInt32(d.count).bigEndian
+            payload.append(Data(bytes: &len, count: 4))
+            payload.append(d)
+        }
+        
+        appendString("aes256-ctr")     // ciphername — indicates encryption
+        appendString("bcrypt")          // kdfname
+        appendBytes(Data(repeating: 0, count: 8))  // kdfoptions (dummy)
+        var nkeys = UInt32(1).bigEndian
+        payload.append(Data(bytes: &nkeys, count: 4))  // number of keys
+        appendBytes(Data(repeating: 0, count: 16))      // public key (dummy)
+        appendBytes(Data(repeating: 0, count: 32))      // encrypted private data (dummy)
+        
+        let base64 = payload.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
+        let encryptedPEM = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", base64)
+        let pemData = encryptedPEM.data(using: .utf8)!
+        
+        XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
+            guard case SSHKeyParseError.encryptedKeyNoPassphrase = error else {
+                XCTFail("Expected encryptedKeyNoPassphrase error, got \(error)")
+                return
+            }
+        }
+    }
+    
+    func testRejectPKCS8EncryptedKeyWithoutPassphrase() {
+        // PKCS#8 encrypted keys use "BEGIN ENCRYPTED PRIVATE KEY" header
+        let encryptedPEM = SSHKeyManager.pemArmor("ENCRYPTED PRIVATE KEY", "MIIFHDBOBgkqhkiG9w0BBQ0wQTA=")
+        let pemData = encryptedPEM.data(using: .utf8)!
+        
+        XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
+            guard case SSHKeyParseError.encryptedKeyNoPassphrase = error else {
+                XCTFail("Expected encryptedKeyNoPassphrase error, got \(error)")
+                return
+            }
+        }
+    }
+    
+    func testRejectTraditionalPEMEncryptedKeyWithoutPassphrase() {
+        // Traditional PEM encrypted keys have "Proc-Type: 4,ENCRYPTED" header
+        let encryptedPEM = """
+        -----BEGIN RSA PRIVATE KEY-----
+        Proc-Type: 4,ENCRYPTED
+        DEK-Info: AES-128-CBC,AABBCCDDEEFF00112233445566778899
+        
+        MIIBuwIBAAJBALRiMLAHudeSA/x3hB2f+2NRkJWn8r4=
+        -----END RSA PRIVATE KEY-----
+        """
         let pemData = encryptedPEM.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKey(pemData)) { error in
@@ -636,8 +693,31 @@ final class SSHKeyParserTests: XCTestCase {
     }
     
     func testParseWithPublicKeyRejectsEncryptedKey() {
-        // parsePrivateKeyWithPublicKey should throw on encrypted keys without passphrase
-        let encryptedPEM = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", "ENCRYPTED-b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0")
+        // Construct a minimal encrypted OpenSSH key binary (same as above)
+        var payload = Data()
+        payload.append("openssh-key-v1\0".data(using: .utf8)!)
+        
+        func appendString(_ s: String) {
+            var len = UInt32(s.utf8.count).bigEndian
+            payload.append(Data(bytes: &len, count: 4))
+            payload.append(s.data(using: .utf8)!)
+        }
+        func appendBytes(_ d: Data) {
+            var len = UInt32(d.count).bigEndian
+            payload.append(Data(bytes: &len, count: 4))
+            payload.append(d)
+        }
+        
+        appendString("aes256-ctr")     // ciphername — indicates encryption
+        appendString("bcrypt")          // kdfname
+        appendBytes(Data(repeating: 0, count: 8))  // kdfoptions (dummy)
+        var nkeys = UInt32(1).bigEndian
+        payload.append(Data(bytes: &nkeys, count: 4))
+        appendBytes(Data(repeating: 0, count: 16))
+        appendBytes(Data(repeating: 0, count: 32))
+        
+        let base64 = payload.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
+        let encryptedPEM = SSHKeyManager.pemArmor("OPENSSH PRIVATE KEY", base64)
         let pemData = encryptedPEM.data(using: .utf8)!
         
         XCTAssertThrowsError(try SSHKeyParser.parsePrivateKeyWithPublicKey(pemData, comment: "test")) { error in
