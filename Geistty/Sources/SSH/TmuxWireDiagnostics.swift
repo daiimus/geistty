@@ -75,7 +75,7 @@ struct WireDiagnosticEvent: Equatable {
 ///
 /// This mirrors Ghostty's `control.zig` Parser but is deliberately simpler —
 /// we only need to parse enough to validate, not to dispatch.
-final class TmuxWireDiagnostics {
+@MainActor final class TmuxWireDiagnostics {
     
     /// Whether diagnostics are actively running
     private(set) var isActive = false

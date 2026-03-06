@@ -278,14 +278,14 @@ class TmuxSessionManager: ObservableObject {
         let observers = paneSurfaces.filter { $0.value.isMultiPaneObserver }
         let primaries = paneSurfaces.filter { !$0.value.isMultiPaneObserver }
         
-        for (paneId, surface) in observers {
+        for (paneId, surface) in observers.sorted(by: { $0.key < $1.key }) {
             #if DEBUG
             teardownOrderForTesting.append((paneId: paneId, isObserver: true))
             #endif
             surface.close()
             logger.debug("Closed observer surface for pane \(paneId)")
         }
-        for (paneId, surface) in primaries {
+        for (paneId, surface) in primaries.sorted(by: { $0.key < $1.key }) {
             #if DEBUG
             teardownOrderForTesting.append((paneId: paneId, isObserver: false))
             #endif
@@ -1430,10 +1430,10 @@ class TmuxSessionManager: ObservableObject {
         let observerPanes = paneSurfaces.filter { $0.value.isMultiPaneObserver }
         let primaryPanes = paneSurfaces.filter { !$0.value.isMultiPaneObserver }
         
-        for (paneId, _) in observerPanes {
+        for (paneId, _) in observerPanes.sorted(by: { $0.key < $1.key }) {
             removeSurface(for: paneId, paneActuallyClosed: true)
         }
-        for (paneId, _) in primaryPanes {
+        for (paneId, _) in primaryPanes.sorted(by: { $0.key < $1.key }) {
             removeSurface(for: paneId, paneActuallyClosed: true)
         }
         
