@@ -21,14 +21,23 @@ struct TmuxSessionNameResolver {
     /// The prefix for auto-generated session names
     static let prefix = "geistty-"
     
-    /// The sentinel line that marks the end of list-sessions output
-    static let endMarker = "---END---"
+    /// Generate a unique end marker with a nonce to prevent false positive
+    /// detection on the shell's command echo. Without the nonce, the echoed
+    /// `echo '---END---'` command itself would match `isResponseComplete`,
+    /// causing discovery to resolve prematurely with zero sessions. See #4.
+    static func makeEndMarker() -> String {
+        let nonce = UUID().uuidString.prefix(8)
+        return "---GEISTTY-END-\(nonce)---"
+    }
     
     /// The shell command to query existing tmux sessions.
-    /// Output format: `<session_name> <attached_count>` per line, followed by `---END---`.
+    /// Output format: `<session_name> <attached_count>` per line, followed by the end marker.
     /// `2>/dev/null` suppresses "no server running" errors when tmux isn't active.
-    static var queryCommand: String {
-        "tmux list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null; echo '\(endMarker)'\n"
+    /// Returns (command, endMarker) so the caller can pass the marker to response checking.
+    static func makeQueryCommand() -> (command: String, endMarker: String) {
+        let marker = makeEndMarker()
+        let command = "tmux list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null; echo '\(marker)'\n"
+        return (command, marker)
     }
     
     /// A parsed tmux session entry
@@ -43,11 +52,13 @@ struct TmuxSessionNameResolver {
     ///
     /// Each line has format: `<name> <attached_count>`
     /// Lines that don't match are ignored (shell noise, errors, prompts).
-    /// The `---END---` sentinel is stripped.
+    /// The end marker sentinel is stripped.
     ///
-    /// - Parameter output: Raw shell output string
+    /// - Parameters:
+    ///   - output: Raw shell output string
+    ///   - endMarker: The nonce-based end marker used for this query
     /// - Returns: Array of parsed session entries
-    static func parseSessions(from output: String) -> [SessionEntry] {
+    static func parseSessions(from output: String, endMarker: String) -> [SessionEntry] {
         var entries: [SessionEntry] = []
         
         for line in output.components(separatedBy: .newlines) {
@@ -112,19 +123,28 @@ struct TmuxSessionNameResolver {
     /// Check if a raw output buffer contains the end marker,
     /// meaning the list-sessions response is complete.
     ///
-    /// - Parameter buffer: Accumulated raw output
+    /// - Parameters:
+    ///   - buffer: Accumulated raw output
+    ///   - endMarker: The nonce-based end marker used for this query
     /// - Returns: true if the response is complete
-    static func isResponseComplete(_ buffer: String) -> Bool {
+    static func isResponseComplete(_ buffer: String, endMarker: String) -> Bool {
         buffer.contains(endMarker)
     }
     
     /// Extract the list-sessions response from a buffer that may contain
     /// shell prompt noise before and after the actual output.
     ///
-    /// - Parameter buffer: Accumulated raw output
+    /// Uses backwards search to find the LAST occurrence of the end marker.
+    /// This is critical because the shell's command echo contains the marker
+    /// embedded in `echo '---GEISTTY-END-XXXX---'`, which would match before
+    /// the actual sentinel output. The real sentinel is always the last occurrence.
+    ///
+    /// - Parameters:
+    ///   - buffer: Accumulated raw output
+    ///   - endMarker: The nonce-based end marker used for this query
     /// - Returns: The portion up to and including the end marker
-    static func extractResponse(from buffer: String) -> String? {
-        guard let range = buffer.range(of: endMarker) else { return nil }
+    static func extractResponse(from buffer: String, endMarker: String) -> String? {
+        guard let range = buffer.range(of: endMarker, options: .backwards) else { return nil }
         return String(buffer[buffer.startIndex..<range.upperBound])
     }
 }
