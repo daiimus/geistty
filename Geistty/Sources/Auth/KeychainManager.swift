@@ -272,6 +272,85 @@ class KeychainManager {
     
     // MARK: - Secure Enclave Key Storage
     
+    // MARK: - Host Key Storage (TOFU)
+    
+    /// Save a host's SSH public key for TOFU verification.
+    /// Stored as the OpenSSH public key string (e.g. "ssh-ed25519 AAAA...").
+    func saveHostKey(_ publicKeyString: String, for host: String, port: Int) throws {
+        let account = "host-key:\(host):\(port)"
+        guard let data = publicKeyString.data(using: .utf8) else {
+            throw KeychainError.dataConversionError
+        }
+        
+        // Delete existing first to avoid duplicate issues
+        try? deleteHostKey(for: host, port: port)
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        
+        let status = SecItemAdd(query as CFDictionary, nil)
+        
+        guard status == errSecSuccess else {
+            logger.error("Failed to save host key for \(host):\(port): OSStatus \(status)")
+            throw KeychainError.unexpectedStatus(status)
+        }
+        
+        logger.info("Saved host key for \(host):\(port)")
+    }
+    
+    /// Retrieve a stored host key for TOFU verification.
+    /// Returns the OpenSSH public key string, or throws `.itemNotFound` on first connection.
+    func getHostKey(for host: String, port: Int) throws -> String {
+        let account = "host-key:\(host):\(port)"
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        guard status == errSecSuccess else {
+            if status == errSecItemNotFound {
+                throw KeychainError.itemNotFound
+            }
+            throw KeychainError.unexpectedStatus(status)
+        }
+        
+        guard let data = result as? Data,
+              let keyString = String(data: data, encoding: .utf8) else {
+            throw KeychainError.dataConversionError
+        }
+        
+        return keyString
+    }
+    
+    /// Delete a stored host key (e.g. when user chooses to trust a changed key).
+    func deleteHostKey(for host: String, port: Int) throws {
+        let account = "host-key:\(host):\(port)"
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        
+        let status = SecItemDelete(query as CFDictionary)
+        
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+    
     /// Save a Secure Enclave key's data representation to the Keychain.
     ///
     /// SE key `dataRepresentation` is an opaque blob — NOT raw key material.

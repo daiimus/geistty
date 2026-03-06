@@ -159,7 +159,7 @@ final class SSHCommandRunner {
         
         // Build the SSH pipeline
         let clientConfig = SSHClientConfiguration(username: username, authMethod: authMethod)
-        let serverAuthDelegate = AcceptAllHostKeysDelegate()
+        let serverAuthDelegate = TOFUHostKeyDelegate(host: self.host, port: self.port)
         
         let bootstrap = NIOTSConnectionBootstrap(group: group)
             .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
