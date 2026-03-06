@@ -282,6 +282,10 @@ class AppState: ObservableObject {
     // Stored as Data for explicit zeroing on clear. See #28.
     var currentPassword: Data?
     
+    /// Whether the app was launched with --ui-testing flag.
+    /// When true, the app auto-connects to localhost for XCUITest connected tests.
+    let isUITesting: Bool
+    
     enum ConnectionStatus: Equatable {
         case disconnected
         case connecting
@@ -289,7 +293,32 @@ class AppState: ObservableObject {
         case error(String)
     }
     
-    init() {}
+    init() {
+        let args = ProcessInfo.processInfo.arguments
+        self.isUITesting = args.contains("--ui-testing")
+        
+        if isUITesting {
+            // Parse test connection parameters from launch arguments.
+            // Expected: --test-host HOST --test-port PORT --test-user USER [--test-key PATH]
+            var host = "localhost"
+            var port = 22
+            var user = NSUserName()
+            
+            if let hostIdx = args.firstIndex(of: "--test-host"), hostIdx + 1 < args.count {
+                host = args[hostIdx + 1]
+            }
+            if let portIdx = args.firstIndex(of: "--test-port"), portIdx + 1 < args.count {
+                port = Int(args[portIdx + 1]) ?? 22
+            }
+            if let userIdx = args.firstIndex(of: "--test-user"), userIdx + 1 < args.count {
+                user = args[userIdx + 1]
+            }
+            
+            // Auto-connect: set params and transition to .connecting
+            setConnectionParams(host: host, port: port, username: user, password: nil)
+            connectionStatus = .connecting
+        }
+    }
     
     /// Set connection parameters before navigating to terminal
     func setConnectionParams(host: String, port: Int, username: String, password: String?) {

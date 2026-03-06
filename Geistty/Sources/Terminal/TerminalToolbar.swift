@@ -194,6 +194,7 @@ final class TerminalAccessoryView: UIInputView {
         button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.accessibilityLabel = label ?? symbol
+        button.accessibilityIdentifier = "ToolbarKey-\(label ?? symbol)"
         return button
     }
 
@@ -210,6 +211,7 @@ final class TerminalAccessoryView: UIInputView {
         button.widthAnchor.constraint(greaterThanOrEqualToConstant: 36).isActive = true
         button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.accessibilityLabel = accessibilityLabel
+        button.accessibilityIdentifier = "ToolbarChar-\(accessibilityLabel)"
         button.accessibilityHint = "Inserts \(char) character"
         return button
     }
@@ -232,6 +234,7 @@ final class TerminalAccessoryView: UIInputView {
         button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.accessibilityLabel = "Control key modifier"
+        button.accessibilityIdentifier = "ToolbarKey-Ctrl"
         button.accessibilityValue = "Inactive"
         button.accessibilityHint = "Double tap to toggle. When active, the next key press will include Control."
         return button

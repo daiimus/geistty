@@ -60,6 +60,7 @@ struct TmuxWindowPickerView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("TmuxNewWindowButton")
                 }
                 .padding(.horizontal, 8)
             }
@@ -171,6 +172,7 @@ private struct WindowTab: View {
                 isHovering = hovering
             }
         }
+        .accessibilityIdentifier("TmuxWindowTab-\(window.id)")
         .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }

@@ -52,6 +52,7 @@ struct ConnectionEditorView: View {
                     .focused($focusedField, equals: .name)
                     .submitLabel(.next)
                     .onSubmit { focusedField = .host }
+                    .accessibilityIdentifier("EditorNameField")
                     .accessibilityLabel("Connection name")
                 
                 TextField("Host", text: $host)
@@ -61,11 +62,13 @@ struct ConnectionEditorView: View {
                     .focused($focusedField, equals: .host)
                     .submitLabel(.next)
                     .onSubmit { focusedField = .port }
+                    .accessibilityIdentifier("EditorHostField")
                     .accessibilityLabel("Host address")
                 
                 TextField("Port", text: $port)
                     .keyboardType(.numberPad)
                     .focused($focusedField, equals: .port)
+                    .accessibilityIdentifier("EditorPortField")
                     .accessibilityLabel("Port number")
                 
                 TextField("Username", text: $username)
@@ -80,6 +83,7 @@ struct ConnectionEditorView: View {
                             focusedField = nil
                         }
                     }
+                    .accessibilityIdentifier("EditorUsernameField")
                     .accessibilityLabel("SSH username")
             }
             
@@ -91,6 +95,7 @@ struct ConnectionEditorView: View {
                             .tag(method)
                     }
                 }
+                .accessibilityIdentifier("AuthMethodPicker")
                 
                 if authMethod == .password {
                     SecureField("Password", text: $password)
@@ -98,6 +103,7 @@ struct ConnectionEditorView: View {
                         .focused($focusedField, equals: .password)
                         .submitLabel(.done)
                         .onSubmit { focusedField = nil }
+                        .accessibilityIdentifier("EditorPasswordField")
                         .accessibilityLabel("SSH password")
                 }
                 
@@ -182,11 +188,13 @@ struct ConnectionEditorView: View {
             // Options
             Section {
                 Toggle("Add to Favorites", isOn: $isFavorite)
+                    .accessibilityIdentifier("FavoriteToggle")
             }
             
             // tmux Integration
             Section {
                 Toggle("Auto-attach to tmux", isOn: $useTmux)
+                    .accessibilityIdentifier("TmuxToggle")
                 
                 if useTmux {
                     TextField("Session Name", text: $tmuxSessionName)
@@ -195,6 +203,7 @@ struct ConnectionEditorView: View {
                         .focused($focusedField, equals: .tmuxSession)
                         .submitLabel(.done)
                         .onSubmit { focusedField = nil }
+                        .accessibilityIdentifier("TmuxSessionNameField")
                         .accessibilityLabel("tmux session name")
                 }
             } header: {
@@ -223,6 +232,7 @@ struct ConnectionEditorView: View {
                 Button("Cancel") {
                     dismiss()
                 }
+                .accessibilityIdentifier("EditorCancelButton")
             }
             
             ToolbarItem(placement: .confirmationAction) {
@@ -230,6 +240,7 @@ struct ConnectionEditorView: View {
                     save()
                 }
                 .disabled(!isValid)
+                .accessibilityIdentifier("EditorSaveButton")
             }
         }
         .sheet(isPresented: $showingKeyImport) {

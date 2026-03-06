@@ -130,6 +130,7 @@ struct CommandPaletteView: View {
                 .textInputAutocapitalization(.never)
                 .focused($isTextFieldFocused)
                 .onSubmit { submitSelected() }
+                .accessibilityIdentifier("CommandPaletteSearchField")
                 .onChange(of: query) { _, newValue in
                     if !newValue.isEmpty {
                         if selectedIndex == nil { selectedIndex = 0 }

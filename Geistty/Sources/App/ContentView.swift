@@ -89,6 +89,15 @@ struct ContentView: View {
                     }
                     .navigationTitle("Geistty")
                     .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button {
+                                showSettings = true
+                            } label: {
+                                Image(systemName: "gearshape")
+                            }
+                            .accessibilityIdentifier("SettingsButton")
+                        }
+                        
                         ToolbarItem(placement: .primaryAction) {
                             Menu {
                                 Button {
@@ -236,6 +245,7 @@ struct DisconnectedView: View {
             Text("No Active Connection")
                 .font(.title2)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("DisconnectedTitle")
             
             VStack(spacing: 12) {
                 Button {
@@ -245,6 +255,7 @@ struct DisconnectedView: View {
                         .frame(maxWidth: 200)
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("DisconnectedQuickConnectButton")
                 
                 Button {
                     showConnectionList = true
@@ -253,6 +264,7 @@ struct DisconnectedView: View {
                         .frame(maxWidth: 200)
                 }
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier("DisconnectedSavedConnectionsButton")
             }
         }
         .padding()
@@ -308,6 +320,7 @@ struct ErrorView: View {
             
             Text("Disconnected")
                 .font(.title2)
+                .accessibilityIdentifier("ErrorTitle")
             
             // Show which connection was lost
             if let conn = connectionDescription {
@@ -321,6 +334,7 @@ struct ErrorView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
+                .accessibilityIdentifier("ErrorMessage")
             
             VStack(spacing: 12) {
                 // Reconnect button — delegates to shared reconnect() via closure. See #27.
@@ -332,6 +346,7 @@ struct ErrorView: View {
                             .frame(maxWidth: 200)
                     }
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("ReconnectButton")
                 }
                 
                 Button {
@@ -342,6 +357,7 @@ struct ErrorView: View {
                         .frame(maxWidth: 200)
                 }
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier("BackToConnectionsButton")
             }
         }
         .padding()
@@ -378,6 +394,7 @@ struct ConnectionSheet: View {
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
+                        .accessibilityIdentifier("SheetHostField")
                     
                     HStack {
                         Text("Port")
@@ -393,9 +410,11 @@ struct ConnectionSheet: View {
                     TextField("Username", text: $connectionInfo.username)
                         .textContentType(.username)
                         .textInputAutocapitalization(.never)
+                        .accessibilityIdentifier("SheetUsernameField")
                     
                     SecureField("Password", text: $connectionInfo.password)
                         .textContentType(.password)
+                        .accessibilityIdentifier("SheetPasswordField")
                 }
                 
                 Section {
@@ -404,6 +423,7 @@ struct ConnectionSheet: View {
                     }
                     .disabled(!isValid)
                     .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("SheetConnectButton")
                 }
                 
                 #if DEBUG

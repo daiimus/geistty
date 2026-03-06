@@ -46,6 +46,7 @@ extension Ghostty {
                     .background(Color(.systemGray5))
                     .cornerRadius(8)
                     .focused($isSearchFieldFocused)
+                    .accessibilityIdentifier("SearchTextField")
                     .overlay(alignment: .trailing) {
                         resultCountView
                             .padding(.trailing, 8)
@@ -67,6 +68,7 @@ extension Ghostty {
                 }
                 .buttonStyle(SearchButtonStyle())
                 .accessibilityLabel("Previous result")
+                .accessibilityIdentifier("SearchPreviousButton")
                 .disabled(searchState.total == 0)
                 
                 // Next result button (chevron down = go to next)
@@ -76,6 +78,7 @@ extension Ghostty {
                 }
                 .buttonStyle(SearchButtonStyle())
                 .accessibilityLabel("Next result")
+                .accessibilityIdentifier("SearchNextButton")
                 .disabled(searchState.total == 0)
                 
                 // Close button
@@ -85,6 +88,7 @@ extension Ghostty {
                 }
                 .buttonStyle(SearchButtonStyle())
                 .accessibilityLabel("Close search")
+                .accessibilityIdentifier("SearchCloseButton")
             }
             .padding(10)
             .background(.regularMaterial)
