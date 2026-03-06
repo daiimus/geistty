@@ -328,7 +328,12 @@ sync_ghostty() {
     log_info "✅ GhosttyKit sync complete"
 }
 
-# Extract screenshots from xcresult bundles
+# Extract screenshots from xcresult bundles.
+# xcresult stores attachments inside per-test summaryRef objects, so we must:
+#   1. Get the top-level testsRef to find all test metadata
+#   2. Collect each test's summaryRef ID
+#   3. Fetch each summary and extract attachment payloadRef IDs
+#   4. Export each attachment as a raw PNG
 extract_screenshots() {
     local RESULT_BUNDLE="${1:-$SCRIPT_DIR/test_results/ui_tests.xcresult}"
     local OUTPUT_DIR="$SCRIPT_DIR/test_results/screenshots"
@@ -344,97 +349,136 @@ extract_screenshots() {
     rm -rf "$OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
 
-    # Get the list of attachment refs from the xcresult
-    local REFS
-    REFS=$(xcrun xcresulttool get --legacy --format json --path "$RESULT_BUNDLE" 2>/dev/null)
+    # Step 1: Get top-level result and find testsRef
+    local TOP_JSON
+    TOP_JSON=$(xcrun xcresulttool get --legacy --format json --path "$RESULT_BUNDLE" 2>/dev/null)
 
-    if [ -z "$REFS" ]; then
+    if [ -z "$TOP_JSON" ]; then
         log_error "Failed to read xcresult bundle"
         return 1
     fi
 
-    # Extract all test action results and find attachment IDs
-    local ACTION_ID
-    ACTION_ID=$(echo "$REFS" | python3 -c "
+    local TESTS_REF
+    TESTS_REF=$(echo "$TOP_JSON" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-actions = data.get('actions', {}).get('_values', [])
-for action in actions:
-    result = action.get('actionResult', {})
-    ref = result.get('testsRef', {}).get('id', {}).get('_value', '')
+for action in data.get('actions', {}).get('_values', []):
+    ref = action.get('actionResult', {}).get('testsRef', {}).get('id', {}).get('_value', '')
     if ref:
         print(ref)
         break
 " 2>/dev/null)
 
-    if [ -z "$ACTION_ID" ]; then
+    if [ -z "$TESTS_REF" ]; then
         log_warn "No test action found in xcresult bundle"
         return 0
     fi
 
-    # Get test details
+    # Step 2: Get test details and collect all per-test summaryRef IDs
     local TEST_DETAILS
-    TEST_DETAILS=$(xcrun xcresulttool get --legacy --format json --path "$RESULT_BUNDLE" --id "$ACTION_ID" 2>/dev/null)
+    TEST_DETAILS=$(xcrun xcresulttool get --legacy --format json --path "$RESULT_BUNDLE" --id "$TESTS_REF" 2>/dev/null)
 
     if [ -z "$TEST_DETAILS" ]; then
         log_warn "No test details found"
         return 0
     fi
 
-    # Extract all attachment refs recursively
-    local ATTACHMENT_IDS
-    ATTACHMENT_IDS=$(echo "$TEST_DETAILS" | python3 -c "
+    local SUMMARY_REFS
+    SUMMARY_REFS=$(echo "$TEST_DETAILS" | python3 -c "
 import sys, json
 
-def find_attachments(obj, path=''):
-    \"\"\"Recursively find all attachments with their names and payload IDs.\"\"\"
+def find_summary_refs(obj):
+    \"\"\"Recursively find ActionTestMetadata nodes and extract summaryRef + test name.\"\"\"
     results = []
     if isinstance(obj, dict):
-        # Check if this is an attachment node
-        if '_type' in obj and obj['_type'].get('_name') == 'ActionTestAttachment':
+        type_name = obj.get('_type', {}).get('_name', '')
+        if type_name == 'ActionTestMetadata':
             name = obj.get('name', {}).get('_value', 'unknown')
-            payload_ref = obj.get('payloadRef', {}).get('id', {}).get('_value', '')
-            if payload_ref:
-                results.append((name, payload_ref))
-        # Recurse into all dict values
-        for key, val in obj.items():
-            results.extend(find_attachments(val, f'{path}.{key}'))
+            ref = obj.get('summaryRef', {}).get('id', {}).get('_value', '')
+            if ref:
+                safe_name = name.replace('/', '_').replace(' ', '_').replace('()', '')
+                results.append((safe_name, ref))
+        for val in obj.values():
+            results.extend(find_summary_refs(val))
     elif isinstance(obj, list):
         for item in obj:
-            results.extend(find_attachments(item, path))
+            results.extend(find_summary_refs(item))
     return results
 
 data = json.load(sys.stdin)
-attachments = find_attachments(data)
-for name, ref_id in attachments:
-    # Sanitise filename
-    safe_name = name.replace('/', '_').replace(' ', '_')
-    print(f'{safe_name}|||{ref_id}')
+for name, ref_id in find_summary_refs(data):
+    print(f'{name}|||{ref_id}')
 " 2>/dev/null)
 
-    if [ -z "$ATTACHMENT_IDS" ]; then
-        log_warn "No screenshots found in test results"
+    if [ -z "$SUMMARY_REFS" ]; then
+        log_warn "No test summaries found"
         return 0
     fi
 
+    # Step 3: For each test summary, fetch it and extract attachment payloadRefs
     local COUNT=0
-    while IFS= read -r line; do
-        local NAME="${line%%|||*}"
-        local REF_ID="${line##*|||}"
+    local TOTAL_TESTS=0
+    while IFS= read -r summary_line; do
+        local TEST_NAME="${summary_line%%|||*}"
+        local SUMMARY_ID="${summary_line##*|||}"
+        TOTAL_TESTS=$((TOTAL_TESTS + 1))
 
-        if [ -n "$REF_ID" ] && [ -n "$NAME" ]; then
-            local OUT_FILE="$OUTPUT_DIR/${NAME}.png"
-            xcrun xcresulttool get --legacy --format raw --path "$RESULT_BUNDLE" --id "$REF_ID" > "$OUT_FILE" 2>/dev/null
-            if [ -s "$OUT_FILE" ]; then
-                COUNT=$((COUNT + 1))
-            else
-                rm -f "$OUT_FILE"
+        [ -z "$SUMMARY_ID" ] && continue
+
+        local SUMMARY_JSON
+        SUMMARY_JSON=$(xcrun xcresulttool get --legacy --format json --path "$RESULT_BUNDLE" --id "$SUMMARY_ID" 2>/dev/null)
+        [ -z "$SUMMARY_JSON" ] && continue
+
+        # Extract attachments from this test summary
+        local ATTACHMENTS
+        ATTACHMENTS=$(echo "$SUMMARY_JSON" | python3 -c "
+import sys, json
+
+def find_attachments(obj):
+    results = []
+    if isinstance(obj, dict):
+        type_name = obj.get('_type', {}).get('_name', '')
+        if type_name == 'ActionTestAttachment':
+            name = obj.get('name', {}).get('_value', 'unknown')
+            payload_ref = obj.get('payloadRef', {}).get('id', {}).get('_value', '')
+            if payload_ref:
+                safe = name.replace('/', '_').replace(' ', '_')
+                results.append((safe, payload_ref))
+        for val in obj.values():
+            results.extend(find_attachments(val))
+    elif isinstance(obj, list):
+        for item in obj:
+            results.extend(find_attachments(item))
+    return results
+
+data = json.load(sys.stdin)
+for name, ref_id in find_attachments(data):
+    print(f'{name}|||{ref_id}')
+" 2>/dev/null)
+
+        [ -z "$ATTACHMENTS" ] && continue
+
+        # Step 4: Export each attachment
+        while IFS= read -r att_line; do
+            local ATT_NAME="${att_line%%|||*}"
+            local ATT_REF="${att_line##*|||}"
+
+            if [ -n "$ATT_REF" ] && [ -n "$ATT_NAME" ]; then
+                local OUT_FILE="$OUTPUT_DIR/${TEST_NAME}_${ATT_NAME}.png"
+                xcrun xcresulttool get --legacy --format raw --path "$RESULT_BUNDLE" --id "$ATT_REF" > "$OUT_FILE" 2>/dev/null
+                if [ -s "$OUT_FILE" ]; then
+                    COUNT=$((COUNT + 1))
+                else
+                    rm -f "$OUT_FILE"
+                fi
             fi
-        fi
-    done <<< "$ATTACHMENT_IDS"
+        done <<< "$ATTACHMENTS"
+    done <<< "$SUMMARY_REFS"
 
-    log_info "✅ Extracted $COUNT screenshots to $OUTPUT_DIR"
-    ls -la "$OUTPUT_DIR" 2>/dev/null | head -20
+    log_info "✅ Extracted $COUNT screenshots from $TOTAL_TESTS tests to $OUTPUT_DIR"
+    if [ "$COUNT" -gt 0 ]; then
+        ls -la "$OUTPUT_DIR" 2>/dev/null | head -30
+    fi
 }
 
 # Run all checks
