@@ -573,7 +573,8 @@ final class NIOSSHErrorTests: XCTestCase {
             .channelError("test"),
             .sessionError("test"),
             .timeout,
-            .networkUnavailable
+            .networkUnavailable,
+            .hostKeyMismatch(host: "example.com", port: 22, expected: "ssh-ed25519 AAAA", actual: "ssh-rsa BBBB")
         ]
         
         for error in errors {
@@ -593,5 +594,18 @@ final class NIOSSHErrorTests: XCTestCase {
         XCTAssertTrue(NIOSSHError.authenticationFailed("bad password").errorDescription!.contains("bad password"))
         XCTAssertTrue(NIOSSHError.channelError("rejected").errorDescription!.contains("rejected"))
         XCTAssertTrue(NIOSSHError.sessionError("pty failed").errorDescription!.contains("pty failed"))
+    }
+    
+    func testHostKeyMismatchIncludesHostAndPort() {
+        let error = NIOSSHError.hostKeyMismatch(
+            host: "example.com",
+            port: 22,
+            expected: "ssh-ed25519 AAAA",
+            actual: "ssh-rsa BBBB"
+        )
+        let desc = error.errorDescription!
+        XCTAssertTrue(desc.contains("example.com"), "Should include host")
+        XCTAssertTrue(desc.contains("22"), "Should include port")
+        XCTAssertTrue(desc.contains("man-in-the-middle") || desc.contains("changed"), "Should warn about key change")
     }
 }

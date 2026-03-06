@@ -19,78 +19,109 @@ extension RawTerminalUIViewController {
     func setupMenuBarNotifications() {
         let nc = NotificationCenter.default
         
+        // A7 fix: Guard against cross-window command leaking on iPad multi-window.
+        // Notifications are broadcast to all windows; only the foreground scene should act.
+        // reloadConfiguration is intentionally unguarded — config changes are global.
+        
         // Terminal actions
         menuBarObservers.append(nc.addObserver(forName: .terminalClearScreen, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleClearScreen()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalReset, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleResetTerminal()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalIncreaseFontSize, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleIncreaseFontSize()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalDecreaseFontSize, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleDecreaseFontSize()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalResetFontSize, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleResetFontSize()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalJumpToPromptUp, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleJumpToPrompt(delta: -1)
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalJumpToPromptDown, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleJumpToPrompt(delta: 1)
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalSelectAll, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleSelectAll()
         })
         menuBarObservers.append(nc.addObserver(forName: .showKeyboardShortcuts, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.showKeyboardShortcutsHelp()
         })
         menuBarObservers.append(nc.addObserver(forName: .showSettings, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleSettingsButton()
         })
+        // reloadConfiguration is global — settings changes apply to all windows
         menuBarObservers.append(nc.addObserver(forName: .reloadConfiguration, object: nil, queue: .main) { [weak self] _ in
             self?.reloadConfiguration()
         })
         
         // Copy/Paste
         menuBarObservers.append(nc.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.viewModel?.copy()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalPaste, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.viewModel?.paste()
         })
         
         // Search/Find
         menuBarObservers.append(nc.addObserver(forName: .terminalFind, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleFind()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalFindNext, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleFindNext()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalFindPrevious, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleFindPrevious()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalHideFindBar, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.closeSearch()
         })
         
         // Background opacity toggle
         menuBarObservers.append(nc.addObserver(forName: .toggleBackgroundOpacity, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.toggleBackgroundOpacity()
         })
         
         // Command palette
         menuBarObservers.append(nc.addObserver(forName: .toggleCommandPalette, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.toggleCommandPalette()
         })
         
         // Connection management
         menuBarObservers.append(nc.addObserver(forName: .terminalDisconnect, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
             self?.handleBackButton()
         })
         // Note: terminalReconnect is handled in ContentView which has access to appState
+    }
+    
+    /// Whether this view controller's window scene is in the foreground.
+    /// Used by notification handlers to prevent cross-window command leaking
+    /// on iPad multi-window (Split View, Slide Over). See issue #30 / A7 fix.
+    private var isInForegroundScene: Bool {
+        view.window?.windowScene?.activationState == .foregroundActive
     }
     
     // MARK: - Menu Action Handlers

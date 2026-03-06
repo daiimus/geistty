@@ -54,6 +54,7 @@ enum NIOSSHError: LocalizedError {
     case sessionError(String)
     case timeout
     case networkUnavailable
+    case hostKeyMismatch(host: String, port: Int, expected: String, actual: String)
     
     var errorDescription: String? {
         switch self {
@@ -65,6 +66,8 @@ enum NIOSSHError: LocalizedError {
         case .sessionError(let r): return "Session error: \(r)"
         case .timeout: return "Operation timed out"
         case .networkUnavailable: return "Network unavailable"
+        case .hostKeyMismatch(let host, let port, _, _):
+            return "WARNING: Host key for \(host):\(port) has changed. This could indicate a man-in-the-middle attack. Connection refused."
         }
     }
 }
@@ -149,33 +152,69 @@ final class SSHClientConfiguration: NIOSSHClientUserAuthenticationDelegate, @unc
 
 // MARK: - Server Authentication (Host Key Verification)
 
-/// Host key verifier using TOFU (Trust On First Use) model.
+/// Host key verifier using TOFU (Trust On First Use) with Keychain storage.
 ///
-/// # Security Note
-/// This implementation accepts all host keys on first connection without verification
-/// against a known_hosts file. This is a known limitation.
+/// On first connection to a host, the server's public key is stored in the Keychain.
+/// On subsequent connections, the presented key is compared against the stored key.
+/// If the key has changed, the connection is rejected with `hostKeyMismatch` —
+/// this is the critical security property that detects potential MITM attacks.
 ///
-/// ## Why TOFU?
-/// - SwiftNIO-SSH doesn't provide built-in known_hosts parsing
-/// - Implementing full OpenSSH known_hosts format is complex (hashed hosts, wildcards, etc.)
-/// - Most mobile SSH apps (Termius, Prompt) also use TOFU or simpler verification
-///
-/// ## Future Improvements
-/// - Store host keys in Keychain after first connection
-/// - Warn user if host key changes (potential MITM)
-/// - Optional: per-connection fingerprint display for manual verification
-///
-/// ## Risk Mitigation
-/// - iOS sandboxing limits attack surface
-/// - Credentials are stored in Secure Enclave (when available)
-/// - TLS-level certificate pinning is not applicable to SSH
-final class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
+/// Stored as OpenSSH public key strings (e.g. "ssh-ed25519 AAAA...") keyed by
+/// host:port in the Keychain under account "host-key:<host>:<port>".
+final class TOFUHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
+    private let host: String
+    private let port: Int
+    
+    init(host: String, port: Int) {
+        self.host = host
+        self.port = port
+    }
+    
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
-        // Accept all host keys (TOFU model) - see class documentation for rationale
-        logger.info("🔑 Accepting host key (TOFU): \(String(describing: hostKey))")
-        validationCompletePromise.succeed(())
+        let presentedKeyString = String(openSSHPublicKey: hostKey)
+        
+        do {
+            let storedKeyString = try KeychainManager.shared.getHostKey(for: host, port: port)
+            
+            if storedKeyString == presentedKeyString {
+                // Key matches stored key — trusted
+                logger.debug("Host key verified for \(self.host):\(self.port)")
+                validationCompletePromise.succeed(())
+            } else {
+                // Key CHANGED — potential MITM. Fail closed.
+                logger.error("HOST KEY MISMATCH for \(self.host):\(self.port) — possible MITM attack. Stored key type differs from presented key.")
+                validationCompletePromise.fail(
+                    NIOSSHError.hostKeyMismatch(
+                        host: host,
+                        port: port,
+                        expected: storedKeyString,
+                        actual: presentedKeyString
+                    )
+                )
+            }
+        } catch KeychainError.itemNotFound {
+            // First connection — trust and store
+            logger.info("First connection to \(self.host):\(self.port) — storing host key (TOFU)")
+            do {
+                try KeychainManager.shared.saveHostKey(presentedKeyString, for: host, port: port)
+            } catch {
+                logger.warning("Failed to store host key for \(self.host):\(self.port): \(error.localizedDescription)")
+                // Still accept — we don't want a Keychain glitch to block connections.
+                // The key simply won't be verified on next connection.
+            }
+            validationCompletePromise.succeed(())
+        } catch {
+            // Keychain error — log but don't block the connection.
+            // Degraded to accept-all behavior for this connection only.
+            logger.warning("Keychain error during host key verification for \(self.host):\(self.port): \(error.localizedDescription) — accepting key")
+            validationCompletePromise.succeed(())
+        }
     }
 }
+
+// Archived: AcceptAllHostKeysDelegate replaced by TOFUHostKeyDelegate (issue #23).
+// The old delegate unconditionally accepted all host keys with no storage or verification.
+// See git history for the original implementation.
 
 // MARK: - Channel Handler
 
@@ -364,7 +403,7 @@ class NIOSSHConnection {
         do {
             // Configure SSH client
             let clientConfig = SSHClientConfiguration(username: username, authMethod: authMethod)
-            let serverAuthDelegate = AcceptAllHostKeysDelegate()
+            let serverAuthDelegate = TOFUHostKeyDelegate(host: connectionHost, port: connectionPort)
             
             // Bootstrap the connection
             let bootstrap = NIOTSConnectionBootstrap(group: group)
