@@ -159,9 +159,11 @@ struct ConnectionListView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "Unknown error")
+                    .accessibilityIdentifier("ConnectionErrorMessage")
             }
             .alert("Enter Password", isPresented: $showingPasswordPrompt) {
                 SecureField("Password", text: $promptedPassword)
+                    .accessibilityIdentifier("PasswordPromptField")
                 Button("Connect") {
                     guard let profile = passwordPromptProfile else { return }
                     let password = promptedPassword
@@ -216,6 +218,7 @@ struct ConnectionListView: View {
             } label: {
                 Label("Connect", systemImage: "bolt.fill")
             }
+            .accessibilityIdentifier("ContextMenuConnect")
             
             Button {
                 profileManager.toggleFavorite(profile)
@@ -226,6 +229,7 @@ struct ConnectionListView: View {
                     Label("Add to Favorites", systemImage: "star")
                 }
             }
+            .accessibilityIdentifier("ContextMenuToggleFavorite")
             
             Divider()
             
@@ -234,12 +238,14 @@ struct ConnectionListView: View {
             } label: {
                 Label("Edit", systemImage: "pencil")
             }
+            .accessibilityIdentifier("ContextMenuEdit")
             
             Button {
                 duplicateProfile(profile)
             } label: {
                 Label("Duplicate", systemImage: "plus.square.on.square")
             }
+            .accessibilityIdentifier("ContextMenuDuplicate")
             
             Divider()
             
@@ -249,12 +255,14 @@ struct ConnectionListView: View {
             } label: {
                 Label("Copy Host", systemImage: "doc.on.doc")
             }
+            .accessibilityIdentifier("ContextMenuCopyHost")
             
             Button {
                 UIPasteboard.general.string = "\(profile.username)@\(profile.host):\(profile.port)"
             } label: {
                 Label("Copy Connection String", systemImage: "terminal")
             }
+            .accessibilityIdentifier("ContextMenuCopyConnectionString")
             
             Divider()
             
@@ -263,6 +271,7 @@ struct ConnectionListView: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .accessibilityIdentifier("ContextMenuDelete")
         }
     }
     
@@ -446,12 +455,14 @@ struct QuickConnectView: View {
             
             Section {
                 Toggle("Save connection", isOn: $saveConnection)
+                    .accessibilityIdentifier("SaveConnectionToggle")
             }
             
             if let error = errorMessage {
                 Section {
                     Text(error)
                         .foregroundColor(.red)
+                        .accessibilityIdentifier("QuickConnectErrorMessage")
                 }
             }
         }
@@ -462,6 +473,7 @@ struct QuickConnectView: View {
                 Button("Cancel") {
                     dismiss()
                 }
+                .accessibilityIdentifier("QuickConnectCancelButton")
             }
             
             ToolbarItem(placement: .confirmationAction) {
