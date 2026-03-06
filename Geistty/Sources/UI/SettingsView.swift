@@ -11,28 +11,51 @@ import os
 private let logger = Logger(subsystem: "com.geistty", category: "Settings")
 
 /// User preferences stored in UserDefaults
+///
+/// Uses @Published + UserDefaults.didSet instead of @AppStorage,
+/// which is designed for View structs, not ObservableObject classes.
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
     
+    private let defaults = UserDefaults.standard
+    
     // MARK: - Terminal Settings
     
-    @AppStorage("terminal.cursorStyle") var cursorStyle: String = "block"
-    @AppStorage("terminal.fontFamily") var fontFamily: String = "Menlo"
+    @Published var cursorStyle: String {
+        didSet { defaults.set(cursorStyle, forKey: "terminal.cursorStyle") }
+    }
+    @Published var fontFamily: String {
+        didSet { defaults.set(fontFamily, forKey: "terminal.fontFamily") }
+    }
     
     // MARK: - Font Rendering Settings
     
-    @AppStorage("terminal.fontThicken") var fontThicken: Bool = true
+    @Published var fontThicken: Bool {
+        didSet { defaults.set(fontThicken, forKey: "terminal.fontThicken") }
+    }
 
     
     // MARK: - Appearance Settings
     
-    @AppStorage("terminal.backgroundOpacity") var backgroundOpacity: Double = 0.95
+    @Published var backgroundOpacity: Double {
+        didSet { defaults.set(backgroundOpacity, forKey: "terminal.backgroundOpacity") }
+    }
     
     // MARK: - UI Settings
     
-    @AppStorage("ui.showStatusBar") var showStatusBar: Bool = false
+    @Published var showStatusBar: Bool {
+        didSet { defaults.set(showStatusBar, forKey: "ui.showStatusBar") }
+    }
     
-    private init() {}
+    private init() {
+        // Initialize from UserDefaults with fallback defaults.
+        // Assignments in init don't trigger didSet, so no spurious writes.
+        cursorStyle = defaults.string(forKey: "terminal.cursorStyle") ?? "block"
+        fontFamily = defaults.string(forKey: "terminal.fontFamily") ?? "Menlo"
+        fontThicken = defaults.object(forKey: "terminal.fontThicken") as? Bool ?? true
+        backgroundOpacity = defaults.object(forKey: "terminal.backgroundOpacity") as? Double ?? 0.95
+        showStatusBar = defaults.object(forKey: "ui.showStatusBar") as? Bool ?? false
+    }
     
     // Available monospace fonts on iOS
     // Note: Font list now centralized in FontMapping.swift
@@ -411,7 +434,7 @@ struct FontPickerView: View {
                         // before the config update reads it
                         UserDefaults.standard.set(font, forKey: "terminal.fontFamily")
                         // Call the callback on next run loop to ensure UserDefaults is synced
-                        DispatchQueue.main.async {
+                        Task { @MainActor in
                             onFontChanged()
                         }
                     }
@@ -636,8 +659,8 @@ struct HighlightedConfigEditor: UIViewRepresentable {
         if textView.text != text {
             let selectedRange = textView.selectedRange
             textView.attributedText = highlightedText(text)
-            // Restore cursor position
-            if selectedRange.location <= textView.text.count {
+            // Restore cursor position (selectedRange uses UTF-16 offsets)
+            if selectedRange.location <= textView.text.utf16.count {
                 textView.selectedRange = selectedRange
             }
         }
@@ -710,18 +733,33 @@ struct HighlightedConfigEditor: UIViewRepresentable {
     class Coordinator: NSObject, UITextViewDelegate {
         var parent: HighlightedConfigEditor
         
+        /// Debounce work item — cancels previous highlighting on each keystroke
+        /// so re-highlighting only runs after typing pauses (~150ms).
+        private var highlightWorkItem: DispatchWorkItem?
+        
         init(_ parent: HighlightedConfigEditor) {
             self.parent = parent
         }
         
         func textViewDidChange(_ textView: UITextView) {
-            // Update binding
+            // Update binding immediately so the text is always current
             parent.text = textView.text
             
-            // Re-apply highlighting
-            let selectedRange = textView.selectedRange
-            textView.attributedText = parent.highlightedText(textView.text)
-            textView.selectedRange = selectedRange
+            // Cancel any pending highlight work
+            highlightWorkItem?.cancel()
+            
+            // Debounce re-highlighting to avoid re-parsing on every keystroke
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                let selectedRange = textView.selectedRange
+                textView.attributedText = self.parent.highlightedText(textView.text)
+                // Restore cursor (selectedRange uses UTF-16 offsets)
+                if selectedRange.location <= textView.text.utf16.count {
+                    textView.selectedRange = selectedRange
+                }
+            }
+            highlightWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
         }
     }
 }

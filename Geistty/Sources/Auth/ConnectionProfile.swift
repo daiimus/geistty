@@ -217,14 +217,14 @@ class ConnectionProfileManager: ObservableObject {
         case NSUbiquitousKeyValueStoreServerChange,
              NSUbiquitousKeyValueStoreInitialSyncChange:
             // External change - merge with local
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self.mergeFromiCloud()
             }
         case NSUbiquitousKeyValueStoreQuotaViolationChange:
             logger.warning("iCloud storage quota exceeded")
         case NSUbiquitousKeyValueStoreAccountChange:
             // Account changed - reload
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self.checkiCloudAvailability()
                 self.loadProfiles()
             }
