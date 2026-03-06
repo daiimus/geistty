@@ -104,6 +104,7 @@ struct SettingsView: View {
                                 .frame(width: 80)
                         }
                     }
+                    .accessibilityIdentifier("ThemePickerLink")
                 }
                 
                 // Cursor Style
@@ -118,6 +119,7 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 200)
+                        .accessibilityIdentifier("CursorStylePicker")
                     }
                 }
                 
@@ -136,6 +138,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .accessibilityIdentifier("FontFamilyLink")
                 } footer: {
                     Text("Font changes apply immediately to the current terminal.")
                 }
@@ -168,6 +171,7 @@ struct SettingsView: View {
                                 in: 8...32,
                                 step: 1
                             )
+                            .accessibilityIdentifier("FontSizeSlider")
                             .accessibilityLabel("Font size")
                             .accessibilityValue("\(currentFontSize) points")
                             
@@ -181,11 +185,13 @@ struct SettingsView: View {
                         onResetFontSize()
                     }
                     .foregroundStyle(.blue)
+                    .accessibilityIdentifier("ResetFontSizeButton")
                 }
                 
                 // Interface
                 Section("Interface") {
                     Toggle("Show Status Bar", isOn: $settings.showStatusBar)
+                        .accessibilityIdentifier("ShowStatusBarToggle")
                     Text("Display iOS time, battery, and network indicators")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -207,6 +213,7 @@ struct SettingsView: View {
                             in: 0.5...1.0,
                             step: 0.05
                         )
+                        .accessibilityIdentifier("BackgroundOpacitySlider")
                         .accessibilityLabel("Background opacity")
                         .accessibilityValue("\(Int(settings.backgroundOpacity * 100)) percent")
                     }
@@ -228,6 +235,7 @@ struct SettingsView: View {
                             Text("Edit Config File")
                         }
                     }
+                    .accessibilityIdentifier("ConfigEditorLink")
                 } header: {
                     Text("Terminal Configuration")
                 } footer: {
@@ -260,6 +268,7 @@ struct SettingsView: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("SettingsDoneButton")
                 }
             }
             // Sync GUI changes to config file (file is source of truth)

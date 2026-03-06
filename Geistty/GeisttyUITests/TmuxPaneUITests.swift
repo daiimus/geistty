@@ -2,345 +2,259 @@
 //  TmuxPaneUITests.swift
 //  GeisttyUITests
 //
-//  UI Tests for tmux pane management, splitting, and resizing
+//  UI Tests for tmux pane management, splitting, and resizing.
+//  Migrated to use TestConfig for credentials and UITestHelpers
+//  for shared utilities.
 //
 
+import os
 import XCTest
+
+private let logger = Logger(subsystem: "com.geistty.uitests", category: "TmuxPaneUITests")
 
 /// Tests for tmux multi-pane functionality
 final class TmuxPaneUITests: XCTestCase {
-    
+
     var app: XCUIApplication!
-    
-    // Test configuration - set these for your environment
-    static let testHost = "localhost"  // Change to your test server
-    static let testUser = "testuser"   // Change to your test user
-    static let testPort = "22"
-    
+
     override func setUpWithError() throws {
-        continueAfterFailure = false
-        app = XCUIApplication()
-        app.launchArguments = ["--ui-testing"]
-        app.launch()
-    }
-    
-    override func tearDownWithError() throws {
-        // Take screenshot on failure for debugging
-        if let failureCount = testRun?.failureCount, failureCount > 0 {
-            let screenshot = app.screenshot()
-            let attachment = XCTAttachment(screenshot: screenshot)
-            attachment.name = "Failure-\(name)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
+        guard TestConfig.isConfigured else {
+            throw XCTSkip("TestConfig.local.swift not configured — isConfigured is false")
         }
+
+        continueAfterFailure = false
+        app = launchForConnectedTests()
+        XCTAssertTrue(app.waitForTerminal(timeout: TestConfig.connectionTimeout),
+                      "Terminal should appear after connecting")
+
+        // Let tmux initialise
+        Thread.sleep(forTimeInterval: 2.0)
+    }
+
+    override func tearDownWithError() throws {
+        takeScreenshot(app, name: "\(name)-teardown")
         app = nil
     }
-    
+
     // MARK: - Split Tests
-    
+
     /// Test horizontal split (Cmd+D)
     func testHorizontalSplit() throws {
-        try skipIfNotConnected()
-        
-        // Take initial screenshot
-        takeScreenshot(name: "Before-Split")
-        
-        // Get initial pane count (if accessible)
-        let initialPaneCount = countVisiblePanes()
-        
-        // Trigger horizontal split
-        app.typeKey("d", modifierFlags: .command)
-        
-        // Wait for tmux to process and UI to update
+        takeScreenshot(app, name: "Before-Split")
+
+        let initialPaneCount = app.terminalPaneCount
+
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 1.0)
-        
-        // Take post-split screenshot
-        takeScreenshot(name: "After-HorizontalSplit")
-        
-        // Verify pane count increased
-        let newPaneCount = countVisiblePanes()
-        
-        // Log for debugging
-        print("📐 Pane count: \(initialPaneCount) -> \(newPaneCount)")
-        
-        // At minimum, verify no crash occurred
+
+        takeScreenshot(app, name: "After-HorizontalSplit")
+
+        let newPaneCount = app.terminalPaneCount
+        logger.debug("Pane count: \(initialPaneCount) -> \(newPaneCount)")
+
         XCTAssertTrue(app.exists, "App should still exist after split")
     }
-    
+
     /// Test vertical split (Cmd+Shift+D)
     func testVerticalSplit() throws {
-        try skipIfNotConnected()
-        
-        takeScreenshot(name: "Before-VerticalSplit")
-        
-        // Trigger vertical split
-        app.typeKey("d", modifierFlags: [.command, .shift])
-        
+        takeScreenshot(app, name: "Before-VerticalSplit")
+
+        app.splitVertical()
         Thread.sleep(forTimeInterval: 1.0)
-        
-        takeScreenshot(name: "After-VerticalSplit")
-        
+
+        takeScreenshot(app, name: "After-VerticalSplit")
+
         XCTAssertTrue(app.exists, "App should still exist after vertical split")
     }
-    
+
     /// Test multiple splits in sequence
     func testMultipleSplits() throws {
-        try skipIfNotConnected()
-        
-        takeScreenshot(name: "MultipleSplits-0-Initial")
-        
+        takeScreenshot(app, name: "MultipleSplits-0-Initial")
+
         // First split (horizontal)
-        app.typeKey("d", modifierFlags: .command)
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 1.0)
-        takeScreenshot(name: "MultipleSplits-1-AfterHorizontal")
-        
+        takeScreenshot(app, name: "MultipleSplits-1-AfterHorizontal")
+
         // Second split (vertical on right pane)
-        app.typeKey("d", modifierFlags: [.command, .shift])
+        app.splitVertical()
         Thread.sleep(forTimeInterval: 1.0)
-        takeScreenshot(name: "MultipleSplits-2-AfterVertical")
-        
+        takeScreenshot(app, name: "MultipleSplits-2-AfterVertical")
+
         // Third split (horizontal on bottom-right)
-        app.typeKey("d", modifierFlags: .command)
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 1.0)
-        takeScreenshot(name: "MultipleSplits-3-Final")
-        
-        // Verify app is stable with multiple panes
+        takeScreenshot(app, name: "MultipleSplits-3-Final")
+
         XCTAssertTrue(app.exists, "App should handle multiple splits")
     }
-    
+
     // MARK: - Focus Navigation Tests
-    
+
     /// Test Cmd+] cycles to next pane
     func testNextPaneFocus() throws {
-        try skipIfNotConnected()
-        
-        // First create a split
-        app.typeKey("d", modifierFlags: .command)
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        takeScreenshot(name: "Focus-BeforeNext")
-        
-        // Navigate to next pane
-        app.typeKey("]", modifierFlags: .command)
+
+        takeScreenshot(app, name: "Focus-BeforeNext")
+
+        app.focusNextPane()
         Thread.sleep(forTimeInterval: 0.3)
-        
-        takeScreenshot(name: "Focus-AfterNext")
-        
+
+        takeScreenshot(app, name: "Focus-AfterNext")
+
         XCTAssertTrue(app.exists, "App should handle focus navigation")
     }
-    
+
     /// Test Cmd+[ cycles to previous pane
     func testPreviousPaneFocus() throws {
-        try skipIfNotConnected()
-        
-        // First create a split
-        app.typeKey("d", modifierFlags: .command)
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        // Navigate to previous pane
-        app.typeKey("[", modifierFlags: .command)
+
+        app.focusPreviousPane()
         Thread.sleep(forTimeInterval: 0.3)
-        
-        takeScreenshot(name: "Focus-AfterPrevious")
-        
+
+        takeScreenshot(app, name: "Focus-AfterPrevious")
+
         XCTAssertTrue(app.exists, "App should handle reverse focus navigation")
     }
-    
+
     /// Test directional focus (Cmd+Option+Arrow)
     func testDirectionalFocus() throws {
-        try skipIfNotConnected()
-        
         // Create 4-pane layout
-        app.typeKey("d", modifierFlags: .command)  // Split horizontal
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        app.typeKey("[", modifierFlags: .command)  // Go to left pane
+
+        app.focusPreviousPane()
         Thread.sleep(forTimeInterval: 0.3)
-        
-        app.typeKey("d", modifierFlags: [.command, .shift])  // Split vertical
+
+        app.splitVertical()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        takeScreenshot(name: "Directional-4PaneLayout")
-        
+
+        takeScreenshot(app, name: "Directional-4PaneLayout")
+
         // Test directional navigation
-        // Right
         app.typeKey(.rightArrow, modifierFlags: [.command, .option])
         Thread.sleep(forTimeInterval: 0.3)
-        takeScreenshot(name: "Directional-AfterRight")
-        
-        // Down
+        takeScreenshot(app, name: "Directional-AfterRight")
+
         app.typeKey(.downArrow, modifierFlags: [.command, .option])
         Thread.sleep(forTimeInterval: 0.3)
-        takeScreenshot(name: "Directional-AfterDown")
-        
-        // Left
+        takeScreenshot(app, name: "Directional-AfterDown")
+
         app.typeKey(.leftArrow, modifierFlags: [.command, .option])
         Thread.sleep(forTimeInterval: 0.3)
-        takeScreenshot(name: "Directional-AfterLeft")
-        
-        // Up
+        takeScreenshot(app, name: "Directional-AfterLeft")
+
         app.typeKey(.upArrow, modifierFlags: [.command, .option])
         Thread.sleep(forTimeInterval: 0.3)
-        takeScreenshot(name: "Directional-AfterUp")
-        
+        takeScreenshot(app, name: "Directional-AfterUp")
+
         XCTAssertTrue(app.exists, "App should handle directional navigation")
     }
-    
+
     // MARK: - Resize Tests
-    
+
     /// Test pane sizing after split
     func testPaneSizingAfterSplit() throws {
-        try skipIfNotConnected()
-        
-        // Get initial frame/size if accessible
-        takeScreenshot(name: "Resize-Initial")
-        
-        // Split horizontally
-        app.typeKey("d", modifierFlags: .command)
+        takeScreenshot(app, name: "Resize-Initial")
+
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 1.0)
-        
-        takeScreenshot(name: "Resize-AfterSplit")
-        
-        // The key question: are both panes using full available space?
-        // This screenshot will help diagnose the sizing issue
-        
+
+        takeScreenshot(app, name: "Resize-AfterSplit")
+
         XCTAssertTrue(app.exists, "App should maintain proper sizing")
     }
-    
+
     /// Test window rotation/resize handling
     func testOrientationChange() throws {
-        try skipIfNotConnected()
-        
-        // Create a split first
-        app.typeKey("d", modifierFlags: .command)
+        app.splitHorizontal()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        takeScreenshot(name: "Orientation-Portrait")
-        
-        // Rotate to landscape
+
+        takeScreenshot(app, name: "Orientation-Portrait")
+
         XCUIDevice.shared.orientation = .landscapeLeft
         Thread.sleep(forTimeInterval: 1.0)
-        
-        takeScreenshot(name: "Orientation-Landscape")
-        
-        // Rotate back to portrait
+        takeScreenshot(app, name: "Orientation-Landscape")
+
         XCUIDevice.shared.orientation = .portrait
         Thread.sleep(forTimeInterval: 1.0)
-        
-        takeScreenshot(name: "Orientation-PortraitAgain")
-        
+        takeScreenshot(app, name: "Orientation-PortraitAgain")
+
         XCTAssertTrue(app.exists, "App should handle orientation changes")
     }
-    
+
     // MARK: - Window (Tab) Tests
-    
+
     /// Test creating new tmux window
     func testNewWindow() throws {
-        try skipIfNotConnected()
-        
-        takeScreenshot(name: "Window-Initial")
-        
-        // Create new window (Cmd+N or equivalent)
-        // Note: Need to verify the actual shortcut in the app
-        app.typeKey("t", modifierFlags: .command)  // Cmd+T for new tab/window
+        takeScreenshot(app, name: "Window-Initial")
+
+        app.newWindow()
         Thread.sleep(forTimeInterval: 1.0)
-        
-        takeScreenshot(name: "Window-AfterNew")
-        
+
+        takeScreenshot(app, name: "Window-AfterNew")
+
         XCTAssertTrue(app.exists, "App should create new tmux window")
     }
-    
+
     /// Test switching between tmux windows
     func testWindowSwitching() throws {
-        try skipIfNotConnected()
-        
-        // Create new window first
-        app.typeKey("t", modifierFlags: .command)
+        app.newWindow()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        takeScreenshot(name: "WindowSwitch-Window2")
-        
-        // Switch to previous window (Cmd+Shift+[)
-        app.typeKey("[", modifierFlags: [.command, .shift])
+
+        takeScreenshot(app, name: "WindowSwitch-Window2")
+
+        app.previousWindow()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        takeScreenshot(name: "WindowSwitch-Window1")
-        
-        // Switch to next window (Cmd+Shift+])
-        app.typeKey("]", modifierFlags: [.command, .shift])
+
+        takeScreenshot(app, name: "WindowSwitch-Window1")
+
+        app.nextWindow()
         Thread.sleep(forTimeInterval: 0.5)
-        
-        takeScreenshot(name: "WindowSwitch-BackToWindow2")
-        
+
+        takeScreenshot(app, name: "WindowSwitch-BackToWindow2")
+
         XCTAssertTrue(app.exists, "App should handle window switching")
     }
-    
+
     // MARK: - Stress Tests
-    
+
     /// Test rapid split/close cycle
     func testRapidSplitClose() throws {
-        try skipIfNotConnected()
-        
         for i in 0..<5 {
-            // Split
-            app.typeKey("d", modifierFlags: .command)
+            app.splitHorizontal()
             Thread.sleep(forTimeInterval: 0.3)
-            
-            // Close pane (Cmd+W on the new pane)
-            app.typeKey("w", modifierFlags: .command)
+
+            app.closeCurrentPane()
             Thread.sleep(forTimeInterval: 0.3)
-            
-            print("🔄 Rapid cycle \(i + 1) complete")
+
+            logger.debug("Rapid cycle \(i + 1) complete")
         }
-        
-        takeScreenshot(name: "RapidCycle-Final")
-        
+
+        takeScreenshot(app, name: "RapidCycle-Final")
+
         XCTAssertTrue(app.exists, "App should survive rapid split/close cycles")
     }
-    
+
     /// Test creating many panes
     func testManyPanes() throws {
-        try skipIfNotConnected()
-        
-        // Create a grid of panes
         for i in 0..<3 {
-            app.typeKey("d", modifierFlags: .command)  // Horizontal
+            app.splitHorizontal()
             Thread.sleep(forTimeInterval: 0.5)
-            
-            app.typeKey("d", modifierFlags: [.command, .shift])  // Vertical
+
+            app.splitVertical()
             Thread.sleep(forTimeInterval: 0.5)
-            
-            print("🔲 Grid iteration \(i + 1) complete")
+
+            logger.debug("Grid iteration \(i + 1) complete")
         }
-        
-        takeScreenshot(name: "ManyPanes-Final")
-        
+
+        takeScreenshot(app, name: "ManyPanes-Final")
+
+        let paneCount = app.terminalPaneCount
+        logger.debug("Final pane count: \(paneCount)")
+
         XCTAssertTrue(app.exists, "App should handle many panes")
-    }
-    
-    // MARK: - Helper Methods
-    
-    private func skipIfNotConnected() throws {
-        // Check if we're in terminal view
-        // This is heuristic - might need adjustment
-        let connectionUI = app.buttons["New Connection"]
-        if connectionUI.waitForExistence(timeout: 2) {
-            throw XCTSkip("Not connected to terminal - these tests require an active SSH connection")
-        }
-    }
-    
-    private func countVisiblePanes() -> Int {
-        // Try to count panes by looking for terminal surfaces
-        // This requires accessibility identifiers to be set in the app
-        let panes = app.otherElements.matching(identifier: "TerminalPane")
-        return panes.count
-    }
-    
-    private func takeScreenshot(name: String) {
-        let screenshot = app.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }

@@ -8,6 +8,8 @@
 # Usage:
 #   ./ci.sh build          - Build for simulator
 #   ./ci.sh test           - Run unit tests on simulator  
+#   ./ci.sh ui-test         Run UI tests on simulator
+#   ./ci.sh screenshots     Extract screenshots from the latest xcresult bundle
 #   ./ci.sh lint           - Check for Swift warnings/errors
 #   ./ci.sh sync-ghostty   - Rebuild and sync GhosttyKit from ghostty fork
 #   ./ci.sh all            - Run all checks (build + test + lint)
@@ -326,6 +328,115 @@ sync_ghostty() {
     log_info "✅ GhosttyKit sync complete"
 }
 
+# Extract screenshots from xcresult bundles
+extract_screenshots() {
+    local RESULT_BUNDLE="${1:-$SCRIPT_DIR/test_results/ui_tests.xcresult}"
+    local OUTPUT_DIR="$SCRIPT_DIR/test_results/screenshots"
+
+    if [ ! -d "$RESULT_BUNDLE" ]; then
+        log_error "No xcresult bundle found at $RESULT_BUNDLE"
+        log_info "Run './ci.sh ui-test' first to generate test results"
+        return 1
+    fi
+
+    log_info "Extracting screenshots from $(basename "$RESULT_BUNDLE")..."
+
+    rm -rf "$OUTPUT_DIR"
+    mkdir -p "$OUTPUT_DIR"
+
+    # Get the list of attachment refs from the xcresult
+    local REFS
+    REFS=$(xcrun xcresulttool get --legacy --format json --path "$RESULT_BUNDLE" 2>/dev/null)
+
+    if [ -z "$REFS" ]; then
+        log_error "Failed to read xcresult bundle"
+        return 1
+    fi
+
+    # Extract all test action results and find attachment IDs
+    local ACTION_ID
+    ACTION_ID=$(echo "$REFS" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+actions = data.get('actions', {}).get('_values', [])
+for action in actions:
+    result = action.get('actionResult', {})
+    ref = result.get('testsRef', {}).get('id', {}).get('_value', '')
+    if ref:
+        print(ref)
+        break
+" 2>/dev/null)
+
+    if [ -z "$ACTION_ID" ]; then
+        log_warn "No test action found in xcresult bundle"
+        return 0
+    fi
+
+    # Get test details
+    local TEST_DETAILS
+    TEST_DETAILS=$(xcrun xcresulttool get --legacy --format json --path "$RESULT_BUNDLE" --id "$ACTION_ID" 2>/dev/null)
+
+    if [ -z "$TEST_DETAILS" ]; then
+        log_warn "No test details found"
+        return 0
+    fi
+
+    # Extract all attachment refs recursively
+    local ATTACHMENT_IDS
+    ATTACHMENT_IDS=$(echo "$TEST_DETAILS" | python3 -c "
+import sys, json
+
+def find_attachments(obj, path=''):
+    \"\"\"Recursively find all attachments with their names and payload IDs.\"\"\"
+    results = []
+    if isinstance(obj, dict):
+        # Check if this is an attachment node
+        if '_type' in obj and obj['_type'].get('_name') == 'ActionTestAttachment':
+            name = obj.get('name', {}).get('_value', 'unknown')
+            payload_ref = obj.get('payloadRef', {}).get('id', {}).get('_value', '')
+            if payload_ref:
+                results.append((name, payload_ref))
+        # Recurse into all dict values
+        for key, val in obj.items():
+            results.extend(find_attachments(val, f'{path}.{key}'))
+    elif isinstance(obj, list):
+        for item in obj:
+            results.extend(find_attachments(item, path))
+    return results
+
+data = json.load(sys.stdin)
+attachments = find_attachments(data)
+for name, ref_id in attachments:
+    # Sanitise filename
+    safe_name = name.replace('/', '_').replace(' ', '_')
+    print(f'{safe_name}|||{ref_id}')
+" 2>/dev/null)
+
+    if [ -z "$ATTACHMENT_IDS" ]; then
+        log_warn "No screenshots found in test results"
+        return 0
+    fi
+
+    local COUNT=0
+    while IFS= read -r line; do
+        local NAME="${line%%|||*}"
+        local REF_ID="${line##*|||}"
+
+        if [ -n "$REF_ID" ] && [ -n "$NAME" ]; then
+            local OUT_FILE="$OUTPUT_DIR/${NAME}.png"
+            xcrun xcresulttool get --legacy --format raw --path "$RESULT_BUNDLE" --id "$REF_ID" > "$OUT_FILE" 2>/dev/null
+            if [ -s "$OUT_FILE" ]; then
+                COUNT=$((COUNT + 1))
+            else
+                rm -f "$OUT_FILE"
+            fi
+        fi
+    done <<< "$ATTACHMENT_IDS"
+
+    log_info "✅ Extracted $COUNT screenshots to $OUTPUT_DIR"
+    ls -la "$OUTPUT_DIR" 2>/dev/null | head -20
+}
+
 # Run all checks
 run_all() {
     resolve_packages
@@ -348,6 +459,7 @@ show_help() {
     echo "  deploy [NAME]   Build, install, and launch with console output"
     echo "  test            Run unit tests on simulator"
     echo "  ui-test         Run UI tests on simulator"
+    echo "  screenshots     Extract screenshots from latest xcresult bundle"
     echo "  lint            Analyze code for warnings"
     echo "  sync-ghostty    Rebuild and sync GhosttyKit xcframework from ghostty fork"
     echo "  all             Run all CI checks"
@@ -385,6 +497,9 @@ case "${1:-help}" in
         ;;
     ui-test)
         run_ui_tests
+        ;;
+    screenshots)
+        extract_screenshots "${2:-}"
         ;;
     lint)
         lint

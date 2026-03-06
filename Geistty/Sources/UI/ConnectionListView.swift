@@ -118,6 +118,7 @@ struct ConnectionListView: View {
                         Text("\(keyManager.keys.count)")
                             .foregroundColor(.secondary)
                     }
+                    .accessibilityIdentifier("SSHKeysLink")
                 }
             }
             .navigationTitle("Connections")
@@ -129,6 +130,7 @@ struct ConnectionListView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityIdentifier("AddConnectionButton")
                 }
             }
             .sheet(isPresented: $showingAddConnection) {
@@ -391,6 +393,7 @@ struct ConnectionRow: View {
             }
         }
         .disabled(isConnecting)
+        .accessibilityIdentifier("ConnectionRow-\(profile.name)")
         .accessibilityLabel("\(profile.name), \(profile.displayString)")
         .accessibilityHint(isConnecting ? "Connecting" : "Double-tap to connect")
     }

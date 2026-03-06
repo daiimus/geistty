@@ -15,6 +15,23 @@
 		B1000003 /* TmuxSizingDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* TmuxSizingDebugTests.swift */; };
 		B1000004 /* ConnectedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004 /* ConnectedTests.swift */; };
 		B1000005 /* TestConfig.local.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000005 /* TestConfig.local.swift */; };
+		B1000006 /* UITestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000006 /* UITestHelpers.swift */; };
+		B1000007 /* LaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000007 /* LaunchTests.swift */; };
+		B1000008 /* QuickConnectSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000008 /* QuickConnectSheetTests.swift */; };
+		B1000009 /* ConnectionListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000009 /* ConnectionListTests.swift */; };
+		B100000A /* ConnectionEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A /* ConnectionEditorTests.swift */; };
+		B100000B /* SettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000B /* SettingsTests.swift */; };
+		B100000C /* SSHKeyManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000C /* SSHKeyManagerTests.swift */; };
+		B100000D /* ErrorViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000D /* ErrorViewTests.swift */; };
+		B100000E /* TerminalBasicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000E /* TerminalBasicTests.swift */; };
+		B100000F /* ToolbarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F /* ToolbarTests.swift */; };
+		B1000010 /* SearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000020 /* SearchTests.swift */; };
+		B1000011 /* CommandPaletteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000021 /* CommandPaletteTests.swift */; };
+		B1000012 /* FontSizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000022 /* FontSizeTests.swift */; };
+		B1000013 /* SplitPaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000023 /* SplitPaneTests.swift */; };
+		B1000014 /* TmuxWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000024 /* TmuxWindowTests.swift */; };
+		B1000015 /* OrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000025 /* OrientationTests.swift */; };
+		B1000016 /* StressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000026 /* StressTests.swift */; };
 		A1000001 /* GeisttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* GeisttyApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
@@ -151,6 +168,23 @@
 		B2000003 /* TmuxSizingDebugTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSizingDebugTests.swift; sourceTree = "<group>"; };
 		B2000004 /* ConnectedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedTests.swift; sourceTree = "<group>"; };
 		B2000005 /* TestConfig.local.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestConfig.local.swift; sourceTree = "<group>"; };
+		B2000006 /* UITestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestHelpers.swift; sourceTree = "<group>"; };
+		B2000007 /* LaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchTests.swift; sourceTree = "<group>"; };
+		B2000008 /* QuickConnectSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickConnectSheetTests.swift; sourceTree = "<group>"; };
+		B2000009 /* ConnectionListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListTests.swift; sourceTree = "<group>"; };
+		B200000A /* ConnectionEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEditorTests.swift; sourceTree = "<group>"; };
+		B200000B /* SettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTests.swift; sourceTree = "<group>"; };
+		B200000C /* SSHKeyManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyManagerTests.swift; sourceTree = "<group>"; };
+		B200000D /* ErrorViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorViewTests.swift; sourceTree = "<group>"; };
+		B200000E /* TerminalBasicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBasicTests.swift; sourceTree = "<group>"; };
+		B200000F /* ToolbarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarTests.swift; sourceTree = "<group>"; };
+		B2000020 /* SearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTests.swift; sourceTree = "<group>"; };
+		B2000021 /* CommandPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteTests.swift; sourceTree = "<group>"; };
+		B2000022 /* FontSizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontSizeTests.swift; sourceTree = "<group>"; };
+		B2000023 /* SplitPaneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneTests.swift; sourceTree = "<group>"; };
+		B2000024 /* TmuxWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowTests.swift; sourceTree = "<group>"; };
+		B2000025 /* OrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrientationTests.swift; sourceTree = "<group>"; };
+		B2000026 /* StressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StressTests.swift; sourceTree = "<group>"; };
 		B2000010 /* GeisttyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000001 /* GeisttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyApp.swift; sourceTree = "<group>"; };
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -412,8 +446,49 @@
 				B2000003 /* TmuxSizingDebugTests.swift */,
 				B2000004 /* ConnectedTests.swift */,
 				B2000005 /* TestConfig.local.swift */,
+				B5000002 /* Helpers */,
+				B5000003 /* DisconnectedTests */,
+				B5000004 /* ConnectedTests */,
 			);
 			path = GeisttyUITests;
+			sourceTree = "<group>";
+		};
+		B5000002 /* Helpers */ = {
+			isa = PBXGroup;
+			children = (
+				B2000006 /* UITestHelpers.swift */,
+			);
+			path = Helpers;
+			sourceTree = "<group>";
+		};
+		B5000003 /* DisconnectedTests */ = {
+			isa = PBXGroup;
+			children = (
+				B2000007 /* LaunchTests.swift */,
+				B2000008 /* QuickConnectSheetTests.swift */,
+				B2000009 /* ConnectionListTests.swift */,
+				B200000A /* ConnectionEditorTests.swift */,
+				B200000B /* SettingsTests.swift */,
+				B200000C /* SSHKeyManagerTests.swift */,
+				B200000D /* ErrorViewTests.swift */,
+			);
+			path = DisconnectedTests;
+			sourceTree = "<group>";
+		};
+		B5000004 /* ConnectedTests */ = {
+			isa = PBXGroup;
+			children = (
+				B200000E /* TerminalBasicTests.swift */,
+				B200000F /* ToolbarTests.swift */,
+				B2000020 /* SearchTests.swift */,
+				B2000021 /* CommandPaletteTests.swift */,
+				B2000022 /* FontSizeTests.swift */,
+				B2000023 /* SplitPaneTests.swift */,
+				B2000024 /* TmuxWindowTests.swift */,
+				B2000025 /* OrientationTests.swift */,
+				B2000026 /* StressTests.swift */,
+			);
+			path = ConnectedTests;
 			sourceTree = "<group>";
 		};
 		A5000012 /* Resources */ = {
@@ -685,6 +760,23 @@
 				B1000003 /* TmuxSizingDebugTests.swift in Sources */,
 				B1000004 /* ConnectedTests.swift in Sources */,
 				B1000005 /* TestConfig.local.swift in Sources */,
+				B1000006 /* UITestHelpers.swift in Sources */,
+				B1000007 /* LaunchTests.swift in Sources */,
+				B1000008 /* QuickConnectSheetTests.swift in Sources */,
+				B1000009 /* ConnectionListTests.swift in Sources */,
+				B100000A /* ConnectionEditorTests.swift in Sources */,
+				B100000B /* SettingsTests.swift in Sources */,
+				B100000C /* SSHKeyManagerTests.swift in Sources */,
+				B100000D /* ErrorViewTests.swift in Sources */,
+				B100000E /* TerminalBasicTests.swift in Sources */,
+				B100000F /* ToolbarTests.swift in Sources */,
+				B1000010 /* SearchTests.swift in Sources */,
+				B1000011 /* CommandPaletteTests.swift in Sources */,
+				B1000012 /* FontSizeTests.swift in Sources */,
+				B1000013 /* SplitPaneTests.swift in Sources */,
+				B1000014 /* TmuxWindowTests.swift in Sources */,
+				B1000015 /* OrientationTests.swift in Sources */,
+				B1000016 /* StressTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
