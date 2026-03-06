@@ -68,7 +68,7 @@ final class TerminalAccessoryView: UIInputView {
 
     init() {
         // Height: 44pt (standard accessory view height)
-        let frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 44)
+        let frame = CGRect(x: 0, y: 0, width: 320, height: 44)
         super.init(frame: frame, inputViewStyle: .keyboard)
         allowsSelfSizing = true
         setupViews()
@@ -253,6 +253,7 @@ final class TerminalAccessoryView: UIInputView {
             wrapper.widthAnchor.constraint(equalToConstant: 12),
             wrapper.heightAnchor.constraint(equalToConstant: 44),
         ])
+        wrapper.accessibilityElementsHidden = true
         return wrapper
     }
 
