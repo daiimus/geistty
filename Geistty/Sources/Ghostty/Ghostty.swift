@@ -272,6 +272,26 @@ extension Ghostty {
         private var hasFocusState: Bool = false
         private var focusInstant: ContinuousClock.Instant? = nil
         
+        /// Terminal symbols bar — displayed above the software keyboard.
+        /// Lazy-initialized on first access; nil for observer surfaces.
+        private lazy var terminalAccessoryView: TerminalAccessoryView? = {
+            // Observer surfaces (multi-pane) never become first responder,
+            // so they don't need an accessory view.
+            guard !isMultiPaneObserver else { return nil }
+            let accessory = TerminalAccessoryView()
+            accessory.onSendText = { [weak self] text in
+                self?.sendText(text)
+            }
+            accessory.onSendVirtualKey = { [weak self] tag in
+                guard let vk = Self.virtualKeyForTag(tag) else { return }
+                self?.sendVirtualKey(vk)
+            }
+            accessory.onSetCtrlToggle = { [weak self] active in
+                self?.setCtrlToggle(active)
+            }
+            return accessory
+        }()
+        
         // MARK: - UIKeyInput conformance
         
         // Note: canBecomeFirstResponder is declared in "First Responder & Keyboard" section
@@ -342,6 +362,7 @@ extension Ghostty {
             // Check if Ctrl toggle is active (from on-screen button)
             if ctrlToggleActive {
                 ctrlToggleActive = false
+                terminalAccessoryView?.resetCtrlState()
                 
                 // With Ctrl active, send as key events to get proper control character handling
                 for char in text {
@@ -1073,6 +1094,7 @@ extension Ghostty {
                 
                 // Reset Ctrl toggle
                 ctrlToggleActive = false
+                terminalAccessoryView?.resetCtrlState()
             }
         }
         
@@ -1570,6 +1592,7 @@ extension Ghostty {
                 if ctrlToggleActive {
                     modFlags.insert(.control)
                     ctrlToggleActive = false  // Clear after use
+                    terminalAccessoryView?.resetCtrlState()
                 }
                 
                 // Create the key event using Ghostty Input types
@@ -1900,6 +1923,23 @@ extension Ghostty {
         // MARK: - First Responder & Keyboard
         
         override var canBecomeFirstResponder: Bool { !isMultiPaneObserver }
+        
+        /// Symbols bar displayed above the software keyboard.
+        /// Returns nil when a hardware keyboard is attached (no software keyboard visible).
+        override var inputAccessoryView: UIView? { terminalAccessoryView }
+        
+        /// Map accessory view button tags to VirtualKey values.
+        private static func virtualKeyForTag(_ tag: Int) -> VirtualKey? {
+            switch tag {
+            case TerminalAccessoryView.vkEscape: return .escape
+            case TerminalAccessoryView.vkTab:    return .tab
+            case TerminalAccessoryView.vkUp:     return .upArrow
+            case TerminalAccessoryView.vkDown:   return .downArrow
+            case TerminalAccessoryView.vkLeft:   return .leftArrow
+            case TerminalAccessoryView.vkRight:  return .rightArrow
+            default: return nil
+            }
+        }
         
         override func becomeFirstResponder() -> Bool {
             let result = super.becomeFirstResponder()
