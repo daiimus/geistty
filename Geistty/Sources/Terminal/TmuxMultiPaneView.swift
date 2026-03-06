@@ -126,6 +126,10 @@ struct TmuxMultiPaneView: View {
                 logger.info("📐 TmuxMultiPaneView appeared, size: \(Int(geometry.size.width))x\(Int(geometry.size.height))")
                 handleSizeChange(geometry.size)
             }
+            .onDisappear {
+                resizeSyncTask?.cancel()
+                resizeSyncTask = nil
+            }
         }
     }
     
@@ -143,7 +147,7 @@ struct TmuxMultiPaneView: View {
             return
         }
         
-        logger.info("📐 handleSizeChange called with size: \(Int(size.width))x\(Int(size.height)), lastSent: \(Int(lastSentSize.width))x\(Int(lastSentSize.height))")
+        logger.debug("📐 handleSizeChange called with size: \(Int(size.width))x\(Int(size.height)), lastSent: \(Int(lastSentSize.width))x\(Int(lastSentSize.height))")
         
         // Avoid redundant resize commands - use tolerance to avoid floating point issues
         let sizeDiff = abs(size.width - lastSentSize.width) + abs(size.height - lastSentSize.height)
@@ -179,8 +183,8 @@ struct TmuxMultiPaneView: View {
             return
         }
         
-        logger.info("📐 Multi-pane geometry: \(Int(size.width))x\(Int(size.height))px -> \(cols)x\(rows) cells (cell: \(Int(cellSize.width))x\(Int(cellSize.height)))")
-        logger.info("📐 Current split tree before resize: panes=\(sessionManager.currentSplitTree.paneIds), isSplit=\(sessionManager.currentSplitTree.isSplit)")
+        logger.debug("📐 Multi-pane geometry: \(Int(size.width))x\(Int(size.height))px -> \(cols)x\(rows) cells (cell: \(Int(cellSize.width))x\(Int(cellSize.height)))")
+        logger.debug("📐 Current split tree before resize: panes=\(sessionManager.currentSplitTree.paneIds), isSplit=\(sessionManager.currentSplitTree.isSplit))")
         
         // Update tracked size at both pixel and grid levels
         lastSentSize = size
@@ -188,7 +192,7 @@ struct TmuxMultiPaneView: View {
         lastSentRows = rows
         
         // Send resize to tmux - this triggers refresh-client -C
-        logger.info("📐 🚀 SENDING refresh-client -C \(cols),\(rows)")
+        logger.debug("📐 SENDING refresh-client -C \(cols),\(rows)")
         sessionManager.resize(cols: cols, rows: rows)
     }
 }
@@ -537,7 +541,7 @@ class GhosttyPaneSurfaceContainerView: UIView {
         if skipGridSizeUpdate {
             // Still mark as "applied" to avoid redundant log spam
             if targetCols != lastAppliedCols || targetRows != lastAppliedRows {
-                logger.info("📐 updateGridSize: SKIPPING setExactGridSize for primary surface (\(targetCols)x\(targetRows)) — resize storm prevention")
+                logger.debug("📐 updateGridSize: SKIPPING setExactGridSize for primary surface (\(targetCols)x\(targetRows)) — resize storm prevention")
                 lastAppliedCols = targetCols
                 lastAppliedRows = targetRows
             }
@@ -550,7 +554,7 @@ class GhosttyPaneSurfaceContainerView: UIView {
             return
         }
         
-        logger.info("📐 GhosttyPaneSurfaceContainerView applying grid size: \(targetCols)x\(targetRows) (was: \(lastAppliedCols)x\(lastAppliedRows)), bounds=\(bounds)")
+        logger.debug("📐 GhosttyPaneSurfaceContainerView applying grid size: \(targetCols)x\(targetRows) (was: \(lastAppliedCols)x\(lastAppliedRows)), bounds=\(bounds)")
         
         // Tell Ghostty to use the exact grid size
         let success = surface.setExactGridSize(cols: targetCols, rows: targetRows)
@@ -560,11 +564,11 @@ class GhosttyPaneSurfaceContainerView: UIView {
             gridSizeRetryCount = 0  // Reset retry counter on success
             gridSizeRetryTask?.cancel()
             gridSizeRetryTask = nil
-            logger.info("📐 ✅ Grid size applied successfully: \(targetCols)x\(targetRows)")
+            logger.debug("📐 Grid size applied successfully: \(targetCols)x\(targetRows)")
         } else {
             // Cell size not available yet - retry with exponential backoff
             gridSizeRetryCount += 1
-            logger.info("📐 ⏳ Grid size application failed (attempt \(gridSizeRetryCount)/\(maxGridSizeRetries))")
+            logger.debug("📐 Grid size application failed (attempt \(gridSizeRetryCount)/\(maxGridSizeRetries))")
             
             if gridSizeRetryCount <= maxGridSizeRetries {
                 // Cancel any pending retry

@@ -92,8 +92,8 @@ class TerminalViewModel: ObservableObject {
     var title: String = ""
     @Published var isConnected: Bool = false
     @Published var disconnectedByRemote: Bool = false
-        @Published var disconnectError: String? = nil
-        var currentFontSize: Float = 14.0
+    @Published var disconnectError: String? = nil
+    var currentFontSize: Float = 14.0
     
     /// Buffer for data received before surface is ready
     private var preSurfaceBuffer: [Data] = []
@@ -470,7 +470,7 @@ extension TerminalViewModel: SSHSessionDelegate {
     func sshSession(_ session: SSHSession, didReceiveData data: Data) {
         // Feed data from SSH to Ghostty terminal for display
         if let surface = surfaceView {
-            logger.info("Received \(data.count) bytes from SSH, feeding to Ghostty")
+            logger.debug("Received \(data.count) bytes from SSH, feeding to Ghostty")
             
             // Shadow-analyze for tmux wire diagnostics (no-op if not active)
             wireDiagnostics.analyze(data)
@@ -478,7 +478,7 @@ extension TerminalViewModel: SSHSessionDelegate {
             surface.feedData(data)
         } else {
             // Buffer data until surface is ready
-            logger.info("Buffering \(data.count) bytes (surface not ready yet)")
+            logger.debug("Buffering \(data.count) bytes (surface not ready yet)")
             preSurfaceBuffer.append(data)
         }
     }
@@ -620,7 +620,7 @@ class RawTerminalUIViewController: UIViewController {
     
     // Status bar preference (read from UserDefaults)
     var showStatusBar: Bool {
-        UserDefaults.standard.bool(forKey: "ui.showStatusBar")
+        UserDefaults.standard.bool(forKey: UserDefaultsKey.showStatusBar)
     }
     
     override var prefersStatusBarHidden: Bool {
@@ -713,7 +713,7 @@ class RawTerminalUIViewController: UIViewController {
     
     func toggleStatusBar() {
         let newValue = !showStatusBar
-        UserDefaults.standard.set(newValue, forKey: "ui.showStatusBar")
+        UserDefaults.standard.set(newValue, forKey: UserDefaultsKey.showStatusBar)
         updateStatusBarAndLayout()
     }
     

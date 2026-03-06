@@ -316,3 +316,18 @@ class AppState: ObservableObject {
         currentPassword = nil
     }
 }
+
+// MARK: - Centralized UserDefaults Keys
+
+/// All UserDefaults key strings used across the app.
+/// Centralizes raw strings to prevent typos and enable refactoring.
+/// Keys for ConnectionProfile and SSHKeyManager are managed separately
+/// (already centralized as private constants in their respective files).
+enum UserDefaultsKey {
+    static let cursorStyle = "terminal.cursorStyle"
+    static let fontFamily = "terminal.fontFamily"
+    static let fontThicken = "terminal.fontThicken"
+    static let backgroundOpacity = "terminal.backgroundOpacity"
+    static let colorTheme = "terminal.colorTheme"
+    static let showStatusBar = "ui.showStatusBar"
+}

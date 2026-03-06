@@ -22,39 +22,39 @@ class AppSettings: ObservableObject {
     // MARK: - Terminal Settings
     
     @Published var cursorStyle: String {
-        didSet { defaults.set(cursorStyle, forKey: "terminal.cursorStyle") }
+        didSet { defaults.set(cursorStyle, forKey: UserDefaultsKey.cursorStyle) }
     }
     @Published var fontFamily: String {
-        didSet { defaults.set(fontFamily, forKey: "terminal.fontFamily") }
+        didSet { defaults.set(fontFamily, forKey: UserDefaultsKey.fontFamily) }
     }
     
     // MARK: - Font Rendering Settings
     
     @Published var fontThicken: Bool {
-        didSet { defaults.set(fontThicken, forKey: "terminal.fontThicken") }
+        didSet { defaults.set(fontThicken, forKey: UserDefaultsKey.fontThicken) }
     }
 
     
     // MARK: - Appearance Settings
     
     @Published var backgroundOpacity: Double {
-        didSet { defaults.set(backgroundOpacity, forKey: "terminal.backgroundOpacity") }
+        didSet { defaults.set(backgroundOpacity, forKey: UserDefaultsKey.backgroundOpacity) }
     }
     
     // MARK: - UI Settings
     
     @Published var showStatusBar: Bool {
-        didSet { defaults.set(showStatusBar, forKey: "ui.showStatusBar") }
+        didSet { defaults.set(showStatusBar, forKey: UserDefaultsKey.showStatusBar) }
     }
     
     private init() {
         // Initialize from UserDefaults with fallback defaults.
         // Assignments in init don't trigger didSet, so no spurious writes.
-        cursorStyle = defaults.string(forKey: "terminal.cursorStyle") ?? "block"
-        fontFamily = defaults.string(forKey: "terminal.fontFamily") ?? "Menlo"
-        fontThicken = defaults.object(forKey: "terminal.fontThicken") as? Bool ?? true
-        backgroundOpacity = defaults.object(forKey: "terminal.backgroundOpacity") as? Double ?? 0.95
-        showStatusBar = defaults.object(forKey: "ui.showStatusBar") as? Bool ?? false
+        cursorStyle = defaults.string(forKey: UserDefaultsKey.cursorStyle) ?? "block"
+        fontFamily = defaults.string(forKey: UserDefaultsKey.fontFamily) ?? "Menlo"
+        fontThicken = defaults.object(forKey: UserDefaultsKey.fontThicken) as? Bool ?? true
+        backgroundOpacity = defaults.object(forKey: UserDefaultsKey.backgroundOpacity) as? Double ?? 0.95
+        showStatusBar = defaults.object(forKey: UserDefaultsKey.showStatusBar) as? Bool ?? false
     }
     
     // Available monospace fonts on iOS
@@ -436,7 +436,7 @@ struct FontPickerView: View {
                         selectedFont = font
                         // Write directly to UserDefaults to ensure it's persisted
                         // before the config update reads it
-                        UserDefaults.standard.set(font, forKey: "terminal.fontFamily")
+                        UserDefaults.standard.set(font, forKey: UserDefaultsKey.fontFamily)
                         // Call the callback on next run loop to ensure UserDefaults is synced
                         Task { @MainActor in
                             onFontChanged()
@@ -582,14 +582,15 @@ struct ConfigEditorView: View {
             loadConfig()
         }
         .onDisappear {
-            // Auto-save if there are changes
+            // Auto-save if there are changes, but suppress the success/error banner
+            // since the view is disappearing and the user won't see it.
             if hasChanges {
-                saveConfig()
+                saveConfig(silent: true)
+                // Sync config file changes back to GUI settings
+                ConfigSyncManager.shared.onConfigFileChanged()
+                // Reload terminal configuration
+                NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
             }
-            // Sync config file changes back to GUI settings
-            ConfigSyncManager.shared.onConfigFileChanged()
-            // Reload terminal configuration
-            NotificationCenter.default.post(name: .reloadConfiguration, object: nil)
         }
     }
     
@@ -605,24 +606,28 @@ struct ConfigEditorView: View {
         }
     }
     
-    private func saveConfig() {
+    private func saveConfig(silent: Bool = false) {
         do {
             try configText.write(to: configPath, atomically: true, encoding: .utf8)
             originalText = configText
-            withAnimation {
-                saveResult = .success
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                if case .success = saveResult {
-                    withAnimation {
-                        saveResult = nil
+            if !silent {
+                withAnimation {
+                    saveResult = .success
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    if case .success = saveResult {
+                        withAnimation {
+                            saveResult = nil
+                        }
                     }
                 }
             }
         } catch {
             logger.error("Failed to save config: \(error.localizedDescription)")
-            withAnimation {
-                saveResult = .failure("Save failed: \(error.localizedDescription)")
+            if !silent {
+                withAnimation {
+                    saveResult = .failure("Save failed: \(error.localizedDescription)")
+                }
             }
         }
     }

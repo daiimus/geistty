@@ -64,20 +64,19 @@ struct ConnectionListView: View {
                     }
                 }
                 
-                // Recent Section
-                if !profileManager.recents.isEmpty {
+                // Recent Section — only show when there are visible non-favorite recents
+                let visibleRecents = filteredRecents.prefix(5).filter { !$0.isFavorite }
+                if !visibleRecents.isEmpty {
                     Section("Recent") {
-                        ForEach(filteredRecents.prefix(5)) { profile in
-                            if !profile.isFavorite {
-                                ConnectionRow(
-                                    profile: profile,
-                                    isConnecting: connectionInProgress?.id == profile.id
-                                ) {
-                                    connect(to: profile)
-                                }
-                                .contextMenu {
-                                    connectionContextMenu(for: profile)
-                                }
+                        ForEach(visibleRecents) { profile in
+                            ConnectionRow(
+                                profile: profile,
+                                isConnecting: connectionInProgress?.id == profile.id
+                            ) {
+                                connect(to: profile)
+                            }
+                            .contextMenu {
+                                connectionContextMenu(for: profile)
                             }
                         }
                     }
