@@ -392,6 +392,8 @@ struct ConnectionRow: View {
             }
         }
         .disabled(isConnecting)
+        .accessibilityLabel("\(profile.name), \(profile.displayString)")
+        .accessibilityHint(isConnecting ? "Connecting" : "Double-tap to connect")
     }
 }
 

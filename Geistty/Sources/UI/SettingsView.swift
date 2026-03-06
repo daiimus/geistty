@@ -168,6 +168,8 @@ struct SettingsView: View {
                                 in: 8...32,
                                 step: 1
                             )
+                            .accessibilityLabel("Font size")
+                            .accessibilityValue("\(currentFontSize) points")
                             
                             Image(systemName: "textformat.size.larger")
                                 .foregroundStyle(.secondary)
@@ -205,6 +207,8 @@ struct SettingsView: View {
                             in: 0.5...1.0,
                             step: 0.05
                         )
+                        .accessibilityLabel("Background opacity")
+                        .accessibilityValue("\(Int(settings.backgroundOpacity * 100)) percent")
                     }
                     .padding(.vertical, 4)
                     
