@@ -198,9 +198,12 @@ final class TOFUHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate, @unch
             do {
                 try KeychainManager.shared.saveHostKey(presentedKeyString, for: host, port: port)
             } catch {
-                logger.warning("Failed to store host key for \(self.host):\(self.port): \(error.localizedDescription)")
-                // Still accept — we don't want a Keychain glitch to block connections.
-                // The key simply won't be verified on next connection.
+                // #55: Save failure breaks TOFU guarantee — the key won't be
+                // verified on next connection. Fail-closed to prevent silent
+                // downgrade to accept-all behavior.
+                logger.error("Failed to store host key for \(self.host):\(self.port): \(error.localizedDescription) — rejecting connection (TOFU broken)")
+                validationCompletePromise.fail(error)
+                return
             }
             validationCompletePromise.succeed(())
         } catch {
@@ -215,10 +218,11 @@ final class TOFUHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate, @unch
                 return
             }
             
-            // Transient Keychain error — log but don't block the connection.
-            // Degraded to accept-all behavior for this connection only.
-            logger.warning("Keychain error during host key verification for \(self.host):\(self.port): \(error.localizedDescription) — accepting key")
-            validationCompletePromise.succeed(())
+            // #55: ALL Keychain errors must fail-closed. An attacker could
+            // exploit any transient Keychain failure window to present a
+            // different key. Reject the connection and let the user retry.
+            logger.error("Keychain error during host key verification for \(self.host):\(self.port): \(error.localizedDescription) — rejecting connection")
+            validationCompletePromise.fail(error)
         }
     }
 }
@@ -236,6 +240,9 @@ final class SSHChannelDataHandler: ChannelInboundHandler {
     
     private let onData: @Sendable (Data) -> Void
     private let onClose: @Sendable (Error?) -> Void
+    /// #63: Guard against double onClose callback. NIO calls errorCaught →
+    /// channelInactive sequentially, which would fire onClose twice.
+    private var closeCalled = false
     
     init(onData: @escaping @Sendable (Data) -> Void, onClose: @escaping @Sendable (Error?) -> Void) {
         self.onData = onData
@@ -268,13 +275,18 @@ final class SSHChannelDataHandler: ChannelInboundHandler {
     }
     
     func channelInactive(context: ChannelHandlerContext) {
+        guard !closeCalled else { return }
+        closeCalled = true
         logger.info("🔌 SSH channel inactive")
         onClose(nil)
     }
     
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         logger.error("🔌 SSH channel error: \(error.localizedDescription)")
-        onClose(error)
+        if !closeCalled {
+            closeCalled = true
+            onClose(error)
+        }
         context.close(promise: nil)
     }
 }
@@ -511,6 +523,14 @@ class NIOSSHConnection {
             delegate?.connectionDidConnect(self)
             delegate?.connectionDidAuthenticate(self)
             
+        } catch let error as NIOSSHError {
+            // #61: Preserve NIOSSHError type (e.g., .hostKeyMismatch) so callers
+            // can detect specific failure reasons instead of getting a generic string.
+            logger.error("🔗 Connection failed: \(error.localizedDescription)")
+            state = .disconnected
+            try? await eventLoopGroup?.shutdownGracefully()
+            eventLoopGroup = nil
+            throw error
         } catch {
             logger.error("🔗 Connection failed: \(error.localizedDescription)")
             state = .disconnected
@@ -709,6 +729,9 @@ class NIOSSHConnection {
     
     /// Disconnect from the server
     func disconnect() {
+        // #60: Guard against duplicate disconnect calls
+        guard state != .disconnected else { return }
+        
         logger.info("Disconnecting...")
         
         // Cancel any in-flight write task
@@ -722,15 +745,17 @@ class NIOSSHConnection {
         channel?.close(promise: nil)
         channel = nil
         
-        // Shutdown event loop
-        eventLoopGroup?.shutdownGracefully { [weak self] error in
+        // #60: Shutdown event loop — nil the reference inside the callback
+        // to avoid racing with the async shutdown. NIOSSHConnection is @MainActor
+        // so the nil assignment must be dispatched back to MainActor.
+        eventLoopGroup?.shutdownGracefully { error in
             if let error = error {
                 logger.warning("Event loop shutdown error: \(error.localizedDescription)")
             }
-            // Ensure reference is dropped after shutdown completes
-            _ = self
+            Task { @MainActor [weak self] in
+                self?.eventLoopGroup = nil
+            }
         }
-        eventLoopGroup = nil
         
         state = .disconnected
         delegate?.connectionDidClose(self, error: nil)

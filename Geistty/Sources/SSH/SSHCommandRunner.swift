@@ -75,6 +75,10 @@ private final class ExecChannelHandler: ChannelInboundHandler {
     
     private let collector: ExecOutputCollector
     private let closedPromise: EventLoopPromise<Void>
+    /// Guard against double promise fulfillment (#54).
+    /// NIO calls errorCaught → channelInactive sequentially, which would
+    /// fulfill the promise twice and hit a precondition crash.
+    private var promiseFulfilled = false
     
     init(collector: ExecOutputCollector, closedPromise: EventLoopPromise<Void>) {
         self.collector = collector
@@ -109,12 +113,17 @@ private final class ExecChannelHandler: ChannelInboundHandler {
     }
     
     func channelInactive(context: ChannelHandlerContext) {
+        guard !promiseFulfilled else { return }
+        promiseFulfilled = true
         closedPromise.succeed(())
     }
     
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         logger.error("Exec channel error: \(error.localizedDescription)")
-        closedPromise.fail(error)
+        if !promiseFulfilled {
+            promiseFulfilled = true
+            closedPromise.fail(error)
+        }
         context.close(promise: nil)
     }
 }

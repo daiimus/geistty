@@ -123,16 +123,16 @@ final class TerminalAccessoryView: UIInputView {
         stack.addArrangedSubview(ctrl)
 
         stack.addArrangedSubview(makeKeyButton(
-            symbol: "arrow.up", label: nil, tag: Self.vkUp, action: #selector(virtualKeyTapped(_:))
+            symbol: "arrow.up", label: "Up arrow", tag: Self.vkUp, action: #selector(virtualKeyTapped(_:))
         ))
         stack.addArrangedSubview(makeKeyButton(
-            symbol: "arrow.down", label: nil, tag: Self.vkDown, action: #selector(virtualKeyTapped(_:))
+            symbol: "arrow.down", label: "Down arrow", tag: Self.vkDown, action: #selector(virtualKeyTapped(_:))
         ))
         stack.addArrangedSubview(makeKeyButton(
-            symbol: "arrow.left", label: nil, tag: Self.vkLeft, action: #selector(virtualKeyTapped(_:))
+            symbol: "arrow.left", label: "Left arrow", tag: Self.vkLeft, action: #selector(virtualKeyTapped(_:))
         ))
         stack.addArrangedSubview(makeKeyButton(
-            symbol: "arrow.right", label: nil, tag: Self.vkRight, action: #selector(virtualKeyTapped(_:))
+            symbol: "arrow.right", label: "Right arrow", tag: Self.vkRight, action: #selector(virtualKeyTapped(_:))
         ))
 
         // --- Divider ---
@@ -167,7 +167,7 @@ final class TerminalAccessoryView: UIInputView {
 
         // --- Dismiss keyboard ---
         stack.addArrangedSubview(makeKeyButton(
-            symbol: "keyboard.chevron.compact.down", label: nil, tag: -1, action: #selector(dismissKeyboard)
+            symbol: "keyboard.chevron.compact.down", label: "Dismiss keyboard", tag: -1, action: #selector(dismissKeyboard)
         ))
     }
 

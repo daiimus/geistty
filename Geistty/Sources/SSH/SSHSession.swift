@@ -308,6 +308,13 @@ class SSHSession: ObservableObject, Identifiable {
     }
     
     deinit {
+        // #58: Clean up async resources that disconnect() may not have cleared.
+        // Without this, the AsyncStream continuation and background tasks leak.
+        writeContinuation?.finish()
+        writeConsumerTask?.cancel()
+        backgroundSafetyTimerTask?.cancel()
+        sessionDiscoveryTimer?.cancel()
+        
         // NotificationCenter.removeObserver is thread-safe, so this is safe
         // even though @MainActor deinit may run on an arbitrary thread.
         // Prevents observer leaks if disconnect() was never called.
@@ -999,9 +1006,11 @@ class SSHSession: ObservableObject, Identifiable {
         tmuxSessionManager?.detach()
         
         // Tear down serial write queue (after detach has been queued)
-        // finish() will cause the consumer to drain remaining items including detach
+        // finish() will cause the consumer to drain remaining items including detach.
+        // #64: Do NOT cancel writeConsumerTask — cancellation can drop the detach
+        // command that was just queued. finish() terminates the AsyncStream, causing
+        // the consumer's `for await` to exit naturally after draining all items.
         writeContinuation?.finish()
-        writeConsumerTask?.cancel()
         writeConsumerTask = nil
         writeContinuation = nil
         writeStream = nil
@@ -1157,6 +1166,11 @@ class SSHSession: ObservableObject, Identifiable {
         // role is handed off to isReconnecting.
         backgroundState = nil
         defer { isReconnecting = false }
+        
+        // #62: Reset counter before the loop so subsequent calls (e.g., from
+        // a manual Reconnect button after all attempts were exhausted) don't
+        // immediately fall through the while condition.
+        reconnectAttempts = 0
         
         while reconnectAttempts < maxReconnectAttempts {
             reconnectAttempts += 1
@@ -1343,6 +1357,17 @@ class SSHSession: ObservableObject, Identifiable {
                     
                     // Now send the actual tmux attach command
                     sendTmuxAttachCommand(sessionName: resolvedName)
+                    
+                    // #57: Forward any trailing data after the end marker.
+                    // A single SSH chunk may contain both the discovery response
+                    // and subsequent data (e.g., DCS 1000p from tmux -CC).
+                    if let endRange = buffer.range(of: endMarker) {
+                        let afterMarker = buffer[endRange.upperBound...]
+                        let trimmed = afterMarker.drop(while: { $0 == "\n" || $0 == "\r" })
+                        if !trimmed.isEmpty, let trailingData = String(trimmed).data(using: .utf8) {
+                            self.handleReceivedData(trailingData)
+                        }
+                    }
                 } else {
                     // Still accumulating response
                     sessionDiscoveryState = .querying(buffer: buffer, endMarker: endMarker)
