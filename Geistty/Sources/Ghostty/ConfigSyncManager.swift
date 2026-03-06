@@ -197,16 +197,16 @@ class ConfigSyncManager: ObservableObject {
         // Cursor style
         let cursor = config.cursorStyle
         if ["block", "bar", "underline"].contains(cursor) {
-            defaults.set(cursor, forKey: "terminal.cursorStyle")
+            defaults.set(cursor, forKey: UserDefaultsKey.cursorStyle)
             logger.debug("Synced cursor-style: \(cursor)")
         }
         
         // Font thicken
-        defaults.set(config.fontThicken, forKey: "terminal.fontThicken")
+        defaults.set(config.fontThicken, forKey: UserDefaultsKey.fontThicken)
         logger.debug("Synced font-thicken: \(config.fontThicken)")
         
         // Background opacity
-        defaults.set(config.backgroundOpacity, forKey: "terminal.backgroundOpacity")
+        defaults.set(config.backgroundOpacity, forKey: UserDefaultsKey.backgroundOpacity)
         logger.debug("Synced background-opacity: \(config.backgroundOpacity)")
         
         logger.info("Synced supported config fields via ghostty_config_get()")
@@ -272,14 +272,14 @@ class ConfigSyncManager: ObservableObject {
             switch key {
             case "font-family":
                 let guiFont = FontMapping.fromGhostty(value)
-                defaults.set(guiFont, forKey: "terminal.fontFamily")
+                defaults.set(guiFont, forKey: UserDefaultsKey.fontFamily)
                 logger.debug("File parser: font-family = \(guiFont)")
                 
             // cursor-style, font-thicken, background-opacity are handled by
             // syncFromConfig() via ghostty_config_get() API — no file parsing needed.
                 
             case "theme":
-                defaults.set(value, forKey: "terminal.colorTheme")
+                defaults.set(value, forKey: UserDefaultsKey.colorTheme)
                 logger.debug("File parser: theme = \(value)")
                 let availableThemes = ThemeManager.shared.themes
                 if let theme = availableThemes.first(where: {

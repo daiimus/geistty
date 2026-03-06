@@ -171,7 +171,7 @@ class ThemeManager: ObservableObject {
         loadBundledThemes()
         
         // Restore selected theme from UserDefaults
-        let savedThemeName = UserDefaults.standard.string(forKey: "terminal.colorTheme") ?? "Default"
+        let savedThemeName = UserDefaults.standard.string(forKey: UserDefaultsKey.colorTheme) ?? "Default"
         if let theme = themes.first(where: { $0.name == savedThemeName }) {
             selectedTheme = theme
         }
@@ -212,7 +212,7 @@ class ThemeManager: ObservableObject {
     /// Ghostty resolves the theme natively via GHOSTTY_RESOURCES_DIR
     func selectTheme(_ theme: TerminalTheme) {
         selectedTheme = theme
-        UserDefaults.standard.set(theme.name, forKey: "terminal.colorTheme")
+        UserDefaults.standard.set(theme.name, forKey: UserDefaultsKey.colorTheme)
         
         // Write `theme = <name>` to config file and strip old inline colors
         ConfigSyncManager.shared.updateTheme(named: theme.name)
@@ -235,6 +235,7 @@ extension Color {
         // Validate: scanner must have consumed the full string and hex must be correct length
         guard scanned, scanner.isAtEnd else {
             // Invalid hex — fall back to black
+            logger.warning("Invalid hex color string: '\(hex)' — falling back to black")
             self.init(red: 0, green: 0, blue: 0)
             return
         }
@@ -250,6 +251,7 @@ extension Color {
             g = Double((int >> 8) & 0xFF) / 255
             b = Double(int & 0xFF) / 255
         default:
+            logger.warning("Unexpected hex color length \(hex.count) for '\(hex)' — falling back to black")
             r = 0
             g = 0
             b = 0
