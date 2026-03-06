@@ -146,12 +146,11 @@ private struct WindowTab: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
         )
-        .onTapGesture(count: 2) {
-            // Double-tap to rename
-            onRename()
-        }
         .onTapGesture(count: 1) {
             // Single tap to select
+            // Rename is available via context menu (long-press / right-click).
+            // The previous double-tap gesture caused a 300ms delay on every
+            // single tap because SwiftUI waits for the second tap timeout.
             onSelect()
         }
         .contextMenu {

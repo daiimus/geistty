@@ -702,13 +702,9 @@ class RawTerminalUIViewController: UIViewController {
     }
     
     private func updateTopConstraint() {
-        if showStatusBar {
-            // When status bar is visible, offset by safe area top
-            surfaceTopConstraint?.constant = view.safeAreaInsets.top
-        } else {
-            // When status bar is hidden, terminal takes full screen
-            surfaceTopConstraint?.constant = 0
-        }
+        // Delegate to updateTerminalTopConstraint() which accounts for both
+        // status bar visibility AND window picker visibility. (#44 T6)
+        updateTerminalTopConstraint()
     }
     
     func toggleStatusBar() {

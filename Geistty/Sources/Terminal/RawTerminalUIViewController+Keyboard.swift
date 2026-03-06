@@ -47,8 +47,11 @@ extension RawTerminalUIViewController {
         let keyboardHeight = view.convert(keyboardFrame, from: nil).height
         
         // Calculate the new size BEFORE animating
-        let newHeight = view.bounds.height - keyboardHeight
-        let newSize = CGSize(width: view.bounds.width, height: newHeight)
+        // Account for top offset (safe area + window picker) so the pre-render
+        // hint matches the surface's actual frame after layout. (#44 T9)
+        let topOffset = surfaceTopConstraint?.constant ?? 0
+        let newHeight = view.bounds.height - keyboardHeight - topOffset
+        let newSize = CGSize(width: view.bounds.width, height: max(0, newHeight))
         
         // Notify Ghostty of size change BEFORE animation to pre-render
         // This prevents the white flash during resize
@@ -89,8 +92,11 @@ extension RawTerminalUIViewController {
         
         let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
         
-        // Calculate the new size BEFORE animating (full height)
-        let newSize = CGSize(width: view.bounds.width, height: view.bounds.height)
+        // Calculate the new size BEFORE animating (full height minus top offset).
+        // Account for top offset (safe area + window picker) so the pre-render
+        // hint matches the surface's actual frame after layout. (#44 T9)
+        let topOffset = surfaceTopConstraint?.constant ?? 0
+        let newSize = CGSize(width: view.bounds.width, height: max(0, view.bounds.height - topOffset))
         
         // Notify Ghostty of size change BEFORE animation to pre-render
         if let surface = self.surfaceView, !isMultiPaneMode {
