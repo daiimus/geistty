@@ -62,13 +62,15 @@ extension RawTerminalUIViewController {
         view.addSubview(hostingController.view)
         hostingController.didMove(toParent: self)
         
-        // Position at the top, below status bar if shown
-        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
+        // Position at the top, below the safe area (status bar).
+        // Uses safeAreaLayoutGuide so the constraint auto-updates on rotation
+        // or multitasking safe-area changes — no stale constant. (#44 T6)
+        let topAnchor = showStatusBar ? view.safeAreaLayoutGuide.topAnchor : view.topAnchor
         
         NSLayoutConstraint.activate([
             hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor, constant: topInset),
+            hostingController.view.topAnchor.constraint(equalTo: topAnchor),
             hostingController.view.heightAnchor.constraint(equalToConstant: windowPickerHeight)
         ])
         

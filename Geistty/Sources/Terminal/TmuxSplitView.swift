@@ -11,6 +11,38 @@ import os
 
 private let logger = os.Logger(subsystem: "com.geistty", category: "TmuxSplitView")
 
+// MARK: - Environment Key
+
+/// Controls whether TmuxSplitDivider's SwiftUI DragGesture is active.
+///
+/// When the UIKit DividerOverlayView is present (multi-pane mode), it handles
+/// divider drags via UIPanGestureRecognizer. The SwiftUI DragGesture must be
+/// disabled to avoid conflicting gesture recognition. (#45)
+private struct DividerDragEnabledKey: EnvironmentKey {
+    static let defaultValue: Bool = true
+}
+
+extension EnvironmentValues {
+    var dividerDragEnabled: Bool {
+        get { self[DividerDragEnabledKey.self] }
+        set { self[DividerDragEnabledKey.self] = newValue }
+    }
+}
+
+// MARK: - Conditional View Modifier
+
+private extension View {
+    /// Conditionally applies a transformation to the view.
+    @ViewBuilder
+    func applyIf<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - SplitViewDirection
 
 /// Direction of a split
@@ -92,6 +124,10 @@ struct TmuxSplitView<L: View, R: View>: View {
     /// Invisible hitbox size around the divider for easier touch
     private let dividerInvisibleSize: CGFloat = 20  // Larger for touch targets
     
+    /// Whether SwiftUI DragGesture is active on dividers.
+    /// Disabled when UIKit DividerOverlayView handles drags. (#45)
+    @Environment(\.dividerDragEnabled) private var dividerDragEnabled
+    
     var body: some View {
         GeometryReader { geo in
             let leftRect = leftRect(for: geo.size)
@@ -114,7 +150,10 @@ struct TmuxSplitView<L: View, R: View>: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel(direction == .horizontal ? "Right pane" : "Bottom pane")
                 
-                // Divider
+                // Divider — drag gesture is only active when no UIKit
+                // DividerOverlayView is handling drags (single-pane or
+                // standalone usage). In multi-pane mode the environment
+                // sets dividerDragEnabled=false. (#45)
                 TmuxSplitDivider(
                     direction: direction,
                     visibleSize: dividerVisibleSize,
@@ -123,7 +162,9 @@ struct TmuxSplitView<L: View, R: View>: View {
                     split: $split
                 )
                 .position(dividerPosition)
-                .gesture(dragGesture(geo.size))
+                .applyIf(dividerDragEnabled) { view in
+                    view.gesture(dragGesture(geo.size))
+                }
                 .onTapGesture(count: 2) {
                     onEqualize()
                 }

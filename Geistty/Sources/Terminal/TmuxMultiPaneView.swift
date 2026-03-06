@@ -46,7 +46,9 @@ struct TmuxMultiPaneView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            // The split tree view (panes with SwiftUI dividers for visual only)
+            // The split tree view (panes with SwiftUI dividers for visual only).
+            // Disable the SwiftUI DragGesture on dividers — the UIKit
+            // DividerOverlayView handles all drag interaction. (#45)
             TmuxSplitTreeView(
                 tree: sessionManager.currentSplitTree,
                 dividerColor: dividerColor,
@@ -85,6 +87,7 @@ struct TmuxMultiPaneView: View {
                     .accessibilityIdentifier("TerminalPane-\(paneId)")
                 }
             )
+            .environment(\.dividerDragEnabled, false)
             .accessibilityIdentifier("TmuxMultiPaneContainer")
             .onChange(of: geometry.size) { _, newSize in
                 handleSizeChange(newSize)
