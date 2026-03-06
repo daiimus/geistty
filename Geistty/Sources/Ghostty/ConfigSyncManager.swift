@@ -33,13 +33,22 @@ class ConfigSyncManager: ObservableObject {
     
     // MARK: - Update Config File
     
+    /// Detect line ending style used in a config string.
+    /// Returns `"\r\n"` if CRLF is found, otherwise `"\n"`.
+    private static func detectLineEnding(in content: String) -> String {
+        content.contains("\r\n") ? "\r\n" : "\n"
+    }
+    
     /// Update a single key in the config file (file is source of truth)
     func updateConfigValue(key: String, value: String) {
         // Read current config
         var content = (try? String(contentsOf: configFilePath, encoding: .utf8)) ?? ""
         
+        // Detect and preserve original line ending style
+        let lineEnding = Self.detectLineEnding(in: content)
+        
         // Find and replace the key, or append if not found
-        let lines = content.components(separatedBy: "\n")
+        let lines = content.components(separatedBy: lineEnding)
         var found = false
         var updatedLines: [String] = []
         
@@ -79,7 +88,7 @@ class ConfigSyncManager: ObservableObject {
         }
         
         // Write back to file
-        content = updatedLines.joined(separator: "\n")
+        content = updatedLines.joined(separator: lineEnding)
         do {
             try content.write(to: configFilePath, atomically: true, encoding: .utf8)
             logger.info("Updated \(key) = \(value) in config file")
@@ -127,7 +136,8 @@ class ConfigSyncManager: ObservableObject {
     /// - Preserves all other config lines unchanged
     static func applyTheme(_ themeName: String, to configString: String) -> String {
         let isDefault = themeName == "Default"
-        let lines = configString.components(separatedBy: "\n")
+        let lineEnding = detectLineEnding(in: configString)
+        let lines = configString.components(separatedBy: lineEnding)
         var updatedLines: [String] = []
         var foundThemeLine = false
         
@@ -171,7 +181,7 @@ class ConfigSyncManager: ObservableObject {
             updatedLines.append("theme = \(themeName)")
         }
         
-        return updatedLines.joined(separator: "\n")
+        return updatedLines.joined(separator: lineEnding)
     }
     
     // MARK: - Config → GUI Sync
