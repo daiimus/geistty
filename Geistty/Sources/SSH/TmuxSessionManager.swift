@@ -898,7 +898,7 @@ class TmuxSessionManager: ObservableObject {
                     logger.debug("Ignoring surface resize in multi-pane mode (handled by container)")
                     return
                 }
-                self.surfaceResizeHandler?(cols, rows)
+                self.debouncedResize(cols: cols, rows: rows)
             }
         }
         

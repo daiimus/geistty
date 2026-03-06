@@ -567,6 +567,7 @@ class NIOSSHConnection {
     
     /// Write data to the channel (fire-and-forget for backwards compatibility)
     func write(_ data: Data) {
+        activeWriteTask?.cancel()
         activeWriteTask = Task {
             do {
                 try await writeAsync(data)
