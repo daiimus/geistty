@@ -1080,6 +1080,9 @@ extension Ghostty {
             if let onPaneTap = onPaneTap {
                 Ghostty.logger.info("[handleTap] primary pane tapped in multi-pane mode, calling onPaneTap")
                 onPaneTap()
+                // #65: Return after pane routing to prevent the Ctrl+click block
+                // below from firing on the wrong surface in multi-pane mode.
+                return
             }
             
             // If Ctrl toggle is active, this tap should open a link
@@ -1399,6 +1402,9 @@ extension Ghostty {
         
         /// Track current modifier state for Ctrl toggle button
         private var ctrlToggleActive = false
+        /// #65: Track which presses had Ctrl injected so pressesEnded
+        /// can emit matching release events with the Ctrl modifier.
+        private var ctrlInjectedPresses = Set<ObjectIdentifier>()
         
         /// Set Ctrl toggle state (from toolbar button)
         func setCtrlToggle(_ active: Bool) {
@@ -1593,6 +1599,9 @@ extension Ghostty {
                     modFlags.insert(.control)
                     ctrlToggleActive = false  // Clear after use
                     terminalAccessoryView?.resetCtrlState()
+                    // #65: Track this press so pressesEnded can emit a matching
+                    // release event with the Ctrl modifier included.
+                    ctrlInjectedPresses.insert(ObjectIdentifier(press))
                 }
                 
                 // Create the key event using Ghostty Input types
@@ -1670,7 +1679,21 @@ extension Ghostty {
             
             for press in presses {
                 guard let surface = surface else { continue }
-                if let keyEvent = Input.KeyEvent(press: press, action: .release) {
+                if var keyEvent = Input.KeyEvent(press: press, action: .release) {
+                    // #65: If this press had Ctrl injected in pressesBegan,
+                    // add Ctrl to the release event so modifiers match.
+                    let pressId = ObjectIdentifier(press)
+                    if ctrlInjectedPresses.remove(pressId) != nil {
+                        keyEvent = Input.KeyEvent(
+                            key: keyEvent.key,
+                            action: .release,
+                            text: keyEvent.text,
+                            composing: keyEvent.composing,
+                            mods: keyEvent.mods.union(.ctrl),
+                            consumedMods: keyEvent.consumedMods,
+                            unshiftedCodepoint: keyEvent.unshiftedCodepoint
+                        )
+                    }
                     keyEvent.withCValue { cEvent in
                         _ = ghostty_surface_key(surface, cEvent)
                     }
@@ -1953,6 +1976,11 @@ extension Ghostty {
             let result = super.resignFirstResponder()
             if result {
                 focusDidChange(false)
+                // #65: Clear Ctrl toggle when keyboard dismisses so it doesn't
+                // persist and unexpectedly modify the next keypress.
+                ctrlToggleActive = false
+                ctrlInjectedPresses.removeAll()
+                terminalAccessoryView?.resetCtrlState()
             }
             return result
         }

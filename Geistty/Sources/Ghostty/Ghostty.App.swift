@@ -293,12 +293,15 @@ extension Ghostty {
                 logger.info("🔗 Opening URL: \(urlStr)")
                 
                 DispatchQueue.main.async {
-                    // Try to create URL, handling both full URLs and file paths
-                    if let url = URL(string: urlStr), url.scheme != nil {
+                    // #56: Whitelist URL schemes to prevent malicious escape sequences
+                    // from triggering tel:, facetime:, itms-services:, shortcuts://, etc.
+                    let allowedSchemes: Set<String> = ["http", "https", "mailto"]
+                    if let url = URL(string: urlStr),
+                       let scheme = url.scheme?.lowercased(),
+                       allowedSchemes.contains(scheme) {
                         UIApplication.shared.open(url)
                     } else {
-                        // Treat as file path - show in Files or alert
-                        logger.warning("Cannot open non-URL path on iOS: \(urlStr)")
+                        logger.warning("Blocked URL with disallowed or missing scheme: \(urlStr)")
                     }
                 }
                 return true

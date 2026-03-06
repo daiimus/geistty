@@ -1437,6 +1437,16 @@ class TmuxSessionManager: ObservableObject {
             removeSurface(for: paneId, paneActuallyClosed: true)
         }
         
+        // #66: Nil surface and closure references that controlModeExited() clears
+        // but cleanup() was missing. Prevents stale closures from capturing
+        // deallocated objects after cleanup.
+        primarySurface = nil
+        primaryCellSize = .zero
+        writeToSSH = nil
+        surfaceFactory = nil
+        surfaceInputHandler = nil
+        surfaceResizeHandler = nil
+        
         // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
         pendingSurfaceCreation.removeAll()
