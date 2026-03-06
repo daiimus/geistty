@@ -144,6 +144,11 @@ class SSHSession: ObservableObject, Identifiable {
     // buys ~30s to finish the detach handshake and close the SSH channel cleanly.
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     
+    /// Tracks the 5-second safety timer that ends the background task.
+    /// Stored so it can be cancelled on rapid bg/fg cycling to prevent
+    /// a stale timer from ending a *new* background task prematurely.
+    private var backgroundSafetyTimerTask: Task<Void, Never>?
+    
     /// Injectable background task provider — defaults to UIApplication.shared.
     /// Tests inject a mock to verify background task lifecycle without a running app.
     var backgroundTaskProvider: BackgroundTaskProvider = UIApplication.shared
@@ -239,6 +244,14 @@ class SSHSession: ObservableObject, Identifiable {
     /// Returns true when `backgroundState` is non-nil.
     var isDetachingForBackground: Bool {
         backgroundState != nil
+    }
+    
+    /// Whether disconnect notifications should be suppressed.
+    /// True during background detach (expected TCP death) or active reconnect
+    /// (old connection teardown). The stale connection guard in `connectionDidClose`
+    /// is separate — it operates on object identity, not flag state.
+    private var shouldSuppressDisconnectNotification: Bool {
+        isDetachingForBackground || isReconnecting
     }
     
     /// Session name discovery state for geistty-N auto-naming.
@@ -970,6 +983,8 @@ class SSHSession: ObservableObject, Identifiable {
         sessionDiscoveryState = .idle
         sessionDiscoveryTimer?.cancel()
         sessionDiscoveryTimer = nil
+        backgroundSafetyTimerTask?.cancel()
+        backgroundSafetyTimerTask = nil
         pendingInputQueue.removeAll()
         removeTmuxNotificationObservers()
         
@@ -1047,7 +1062,10 @@ class SSHSession: ObservableObject, Identifiable {
         // Safety timer to end background task after 5s. We're not waiting
         // for anything specific (no detach-client response), but the grace
         // period lets any in-flight data finish writing.
-        Task { @MainActor [weak self] in
+        // Cancel any previous timer to prevent stale timers from ending
+        // a new background task prematurely on rapid bg/fg cycling.
+        backgroundSafetyTimerTask?.cancel()
+        backgroundSafetyTimerTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             self?.endBackgroundTaskIfNeeded()
         }
@@ -1060,7 +1078,9 @@ class SSHSession: ObservableObject, Identifiable {
     func appDidBecomeActive() {
         logger.info("App became active, checking connection health... backgroundState=\(self.backgroundState != nil)")
         
-        // End any lingering background task from the resign-active sequence
+        // Cancel the safety timer and end any lingering background task
+        backgroundSafetyTimerTask?.cancel()
+        backgroundSafetyTimerTask = nil
         endBackgroundTaskIfNeeded()
         
         // If already reconnecting, don't start another attempt
@@ -1493,22 +1513,14 @@ extension SSHSession: NIOSSHConnectionDelegate {
         self.lastError = error
         self.state = .disconnected
         
-        // When backgrounded with an active tmux session, the SSH connection dies
-        // from neglect (iOS suspends, TCP keepalive expires). This is EXPECTED —
-        // suppress the disconnect notification so SwiftUI doesn't remove
-        // TerminalContainerView (which triggers full surface teardown and a
-        // renderer use-after-free SIGSEGV).
-        // appDidBecomeActive() handles reconnecting via a fresh SSH connection.
-        if isDetachingForBackground {
-            logger.info("SSH channel closed during background — suppressing disconnect notification")
-            return
-        }
-        
-        // During reconnect, the old connection's teardown may fire after
-        // backgroundState has been cleared. Suppress these too —
-        // attemptReconnect() manages the lifecycle directly.
-        if isReconnecting {
-            logger.info("SSH channel closed during reconnect — suppressing disconnect notification")
+        // Suppress disconnect notifications during expected teardown scenarios.
+        // Both background detach and reconnect involve intentional connection
+        // closure — notifying the delegate would trigger SwiftUI to remove
+        // TerminalContainerView, causing full surface teardown and a renderer
+        // use-after-free SIGSEGV.
+        if shouldSuppressDisconnectNotification {
+            let reason = isDetachingForBackground ? "background detach" : "reconnect"
+            logger.info("SSH channel closed during \(reason) — suppressing disconnect notification")
             return
         }
         

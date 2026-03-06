@@ -10,7 +10,7 @@
 import XCTest
 @testable import Geistty
 
-final class TmuxWireDiagnosticsTests: XCTestCase {
+@MainActor final class TmuxWireDiagnosticsTests: XCTestCase {
     
     var diag: TmuxWireDiagnostics!
     

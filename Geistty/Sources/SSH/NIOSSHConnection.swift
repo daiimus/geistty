@@ -610,13 +610,12 @@ class NIOSSHConnection {
         // Wait for write to complete or fail
         try await promise.futureResult.get()
         
-        // Write succeeded - ensure health is marked healthy if it was stale
+        // Write succeeded - ensure health is marked healthy if it was stale.
+        // No MainActor.run needed — this class is already @MainActor.
         if case .stale = health {
-            await MainActor.run {
-                logger.info("📡 Write succeeded on stale connection - marking healthy")
-                self.health = .healthy
-                self.delegate?.connection(self, healthDidChange: self.health)
-            }
+            logger.info("📡 Write succeeded on stale connection - marking healthy")
+            self.health = .healthy
+            self.delegate?.connection(self, healthDidChange: self.health)
         }
     }
     
