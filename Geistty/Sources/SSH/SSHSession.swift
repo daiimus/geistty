@@ -874,6 +874,11 @@ class SSHSession: ObservableObject, Identifiable {
     ///   - originalData: The original user input (for queueing on failure)
     private func performWrite(_ command: Data, originalData: Data) {
         guard connection != nil else {
+            // Skip queueing for control commands (empty originalData sentinel)
+            guard !originalData.isEmpty else {
+                logger.warning("⚠️ Control command dropped — no connection")
+                return
+            }
             logger.warning("⚠️ No connection for write, queueing")
             pendingInputQueue.append(originalData)
             updatePendingInputDisplay()
@@ -886,6 +891,8 @@ class SSHSession: ObservableObject, Identifiable {
     /// Execute a single write to the SSH connection (called serially by consumer task).
     private func executeWrite(_ command: Data, originalData: Data) async {
         guard let connection = connection else {
+            // Skip queueing for control commands (empty originalData sentinel)
+            guard !originalData.isEmpty else { return }
             await MainActor.run {
                 self.pendingInputQueue.append(originalData)
                 self.updatePendingInputDisplay()
@@ -897,8 +904,14 @@ class SSHSession: ObservableObject, Identifiable {
             try await connection.writeAsync(command)
             // Success! If we were stale, NIOSSHConnection will mark us healthy
         } catch {
-            // Write failed - queue the ORIGINAL data (not the tmux command)
-            logger.error("❌ Write failed: \(error.localizedDescription) - queueing input")
+            // Write failed — queue the ORIGINAL data (not the tmux command)
+            // Skip queueing for control commands (empty originalData sentinel)
+            logger.error("❌ Write failed: \(error.localizedDescription)")
+            guard !originalData.isEmpty else {
+                logger.warning("⚠️ Control command write failed (not queued): \(error.localizedDescription)")
+                return
+            }
+            logger.error("Queueing \(originalData.count) bytes of user input")
             await MainActor.run {
                 self.pendingInputQueue.append(originalData)
                 self.updatePendingInputDisplay()
@@ -924,30 +937,20 @@ class SSHSession: ObservableObject, Identifiable {
         tmuxSessionManager?.displayPendingInput(displayText)
     }
     
-    /// Write a control command (not user input) to the connection
-    /// Control commands don't get queued on failure - they're ephemeral
+    /// Write a control command (not user input) to the connection.
+    /// Routed through the serial write stream to prevent races with user input.
+    /// Control commands use empty `originalData` so they are NOT queued on failure
+    /// (they're ephemeral — replaying stale control commands after reconnect is wrong).
     /// - Parameter command: The command data to write
     private func writeControlCommand(_ command: Data) {
-        guard let connection = connection else {
-            logger.warning("⚠️ writeControlCommand called but no connection")
-            return
-        }
-        
         // Log what we're sending
         if let str = String(data: command, encoding: .utf8) {
             logger.info("📤 writeControlCommand: \(str.prefix(100))")
         }
         
-        Task {
-            do {
-                try await connection.writeAsync(command)
-                logger.debug("📤 writeControlCommand completed successfully")
-            } catch {
-                // Control commands failing is expected if connection is dead
-                // The connection will handle marking itself as dead
-                logger.warning("⚠️ Control command write failed: \(error.localizedDescription)")
-            }
-        }
+        // Route through serial stream with empty originalData sentinel
+        // (performWrite checks connection; if nil, empty data is harmless to queue)
+        performWrite(command, originalData: Data())
     }
     
     /// Convenience overload for string commands
