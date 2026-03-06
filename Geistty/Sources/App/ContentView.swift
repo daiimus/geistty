@@ -172,13 +172,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView(
-                currentFontSize: 14,
-                onFontSizeChanged: { _ in },
-                onResetFontSize: { },
-                onFontFamilyChanged: { },
-                onThemeChanged: { }
-            )
+            SettingsView()
         }
     }
     
@@ -438,7 +432,8 @@ struct ConnectionSheet: View {
     
     private var isValid: Bool {
         !connectionInfo.host.isEmpty &&
-        !connectionInfo.username.isEmpty
+        !connectionInfo.username.isEmpty &&
+        connectionInfo.port >= 1 && connectionInfo.port <= 65535
     }
 }
 
