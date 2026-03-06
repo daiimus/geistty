@@ -13,8 +13,8 @@ private let logger = Logger(subsystem: "com.geistty", category: "ConnectionList"
 /// Main view showing saved connections with quick connect
 struct ConnectionListView: View {
     
-    @StateObject private var profileManager = ConnectionProfileManager.shared
-    @StateObject private var keyManager = SSHKeyManager.shared
+    @ObservedObject private var profileManager = ConnectionProfileManager.shared
+    @ObservedObject private var keyManager = SSHKeyManager.shared
     
     @State private var showingAddConnection = false
     @State private var showingKeyManager = false

@@ -543,6 +543,10 @@ struct RawTerminalViewController: UIViewControllerRepresentable {
 }
 
 /// Pure UIKit view controller that directly hosts the Ghostty SurfaceView
+///
+/// Explicitly @MainActor to guarantee all ThemeManager.shared and UIKit
+/// access is provably main-actor-isolated under Swift 6 concurrency.
+@MainActor
 class RawTerminalUIViewController: UIViewController {
     var ghosttyApp: Ghostty.App?
     var viewModel: TerminalViewModel?
