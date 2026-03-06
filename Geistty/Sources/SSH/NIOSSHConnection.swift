@@ -204,7 +204,18 @@ final class TOFUHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate, @unch
             }
             validationCompletePromise.succeed(())
         } catch {
-            // Keychain error — log but don't block the connection.
+            // Keychain error — distinguish security-critical failures from transient glitches.
+            // errSecInteractionNotAllowed means the device is locked and data protection
+            // prevents Keychain access. An attacker could exploit this window to present
+            // a different key, so we must reject rather than silently accept.
+            if case KeychainError.unexpectedStatus(let status) = error,
+               status == errSecInteractionNotAllowed {
+                logger.error("Keychain locked during host key verification for \(self.host):\(self.port) — rejecting connection (device locked)")
+                validationCompletePromise.fail(error)
+                return
+            }
+            
+            // Transient Keychain error — log but don't block the connection.
             // Degraded to accept-all behavior for this connection only.
             logger.warning("Keychain error during host key verification for \(self.host):\(self.port): \(error.localizedDescription) — accepting key")
             validationCompletePromise.succeed(())
@@ -606,7 +617,6 @@ class NIOSSHConnection {
     
     /// Write data to the channel (fire-and-forget for backwards compatibility)
     func write(_ data: Data) {
-        activeWriteTask?.cancel()
         activeWriteTask = Task {
             do {
                 try await writeAsync(data)

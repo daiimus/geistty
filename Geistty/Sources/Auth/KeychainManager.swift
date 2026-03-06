@@ -274,10 +274,18 @@ class KeychainManager {
     
     // MARK: - Host Key Storage (TOFU)
     
+    /// Build a Keychain account key for host key storage.
+    /// Wraps IPv6 addresses in brackets to prevent ambiguity with the colon separator
+    /// (e.g. `host-key:[::1]:22` instead of `host-key:::1:22`).
+    private func hostKeyAccount(host: String, port: Int) -> String {
+        let safeHost = host.contains(":") ? "[\(host)]" : host
+        return "host-key:\(safeHost):\(port)"
+    }
+    
     /// Save a host's SSH public key for TOFU verification.
     /// Stored as the OpenSSH public key string (e.g. "ssh-ed25519 AAAA...").
     func saveHostKey(_ publicKeyString: String, for host: String, port: Int) throws {
-        let account = "host-key:\(host):\(port)"
+        let account = hostKeyAccount(host: host, port: port)
         guard let data = publicKeyString.data(using: .utf8) else {
             throw KeychainError.dataConversionError
         }
@@ -306,7 +314,7 @@ class KeychainManager {
     /// Retrieve a stored host key for TOFU verification.
     /// Returns the OpenSSH public key string, or throws `.itemNotFound` on first connection.
     func getHostKey(for host: String, port: Int) throws -> String {
-        let account = "host-key:\(host):\(port)"
+        let account = hostKeyAccount(host: host, port: port)
         
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -336,7 +344,7 @@ class KeychainManager {
     
     /// Delete a stored host key (e.g. when user chooses to trust a changed key).
     func deleteHostKey(for host: String, port: Int) throws {
-        let account = "host-key:\(host):\(port)"
+        let account = hostKeyAccount(host: host, port: port)
         
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
