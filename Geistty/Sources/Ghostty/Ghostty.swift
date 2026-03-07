@@ -1948,7 +1948,9 @@ extension Ghostty {
         override var canBecomeFirstResponder: Bool { !isMultiPaneObserver }
         
         /// Symbols bar displayed above the software keyboard.
-        /// Returns nil when a hardware keyboard is attached (no software keyboard visible).
+        /// When only a hardware keyboard is attached, the bar may still be
+        /// returned but keyboard handling guards against layout shifts from
+        /// tiny keyboard frames (see RawTerminalUIViewController+Keyboard.swift).
         override var inputAccessoryView: UIView? { terminalAccessoryView }
         
         /// Map accessory view button tags to VirtualKey values.

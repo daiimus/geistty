@@ -63,7 +63,6 @@ struct ContentView: View {
             if appState.connectionStatus == .connected || appState.connectionStatus == .connecting {
                 TerminalContainerView()
                     .background(themeBackground)
-                    .ignoresSafeArea()
             } else {
                 // Non-connected states use NavigationStack with welcome/error UI
                 NavigationStack {
@@ -145,20 +144,26 @@ struct ContentView: View {
         // scenes from processing keyboard shortcut notifications on multi-window iPad.
         .onReceive(NotificationCenter.default.publisher(for: .showNewConnection)) { _ in
             guard scenePhase == .active else { return }
-            // Disconnect active session before showing new connection
-            disconnectAndReset()
+            // Only disconnect if there's an active session to disconnect
+            if appState.connectionStatus != .disconnected {
+                disconnectAndReset()
+            }
             showConnectionList = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showQuickConnect)) { _ in
             guard scenePhase == .active else { return }
-            // Disconnect active session before showing quick connect
-            disconnectAndReset()
+            // Only disconnect if there's an active session to disconnect
+            if appState.connectionStatus != .disconnected {
+                disconnectAndReset()
+            }
             showConnectionSheet = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showConnectionProfiles)) { _ in
             guard scenePhase == .active else { return }
-            // Disconnect active session before showing connection list
-            disconnectAndReset()
+            // Only disconnect if there's an active session to disconnect
+            if appState.connectionStatus != .disconnected {
+                disconnectAndReset()
+            }
             showConnectionList = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalDisconnect)) { _ in

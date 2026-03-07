@@ -6,16 +6,19 @@
 # Useful for automated testing and agent-driven development.
 #
 # Usage:
-#   ./ci.sh build          - Build for simulator
-#   ./ci.sh test           - Run unit tests on simulator  
-#   ./ci.sh ui-test         Run UI tests on simulator
-#   ./ci.sh screenshots     Extract screenshots from the latest xcresult bundle
-#   ./ci.sh lint           - Check for Swift warnings/errors
-#   ./ci.sh sync-ghostty   - Rebuild and sync GhosttyKit from ghostty fork
-#   ./ci.sh all            - Run all checks (build + test + lint)
-#   ./ci.sh device-build   - Build for device (uses CI keychain for signing)
-#   ./ci.sh install DEVICE - Install and run on device
-#   ./ci.sh deploy [DEVICE] - Build, install, and launch with console output
+#   ./ci.sh build              - Build for simulator
+#   ./ci.sh test               - Run unit tests on simulator  
+#   ./ci.sh ui-test            - Run UI tests on iPhone simulator
+#   ./ci.sh ui-test-ipad       - Run UI tests on iPad Pro simulator
+#   ./ci.sh visual-test        - Run visual regression tests (screenshot comparison)
+#   ./ci.sh update-snapshots   - Record new reference screenshots
+#   ./ci.sh screenshots        - Extract screenshots from the latest xcresult bundle
+#   ./ci.sh lint               - Check for Swift warnings/errors
+#   ./ci.sh sync-ghostty       - Rebuild and sync GhosttyKit from ghostty fork
+#   ./ci.sh all                - Run all checks (build + test + lint)
+#   ./ci.sh device-build       - Build for device (uses CI keychain for signing)
+#   ./ci.sh install DEVICE     - Install and run on device
+#   ./ci.sh deploy [DEVICE]    - Build, install, and launch with console output
 #
 
 set -e
@@ -239,15 +242,21 @@ run_tests() {
 
 # Run UI tests
 run_ui_tests() {
-    log_info "Running UI tests..."
+    local DEST="${1:-$SIMULATOR}"
+    local RESULT_NAME="${2:-ui_tests}"
+    log_info "Running UI tests on: $DEST"
+    
+    # Remove stale result bundle (xcodebuild won't overwrite)
+    rm -rf "$SCRIPT_DIR/test_results/${RESULT_NAME}.xcresult" 2>/dev/null || true
     
     xcodebuild test \
         -project "$PROJECT" \
         -scheme "$SCHEME" \
-        -destination "$SIMULATOR" \
+        -destination "$DEST" \
         -only-testing:GeisttyUITests \
         -derivedDataPath "$DERIVED_DATA" \
-        -resultBundlePath "$SCRIPT_DIR/test_results/ui_tests.xcresult" \
+        -resultBundlePath "$SCRIPT_DIR/test_results/${RESULT_NAME}.xcresult" \
+        -parallel-testing-enabled NO \
         CODE_SIGNING_ALLOWED=NO \
         2>&1 | tee /tmp/geistty_ui_tests.log | tail -50
     
@@ -255,6 +264,69 @@ run_ui_tests() {
         log_info "✅ UI Tests passed"
     else
         log_error "❌ UI Tests failed"
+        return 1
+    fi
+}
+
+# Run UI tests on iPad simulator
+run_ui_tests_ipad() {
+    local IPAD_SIMULATOR="platform=iOS Simulator,name=iPad Pro 13-inch (M5)"
+    log_info "Running UI tests on iPad Pro 13-inch (M5)..."
+    run_ui_tests "$IPAD_SIMULATOR" "ui_tests_ipad"
+}
+
+# Run visual regression tests (screenshot comparison mode)
+run_visual_tests() {
+    local DEST="${1:-$SIMULATOR}"
+    local RESULT_NAME="${2:-visual_tests}"
+    log_info "Running visual regression tests on: $DEST"
+    
+    # Remove stale result bundle
+    rm -rf "$SCRIPT_DIR/test_results/${RESULT_NAME}.xcresult" 2>/dev/null || true
+    
+    xcodebuild test \
+        -project "$PROJECT" \
+        -scheme "$SCHEME" \
+        -destination "$DEST" \
+        -only-testing:GeisttyUITests \
+        -derivedDataPath "$DERIVED_DATA" \
+        -resultBundlePath "$SCRIPT_DIR/test_results/${RESULT_NAME}.xcresult" \
+        -parallel-testing-enabled NO \
+        CODE_SIGNING_ALLOWED=NO \
+        2>&1 | tee /tmp/geistty_visual_tests.log | tail -50
+    
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_info "✅ Visual tests passed"
+        extract_screenshots "$SCRIPT_DIR/test_results/${RESULT_NAME}.xcresult"
+    else
+        log_error "❌ Visual tests failed"
+        extract_screenshots "$SCRIPT_DIR/test_results/${RESULT_NAME}.xcresult"
+        return 1
+    fi
+}
+
+# Update reference screenshots (record mode)
+update_snapshots() {
+    local DEST="${1:-$SIMULATOR}"
+    log_info "Recording reference screenshots on: $DEST"
+    
+    rm -rf "$SCRIPT_DIR/test_results/snapshot_record.xcresult" 2>/dev/null || true
+    
+    RECORD_SNAPSHOTS=1 xcodebuild test \
+        -project "$PROJECT" \
+        -scheme "$SCHEME" \
+        -destination "$DEST" \
+        -only-testing:GeisttyUITests \
+        -derivedDataPath "$DERIVED_DATA" \
+        -resultBundlePath "$SCRIPT_DIR/test_results/snapshot_record.xcresult" \
+        -parallel-testing-enabled NO \
+        CODE_SIGNING_ALLOWED=NO \
+        2>&1 | tee /tmp/geistty_snapshot_record.log | tail -50
+    
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_info "✅ Reference screenshots updated"
+    else
+        log_error "❌ Snapshot recording failed"
         return 1
     fi
 }
@@ -497,24 +569,29 @@ show_help() {
     echo "Usage: $0 <command> [options]"
     echo ""
     echo "Commands:"
-    echo "  build           Build for iOS Simulator (no signing required)"
-    echo "  device-build    Build for iOS device (auto-unlocks CI keychain)"
-    echo "  install [NAME]  Install and launch on device (default: iPad)"
-    echo "  deploy [NAME]   Build, install, and launch with console output"
-    echo "  test            Run unit tests on simulator"
-    echo "  ui-test         Run UI tests on simulator"
-    echo "  screenshots     Extract screenshots from latest xcresult bundle"
-    echo "  lint            Analyze code for warnings"
-    echo "  sync-ghostty    Rebuild and sync GhosttyKit xcframework from ghostty fork"
-    echo "  all             Run all CI checks"
-    echo "  help            Show this help"
+    echo "  build              Build for iOS Simulator (no signing required)"
+    echo "  device-build       Build for iOS device (auto-unlocks CI keychain)"
+    echo "  install [NAME]     Install and launch on device (default: iPad)"
+    echo "  deploy [NAME]      Build, install, and launch with console output"
+    echo "  test               Run unit tests on simulator"
+    echo "  ui-test            Run UI tests on iPhone simulator"
+    echo "  ui-test-ipad       Run UI tests on iPad Pro simulator"
+    echo "  visual-test        Run visual regression tests (screenshot comparison)"
+    echo "  update-snapshots   Record new reference screenshots for visual tests"
+    echo "  screenshots [PATH] Extract screenshots from xcresult bundle"
+    echo "  lint               Analyze code for warnings"
+    echo "  sync-ghostty       Rebuild and sync GhosttyKit xcframework from ghostty fork"
+    echo "  all                Run all CI checks"
+    echo "  help               Show this help"
     echo ""
     echo "Examples:"
-    echo "  $0 build                              # Build for simulator"
-    echo "  $0 install MyiPad                         # Install on device named MyiPad"
-    echo "  $0 deploy                                  # Full deploy to default device"
-    echo "  $0 deploy MyiPhone                          # Full deploy to device named MyiPhone"
-    echo "  $0 all                                # Full CI run"
+    echo "  $0 build                    # Build for simulator"
+    echo "  $0 ui-test                  # Run UI tests on iPhone 17 Pro"
+    echo "  $0 ui-test-ipad             # Run UI tests on iPad Pro 13-inch"
+    echo "  $0 visual-test              # Run visual regression tests"
+    echo "  $0 update-snapshots         # Record new reference screenshots"
+    echo "  $0 deploy                   # Full deploy to default device"
+    echo "  $0 all                      # Full CI run"
 }
 
 # Create test results directory
@@ -541,6 +618,15 @@ case "${1:-help}" in
         ;;
     ui-test)
         run_ui_tests
+        ;;
+    ui-test-ipad)
+        run_ui_tests_ipad
+        ;;
+    visual-test)
+        run_visual_tests
+        ;;
+    update-snapshots)
+        update_snapshots
         ;;
     screenshots)
         extract_screenshots "${2:-}"
