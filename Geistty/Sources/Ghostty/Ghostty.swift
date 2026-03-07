@@ -272,6 +272,12 @@ extension Ghostty {
         private var hasFocusState: Bool = false
         private var focusInstant: ContinuousClock.Instant? = nil
         
+        /// Whether the software keyboard is currently visible (height >= 100pt).
+        /// Used to conditionally return the input accessory view — on iPad with
+        /// a hardware keyboard, returning `nil` prevents the Esc/Tab/arrow bar
+        /// from floating at the bottom of the screen. (#44 Bug 2 regression)
+        private var softwareKeyboardVisible = false
+        
         /// Terminal symbols bar — displayed above the software keyboard.
         /// Lazy-initialized on first access; nil for observer surfaces.
         private lazy var terminalAccessoryView: TerminalAccessoryView? = {
@@ -572,6 +578,21 @@ extension Ghostty {
                 name: UIApplication.didBecomeActiveNotification,
                 object: nil
             )
+            
+            // Track software keyboard visibility so inputAccessoryView returns
+            // nil when only a hardware keyboard is attached. (#44 Bug 2)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(softwareKeyboardWillShow(_:)),
+                name: UIResponder.keyboardWillShowNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(softwareKeyboardWillHide(_:)),
+                name: UIResponder.keyboardWillHideNotification,
+                object: nil
+            )
         }
         
         /// Restore keyboard focus when app becomes active
@@ -593,6 +614,37 @@ extension Ghostty {
                 }
             }
         }
+        
+        /// Track software keyboard visibility to gate inputAccessoryView.
+        /// A "real" software keyboard has a frame height >= 100pt; the
+        /// inputAccessoryView alone is ~44pt and should not count.
+        @objc private func softwareKeyboardWillShow(_ notification: Notification) {
+            guard let userInfo = notification.userInfo,
+                  let frame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+                return
+            }
+            
+            // Calculate overlap with our view, matching the logic in
+            // RawTerminalUIViewController+Keyboard.swift.
+            let frameInView = convert(frame, from: nil)
+            let overlap = max(0, bounds.maxY - frameInView.minY)
+            
+            let isSoftwareKeyboard = overlap >= 100
+            if isSoftwareKeyboard != softwareKeyboardVisible {
+                softwareKeyboardVisible = isSoftwareKeyboard
+                reloadInputViews()
+            }
+        }
+        
+        /// Software keyboard is hiding — clear the flag and reload so
+        /// inputAccessoryView returns nil.
+        @objc private func softwareKeyboardWillHide(_ notification: Notification) {
+            if softwareKeyboardVisible {
+                softwareKeyboardVisible = false
+                reloadInputViews()
+            }
+        }
+        
         // MARK: - Accessibility
         
         /// Configure accessibility for VoiceOver and other assistive technologies
@@ -1948,10 +2000,12 @@ extension Ghostty {
         override var canBecomeFirstResponder: Bool { !isMultiPaneObserver }
         
         /// Symbols bar displayed above the software keyboard.
-        /// When only a hardware keyboard is attached, the bar may still be
-        /// returned but keyboard handling guards against layout shifts from
-        /// tiny keyboard frames (see RawTerminalUIViewController+Keyboard.swift).
-        override var inputAccessoryView: UIView? { terminalAccessoryView }
+        /// Returns `nil` when no software keyboard is visible so the
+        /// accessory bar doesn't float at the screen bottom on iPad with
+        /// a hardware keyboard. (#44 Bug 2 regression fix)
+        override var inputAccessoryView: UIView? {
+            softwareKeyboardVisible ? terminalAccessoryView : nil
+        }
         
         /// Map accessory view button tags to VirtualKey values.
         private static func virtualKeyForTag(_ tag: Int) -> VirtualKey? {
@@ -1978,6 +2032,8 @@ extension Ghostty {
             let result = super.resignFirstResponder()
             if result {
                 focusDidChange(false)
+                // Reset software keyboard tracking — keyboard hides on resign.
+                softwareKeyboardVisible = false
                 // #65: Clear Ctrl toggle when keyboard dismisses so it doesn't
                 // persist and unexpectedly modify the next keypress.
                 ctrlToggleActive = false
