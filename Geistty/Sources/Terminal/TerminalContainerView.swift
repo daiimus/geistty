@@ -322,10 +322,16 @@ class TerminalViewModel: ObservableObject {
     }
     
     func copy() {
+        if surfaceView == nil {
+            logger.warning("ViewModel.copy: surfaceView is nil")
+        }
         surfaceView?.copy(nil)
     }
     
     func paste() {
+        if surfaceView == nil {
+            logger.warning("ViewModel.paste: surfaceView is nil")
+        }
         surfaceView?.paste(nil)
     }
     

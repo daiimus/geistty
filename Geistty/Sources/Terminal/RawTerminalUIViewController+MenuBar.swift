@@ -71,11 +71,23 @@ extension RawTerminalUIViewController {
         
         // Copy/Paste
         menuBarObservers.append(nc.addObserver(forName: .terminalCopy, object: nil, queue: .main) { [weak self] _ in
-            guard self?.isInForegroundScene == true else { return }
+            guard self?.isInForegroundScene == true else {
+                logger.debug("terminalCopy: skipped (not in foreground scene)")
+                return
+            }
+            if self?.viewModel == nil {
+                logger.warning("terminalCopy: viewModel is nil")
+            }
             self?.viewModel?.copy()
         })
         menuBarObservers.append(nc.addObserver(forName: .terminalPaste, object: nil, queue: .main) { [weak self] _ in
-            guard self?.isInForegroundScene == true else { return }
+            guard self?.isInForegroundScene == true else {
+                logger.debug("terminalPaste: skipped (not in foreground scene)")
+                return
+            }
+            if self?.viewModel == nil {
+                logger.warning("terminalPaste: viewModel is nil")
+            }
             self?.viewModel?.paste()
         })
         
