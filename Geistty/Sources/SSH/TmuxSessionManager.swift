@@ -72,13 +72,35 @@ class TmuxSessionManager: ObservableObject {
     /// real pane ID when handleTmuxStateChanged provides real pane IDs.
     @Published private(set) var primarySurface: Ghostty.SurfaceView?
     
+    /// Hidden surface that keeps the Zig tmux viewer alive after its pane closes.
+    ///
+    /// The tmux viewer (Zig-side state machine) is owned by whichever Surface
+    /// first entered tmux control mode — the "primary" surface. Observer surfaces
+    /// bind to the viewer via `tmux_pane_binding.source`, which points back to
+    /// the primary's `CoreSurface`. If we free the primary when its pane closes,
+    /// the viewer is destroyed and all observer bindings become dangling pointers.
+    ///
+    /// When the primary's pane is closed but other panes remain, we:
+    /// 1. Remove it from `paneSurfaces` (so it's not rendered)
+    /// 2. Remove it from the view hierarchy
+    /// 3. Stash it here to keep the Zig viewer alive
+    /// 4. Promote an observer to `primarySurface` for Swift-level callbacks
+    ///
+    /// Freed last during `controlModeExited()` / `cleanup()` / when all panes close.
+    private var viewerOwnerSurface: Ghostty.SurfaceView?
+    
     /// Protocol-typed accessor for tmux C API queries.
-    /// In production, returns `primarySurface`. In tests, returns `tmuxQuerySurfaceOverride`.
+    /// Returns the surface that owns the Zig tmux viewer. This is normally
+    /// `primarySurface`, but after the primary's pane is closed and the viewer
+    /// is stashed in `viewerOwnerSurface`, we must query through the stashed
+    /// surface (which still has the viewer) rather than the promoted primary
+    /// (which is an observer without a viewer on its IO handler).
+    /// In tests, returns `tmuxQuerySurfaceOverride`.
     var tmuxQuerySurface: (any TmuxSurfaceProtocol)? {
         #if DEBUG
         if let override = tmuxQuerySurfaceOverride { return override }
         #endif
-        return primarySurface
+        return viewerOwnerSurface ?? primarySurface
     }
     
     #if DEBUG
@@ -300,6 +322,10 @@ class TmuxSessionManager: ObservableObject {
         paneSurfaces.removeAll()
         primarySurface = nil
         primaryCellSize = .zero
+        
+        // Free the hidden viewer owner surface LAST — observers have already
+        // been freed so their binding.source pointers are no longer live.
+        freeViewerOwnerSurface()
     }
     
     /// Lightweight reset for background → foreground reconnect.
@@ -331,6 +357,12 @@ class TmuxSessionManager: ObservableObject {
             surface.close()
             logger.debug("Closed observer surface for pane \(paneId)")
         }
+        
+        // Free the hidden viewer owner surface (if it exists from a prior
+        // primary-pane-closed scenario). Observers are already freed above,
+        // so binding.source pointers are no longer live. The new DCS 1000p
+        // on reconnect will create a fresh viewer in the preserved primarySurface.
+        freeViewerOwnerSurface()
         
         // Clear paneSurfaces entirely. The primary will be re-registered under its
         // real pane ID when handleTmuxStateChanged → getSurfaceOrCreate finds
@@ -970,6 +1002,14 @@ class TmuxSessionManager: ObservableObject {
         }
         
         if let surface = paneSurfaces.removeValue(forKey: paneId) {
+            // If this surface was stashed as the viewer owner (its pane was closed
+            // but we kept it alive to preserve the Zig tmux viewer), don't close it.
+            // It will be freed last during controlModeExited() / cleanup().
+            if surface === viewerOwnerSurface {
+                logger.info("Skipping close for pane \(paneId) — stashed as viewerOwnerSurface")
+                return
+            }
+            
             // Close the surface synchronously to free the Zig Surface and
             // invalidate its userdata pointer BEFORE ARC releases the SurfaceView.
             //
@@ -989,39 +1029,71 @@ class TmuxSessionManager: ObservableObject {
         }
     }
     
-    /// Reassign primary surface when the current primary pane is closed
-    /// This is an atomic operation that avoids gaps in cell size callbacks
+    /// Reassign primary surface when the current primary pane is closed.
+    ///
+    /// The tmux viewer (Zig-side) is owned by the original primary surface.
+    /// We can't migrate it to another surface, so we stash the old primary
+    /// in `viewerOwnerSurface` to keep the viewer alive. The remaining
+    /// observer surface becomes the new `primarySurface` for Swift-level
+    /// callbacks (cell size, input routing).
+    ///
+    /// The old primary is NOT freed here — it stays alive until
+    /// `controlModeExited()` / `cleanup()` frees it last (after all observers).
     private func reassignPrimarySurface(excludingPaneId closedPaneId: String, fromPaneIds remainingPaneIds: Set<String>) {
-        logger.info("📐 🔄 Primary surface's pane \(closedPaneId) closed, reassigning...")
+        logger.info("Primary surface's pane \(closedPaneId) closed, reassigning...")
+        
+        let oldPrimary = primarySurface
         
         // Sort numerically to get deterministic ordering (lowest numeric ID first)
         let sortedPaneIds = TmuxId.sortedNumerically(remainingPaneIds)
         
         guard let firstRemainingPaneId = sortedPaneIds.first else {
-            // No remaining panes - clear primary surface
+            // No remaining panes — free the viewer owner surface now
             primarySurface?.onCellSizeChanged = nil
             primarySurface = nil
             primaryCellSize = .zero
-            logger.info("📐 No remaining panes, primary surface cleared")
+            freeViewerOwnerSurface()
+            logger.info("No remaining panes, primary surface cleared")
             return
+        }
+        
+        // Stash the old primary to keep the Zig viewer alive.
+        // Remove it from the view hierarchy so it's not displayed for the dead pane.
+        if let oldPrimary = oldPrimary {
+            oldPrimary.onCellSizeChanged = nil
+            oldPrimary.removeFromSuperview()
+            viewerOwnerSurface = oldPrimary
+            logger.info("Stashed old primary as viewerOwnerSurface (keeping Zig viewer alive)")
         }
         
         // Ensure surface exists for the remaining pane
         if paneSurfaces[firstRemainingPaneId] == nil {
-            logger.info("📐 🆕 Creating surface for remaining pane \(firstRemainingPaneId)")
+            logger.info("Creating surface for remaining pane \(firstRemainingPaneId)")
             _ = getSurfaceOrCreate(for: firstRemainingPaneId)
         }
         
         guard let remainingSurface = paneSurfaces[firstRemainingPaneId] else {
-            logger.error("📐 ❌ Failed to get/create surface for \(firstRemainingPaneId)")
+            logger.error("Failed to get/create surface for \(firstRemainingPaneId)")
             primarySurface = nil
             primaryCellSize = .zero
             return
         }
         
-        // Use the atomic assignment helper
+        // Use the atomic assignment helper — this sets up cell size callbacks
         assignPrimarySurface(remainingSurface, forPaneId: firstRemainingPaneId)
-        logger.info("📐 🔄 Reassigned primarySurface to \(firstRemainingPaneId)")
+        logger.info("Reassigned primarySurface to \(firstRemainingPaneId)")
+    }
+    
+    /// Free the hidden viewer owner surface. Must be called AFTER all observer
+    /// surfaces have been freed (they hold binding.source pointers to it).
+    private func freeViewerOwnerSurface() {
+        guard let surface = viewerOwnerSurface else { return }
+        #if DEBUG
+        teardownOrderForTesting.append((paneId: "viewerOwner", isObserver: false))
+        #endif
+        surface.close()
+        viewerOwnerSurface = nil
+        logger.info("Freed viewerOwnerSurface (Zig viewer destroyed)")
     }
     
     /// Get all active surfaces
@@ -1441,6 +1513,10 @@ class TmuxSessionManager: ObservableObject {
         for (paneId, _) in primaryPanes.sorted(by: { $0.key < $1.key }) {
             removeSurface(for: paneId, paneActuallyClosed: true)
         }
+        
+        // Free the hidden viewer owner surface LAST — observers have already
+        // been freed so their binding.source pointers are no longer live.
+        freeViewerOwnerSurface()
         
         // #66: Nil surface and closure references that controlModeExited() clears
         // but cleanup() was missing. Prevents stale closures from capturing
