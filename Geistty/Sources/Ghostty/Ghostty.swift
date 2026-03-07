@@ -1695,7 +1695,7 @@ extension Ghostty {
                             continue
                         }
                     case "c", "v", "a", "f", "g", "w", "n", ",":
-                        // These are handled by SwiftUI menu system - let them pass through
+                        // These are handled by SwiftUI menu system / UIKeyCommand - let them pass through
                         // Copy, Paste, Select All, Find, Find Next, Disconnect, New Connection, Preferences
                         // Don't mark as handled — will be passed to super below
                         continue
@@ -2063,6 +2063,13 @@ extension Ghostty {
         // MARK: - First Responder & Keyboard
         
         override var canBecomeFirstResponder: Bool { !isMultiPaneObserver }
+        
+        override var keyCommands: [UIKeyCommand]? {
+            [
+                UIKeyCommand(action: #selector(copy(_:)), input: "c", modifierFlags: .command),
+                UIKeyCommand(action: #selector(paste(_:)), input: "v", modifierFlags: .command),
+            ]
+        }
         
         /// Symbols bar displayed above the software keyboard.
         /// Returns `nil` when no software keyboard is visible so the
