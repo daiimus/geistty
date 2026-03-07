@@ -1447,15 +1447,19 @@ extension Ghostty {
         
         // MARK: - Edit Actions
         
-        /// Override canPerformAction to enable copy/paste
+        /// Override canPerformAction to enable copy/paste.
+        /// Matches upstream macOS pattern: copy is always enabled (the binding
+        /// action itself returns false if there's no selection), paste checks
+        /// for clipboard content.
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
             // Prevent system "cut" action from intercepting Ctrl+X
             if action == #selector(UIResponderStandardEditActions.cut(_:)) {
                 return false
             }
             if action == #selector(UIResponderStandardEditActions.copy(_:)) {
-                guard let surface = surface else { return false }
-                return ghostty_surface_has_selection(surface)
+                // Always allow — matches macOS validateMenuItem default.
+                // The binding action handles no-selection gracefully.
+                return surface != nil
             }
             if action == #selector(UIResponderStandardEditActions.paste(_:)) {
                 return UIPasteboard.general.hasStrings
@@ -1463,25 +1467,18 @@ extension Ghostty {
             return super.canPerformAction(action, withSender: sender)
         }
         
-        /// Handle copy action
+        /// Handle copy action — delegates to Ghostty's copy_to_clipboard binding
+        /// action, which reads the selection, formats it, and calls the
+        /// writeClipboard callback (which writes to UIPasteboard.general).
+        /// This matches the upstream macOS pattern exactly.
         @objc override func copy(_ sender: Any?) {
             guard let surface = surface else {
-                logger.warning("copy: surface is nil, cannot read selection")
+                logger.warning("copy: surface is nil")
                 return
             }
-            
-            var textStruct = ghostty_text_s()
-            if ghostty_surface_read_selection(surface, &textStruct) {
-                if let textPtr = textStruct.text, textStruct.text_len > 0 {
-                    let selectedText = String(cString: textPtr)
-                    UIPasteboard.general.string = selectedText
-                    logger.info("copy: copied \(textStruct.text_len) bytes to clipboard")
-                } else {
-                    logger.warning("copy: selection read succeeded but text is nil or empty")
-                }
-                ghostty_surface_free_text(surface, &textStruct)
-            } else {
-                logger.warning("copy: ghostty_surface_read_selection returned false (no selection?)")
+            let action = "copy_to_clipboard"
+            if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+                logger.warning("copy: copy_to_clipboard action returned false (no selection?)")
             }
         }
         
