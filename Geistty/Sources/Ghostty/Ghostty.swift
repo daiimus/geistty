@@ -412,11 +412,6 @@ extension Ghostty {
         init(_ app: ghostty_app_t, baseConfig: SurfaceConfiguration? = nil, uuid: UUID? = nil) {
             self.uuid = uuid ?? UUID()
             
-            // CRITICAL: Register Ghostty-compatible methods BEFORE creating the view
-            // This must happen before super.init() because ghostty_surface_new()
-            // might be called before init() completes on some code paths.
-            Self.registerGhosttyMethods()
-            
             // Initialize with a reasonable default frame (non-zero so layer bounds are non-zero)
             super.init(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
             
@@ -1217,6 +1212,63 @@ extension Ghostty {
             hapticNotification.notificationOccurred(.success)
         }
         
+        // MARK: - Frame Pacing (CADisplayLink → Ghostty draw_now)
+        
+        /// CADisplayLink for vsync-aligned frame presentation on iOS.
+        /// Mirrors macOS CVDisplayLink → draw_now architecture: each display
+        /// link tick calls ghostty_surface_draw_now() which notifies the
+        /// renderer thread's draw_now async for immediate, non-coalescing frame
+        /// draw. Supports ProMotion (up to 120Hz) via preferredFrameRateRange.
+        private var frameDisplayLink: CADisplayLink?
+        private var frameDisplayLinkProxy: FrameDisplayLinkProxy?
+        
+        /// Weak proxy target for CADisplayLink to avoid retain cycles.
+        /// Same pattern as DisplayLinkProxy for scroll momentum.
+        private class FrameDisplayLinkProxy {
+            weak var target: SurfaceView?
+            
+            init(_ target: SurfaceView) {
+                self.target = target
+            }
+            
+            @objc func tick(_ displayLink: CADisplayLink) {
+                if let target = target, let surface = target.surface {
+                    ghostty_surface_draw_now(surface)
+                } else {
+                    // Target was deallocated — clean up
+                    displayLink.invalidate()
+                }
+            }
+        }
+        
+        /// Start the frame display link for vsync-aligned rendering.
+        /// Called when the surface is added to a window and visible.
+        private func startFrameDisplayLink() {
+            guard frameDisplayLink == nil, surface != nil else { return }
+            
+            let proxy = FrameDisplayLinkProxy(self)
+            frameDisplayLinkProxy = proxy
+            let link = CADisplayLink(target: proxy, selector: #selector(FrameDisplayLinkProxy.tick))
+            
+            // ProMotion: request up to 120Hz on capable devices, minimum 60Hz
+            link.preferredFrameRateRange = CAFrameRateRange(
+                minimum: 60,
+                maximum: 120,
+                preferred: 120
+            )
+            
+            link.add(to: .main, forMode: .common)
+            frameDisplayLink = link
+        }
+        
+        /// Stop the frame display link. Called on close, dealloc, or when
+        /// removed from window.
+        private func stopFrameDisplayLink() {
+            frameDisplayLink?.invalidate()
+            frameDisplayLink = nil
+            frameDisplayLinkProxy = nil
+        }
+        
         // MARK: - UIGestureRecognizerDelegate
         
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -1826,6 +1878,7 @@ extension Ghostty {
             
             // Stop all timers and subscriptions (safety net if close() wasn't called)
             stopKeyRepeat()
+            stopFrameDisplayLink()
             scrollIndicatorHideTimer?.invalidate()
             searchNeedleCancellable = nil
             
@@ -1853,6 +1906,7 @@ extension Ghostty {
             // Invalidate the display link to break the retain cycle
             // (CADisplayLink strongly retains its target via proxy)
             stopScrollMomentum()
+            stopFrameDisplayLink()
             selectionResetTimer?.invalidate()
             selectionResetTimer = nil
             
@@ -2519,106 +2573,6 @@ extension Ghostty {
         
         // MARK: - UIView Overrides
         
-        override class var layerClass: AnyClass {
-            return CAMetalLayer.self
-        }
-        
-        // MARK: - Ghostty Metal Renderer Compatibility
-        //
-        // Ghostty's Metal.zig has this iOS code (line 117):
-        //   info.view.msgSend(void, objc.sel("addSublayer"), .{layer.layer.value});
-        //
-        // The issue: objc.sel("addSublayer") creates selector "addSublayer" (NO colon),
-        // but it passes an argument. In ObjC, method names include colons for parameters:
-        //   - "addSublayer" = no arguments
-        //   - "addSublayer:" = one argument
-        //
-        // This is a bug in Ghostty's iOS code path. We work around it by adding
-        // a method at class initialization that handles "addSublayer" selector
-        // but accepts the argument anyway.
-        //
-        // Note: Swift's @objc(addSublayer:) would create the selector WITH a colon,
-        // which won't match what Ghostty is looking for.
-        
-        /// Runtime-registered flag to avoid double registration
-        private static var methodsRegistered = false
-        
-        /// Register custom methods that Ghostty expects.
-        /// This MUST be called before any SurfaceView is created.
-        static func registerGhosttyMethods() {
-            guard !methodsRegistered else { return }
-            methodsRegistered = true
-            
-            // Ghostty calls "addSublayer" (no colon) but passes one argument.
-            // We need to add this method at runtime since Swift can't express this.
-            let selector = sel_registerName("addSublayer")
-            
-            // The IMP signature: void function(id self, SEL _cmd, id sublayer)
-            let imp: @convention(c) (AnyObject, Selector, AnyObject) -> Void = { (self_, sel_, sublayer) in
-                if let view = self_ as? UIView {
-                    if let caLayer = sublayer as? CALayer {
-                        view.layer.addSublayer(caLayer)
-                    } else {
-                        // Try to cast through AnyObject to id and use ObjC runtime
-                        let obj = sublayer as AnyObject
-                        if let caLayer = obj as? CALayer {
-                            view.layer.addSublayer(caLayer)
-                        }
-                    }
-                }
-            }
-            
-            // Type encoding: v = void return, @ = id (self), : = SEL, @ = id (argument)
-            let typeEncoding = "v@:@"
-            
-            let success = class_addMethod(
-                SurfaceView.self,
-                selector,
-                unsafeBitCast(imp, to: IMP.self),
-                typeEncoding
-            )
-            
-            if !success {
-                // Method already exists - try to replace it
-                let method = class_getInstanceMethod(SurfaceView.self, selector)
-                if let method = method {
-                    method_setImplementation(method, unsafeBitCast(imp, to: IMP.self))
-                }
-            }
-            
-            // Also add "addSublayer:" (with colon) just in case
-            let selectorWithColon = sel_registerName("addSublayer:")
-            _ = class_addMethod(
-                SurfaceView.self,
-                selectorWithColon,
-                unsafeBitCast(imp, to: IMP.self),
-                typeEncoding
-            )
-        }
-        
-        /// Override to forward unrecognized selectors to self.layer
-        /// This catches any CALayer methods that Ghostty might call on the view
-        override func forwardingTarget(for aSelector: Selector!) -> Any? {
-            // Check if the layer responds to this selector
-            if layer.responds(to: aSelector) {
-                return layer
-            }
-            return super.forwardingTarget(for: aSelector)
-        }
-        
-        /// Override method resolution to catch unhandled methods
-        override class func resolveInstanceMethod(_ sel: Selector!) -> Bool {
-            let selectorName = NSStringFromSelector(sel)
-            
-            // If it's addSublayer (with or without colon), register our handler
-            if selectorName == "addSublayer" || selectorName == "addSublayer:" {
-                registerGhosttyMethods()
-                return true
-            }
-            
-            return super.resolveInstanceMethod(sel)
-        }
-        
         override func didMoveToWindow() {
             super.didMoveToWindow()
             // Only auto-resize if not using explicit grid sizing (tmux multi-pane mode).
@@ -2636,6 +2590,9 @@ extension Ghostty {
             // canBecomeFirstResponder returns false for observers, so
             // becomeFirstResponder() is a no-op — no guard needed.
             if window != nil {
+                // Start vsync-aligned frame pacing
+                startFrameDisplayLink()
+                
                 RunLoop.main.perform { [weak self] in
                     guard let self = self, self.window != nil else { return }
                     if !self.isFirstResponder {
@@ -2643,6 +2600,9 @@ extension Ghostty {
                     }
                 }
             } else {
+                // Stop frame pacing when removed from window
+                stopFrameDisplayLink()
+                
                 // Resign when removed from window to clean up keyboard
                 if self.isFirstResponder {
                     _ = self.resignFirstResponder()
