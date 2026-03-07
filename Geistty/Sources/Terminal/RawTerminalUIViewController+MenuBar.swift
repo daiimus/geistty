@@ -181,36 +181,10 @@ extension RawTerminalUIViewController {
     }
     
     func showKeyboardShortcutsHelp() {
-        let shortcuts = """
-        Keyboard Shortcuts
-        
-        Cmd+C        Copy
-        Cmd+V        Paste
-        Cmd+K        Clear Screen
-        Cmd+0        Reset Font Size
-        Cmd++        Increase Font Size
-        Cmd+-        Decrease Font Size
-        Cmd+Up       Jump to Previous Prompt
-        Cmd+Down     Jump to Next Prompt
-        Cmd+Shift+P  Command Palette
-        Cmd+W        Disconnect
-        
-        Ctrl+C       Interrupt (SIGINT)
-        Ctrl+D       EOF / Logout
-        Ctrl+L       Clear Screen
-        Ctrl+Z       Suspend
-        
-        Arrow Keys   Navigate
-        Tab          Complete
-        Esc          Cancel
-        
-        Note: Jump to Prompt requires shell
-        integration (OSC 133) on the remote host.
-        """
-        
-        let alert = UIAlertController(title: nil, message: shortcuts, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
+        let helpVC = KeyboardShortcutsHelpController()
+        let nav = UINavigationController(rootViewController: helpVC)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
     }
     
     @objc func handleBackButton() {
@@ -295,5 +269,149 @@ extension RawTerminalUIViewController {
             ghostty_surface_binding_action(surface, cstr, UInt(actionStr.utf8.count))
         }
         logger.info("Command palette executed: \(actionStr)")
+    }
+}
+
+// MARK: - Keyboard Shortcuts Help Controller
+
+/// Full-screen scrollable keyboard shortcuts reference.
+/// Uses a plain UITableView grouped by category for clean presentation
+/// and easy scrollability on all device sizes.
+final class KeyboardShortcutsHelpController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+    
+    private struct Shortcut {
+        let keys: String
+        let action: String
+    }
+    
+    private struct Section {
+        let title: String
+        let footnote: String?
+        let shortcuts: [Shortcut]
+    }
+    
+    private let sections: [Section] = [
+        Section(title: "General", footnote: nil, shortcuts: [
+            Shortcut(keys: "\u{2318}C", action: "Copy"),
+            Shortcut(keys: "\u{2318}V", action: "Paste"),
+            Shortcut(keys: "\u{2318}A", action: "Select All"),
+            Shortcut(keys: "\u{2318}F", action: "Find"),
+            Shortcut(keys: "\u{2318}G", action: "Find Next"),
+            Shortcut(keys: "\u{21E7}\u{2318}G", action: "Find Previous"),
+            Shortcut(keys: "\u{2318}W", action: "Disconnect"),
+            Shortcut(keys: "\u{2318}R", action: "Reconnect"),
+            Shortcut(keys: "\u{2318},", action: "Settings"),
+        ]),
+        Section(title: "Terminal", footnote: "Jump to Prompt requires shell integration (OSC 133) on the remote host.", shortcuts: [
+            Shortcut(keys: "\u{2318}K", action: "Clear Screen"),
+            Shortcut(keys: "\u{2318}\u{2191}", action: "Jump to Previous Prompt"),
+            Shortcut(keys: "\u{2318}\u{2193}", action: "Jump to Next Prompt"),
+            Shortcut(keys: "\u{21E7}\u{2318}P", action: "Command Palette"),
+            Shortcut(keys: "\u{2318}/", action: "Keyboard Shortcuts"),
+            Shortcut(keys: "\u{21E7}\u{2318},", action: "Reload Configuration"),
+            Shortcut(keys: "\u{2318}U", action: "Toggle Background Transparency"),
+        ]),
+        Section(title: "Font Size", footnote: nil, shortcuts: [
+            Shortcut(keys: "\u{2318}+", action: "Increase"),
+            Shortcut(keys: "\u{2318}\u{2212}", action: "Decrease"),
+            Shortcut(keys: "\u{2318}0", action: "Reset"),
+        ]),
+        Section(title: "tmux Panes", footnote: "Requires an active tmux session.", shortcuts: [
+            Shortcut(keys: "\u{2318}D", action: "Split Right"),
+            Shortcut(keys: "\u{21E7}\u{2318}D", action: "Split Down"),
+            Shortcut(keys: "\u{2318}[", action: "Previous Pane"),
+            Shortcut(keys: "\u{2318}]", action: "Next Pane"),
+            Shortcut(keys: "\u{2325}\u{2318}\u{2191}", action: "Navigate Up"),
+            Shortcut(keys: "\u{2325}\u{2318}\u{2193}", action: "Navigate Down"),
+            Shortcut(keys: "\u{2325}\u{2318}\u{2190}", action: "Navigate Left"),
+            Shortcut(keys: "\u{2325}\u{2318}\u{2192}", action: "Navigate Right"),
+            Shortcut(keys: "\u{21E7}\u{2318}\u{21A9}", action: "Toggle Zoom"),
+            Shortcut(keys: "\u{2303}\u{2318}=", action: "Equalize Panes"),
+        ]),
+        Section(title: "tmux Windows", footnote: nil, shortcuts: [
+            Shortcut(keys: "\u{2318}T", action: "New Window"),
+            Shortcut(keys: "\u{21E7}\u{2318}[", action: "Previous Window"),
+            Shortcut(keys: "\u{21E7}\u{2318}]", action: "Next Window"),
+            Shortcut(keys: "\u{2318}1\u{2013}8", action: "Go to Window N"),
+            Shortcut(keys: "\u{2318}9", action: "Last Window"),
+            Shortcut(keys: "\u{21E7}\u{2318}W", action: "Close Window"),
+            Shortcut(keys: "\u{21E7}\u{2318}R", action: "Rename Window"),
+        ]),
+        Section(title: "Terminal Input", footnote: nil, shortcuts: [
+            Shortcut(keys: "\u{2303}C", action: "Interrupt (SIGINT)"),
+            Shortcut(keys: "\u{2303}D", action: "EOF / Logout"),
+            Shortcut(keys: "\u{2303}L", action: "Clear Screen"),
+            Shortcut(keys: "\u{2303}Z", action: "Suspend"),
+        ]),
+    ]
+    
+    private var tableView: UITableView!
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        view.backgroundColor = .systemGroupedBackground
+        
+        // Navigation bar
+        title = "Keyboard Shortcuts"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done,
+            target: self,
+            action: #selector(dismissHelp)
+        )
+        
+        // Table view
+        tableView = UITableView(frame: .zero, style: .insetGrouped)
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "ShortcutCell")
+        tableView.allowsSelection = false
+        view.addSubview(tableView)
+        
+        NSLayoutConstraint.activate([
+            tableView.topAnchor.constraint(equalTo: view.topAnchor),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+    
+    @objc private func dismissHelp() {
+        dismiss(animated: true)
+    }
+    
+    // MARK: - UITableViewDataSource
+    
+    func numberOfSections(in tableView: UITableView) -> Int {
+        sections.count
+    }
+    
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        sections[section].shortcuts.count
+    }
+    
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        sections[section].title
+    }
+    
+    func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        sections[section].footnote
+    }
+    
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "ShortcutCell", for: indexPath)
+        let shortcut = sections[indexPath.section].shortcuts[indexPath.row]
+        
+        var content = cell.defaultContentConfiguration()
+        content.text = shortcut.action
+        content.secondaryText = shortcut.keys
+        content.prefersSideBySideTextAndSecondaryText = true
+        content.secondaryTextProperties.font = .monospacedSystemFont(ofSize: 15, weight: .medium)
+        content.secondaryTextProperties.color = .secondaryLabel
+        cell.contentConfiguration = content
+        cell.accessibilityIdentifier = "shortcut_\(shortcut.action.lowercased().replacingOccurrences(of: " ", with: "_"))"
+        
+        return cell
     }
 }
