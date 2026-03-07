@@ -43,8 +43,22 @@ extension RawTerminalUIViewController {
         
         let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
         
-        // Convert keyboard frame to view coordinates
-        let keyboardHeight = view.convert(keyboardFrame, from: nil).height
+        // Calculate how much the keyboard actually overlaps our view.
+        // Using .height of the converted rect is incorrect — it gives the keyboard
+        // frame's own height regardless of position. We need the overlap between
+        // the keyboard and the view's bottom edge. (#44 Bug 2)
+        let keyboardFrameInView = view.convert(keyboardFrame, from: nil)
+        let keyboardHeight = max(0, view.bounds.maxY - keyboardFrameInView.minY)
+        
+        // Ignore spurious keyboard notifications with tiny heights (e.g. just the
+        // inputAccessoryView at 44pt). On iPad with a hardware keyboard, iOS may
+        // post keyboardWillShow for the accessory alone — this shouldn't shift the
+        // terminal layout. (#44 Bug 2)
+        let minimumKeyboardHeight: CGFloat = 100
+        guard keyboardHeight >= minimumKeyboardHeight else {
+            logger.debug("⌨️ Ignoring small keyboard height: \(keyboardHeight) (< \(minimumKeyboardHeight))")
+            return
+        }
         
         // Calculate the new size BEFORE animating
         // Account for top offset (safe area + window picker) so the pre-render
@@ -87,6 +101,13 @@ extension RawTerminalUIViewController {
         guard let userInfo = notification.userInfo,
               let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
               let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int else {
+            return
+        }
+        
+        // If the bottom constraint is already at 0 (e.g. we ignored a small
+        // keyboardWillShow), skip the hide animation to avoid unnecessary layout. (#44 Bug 2)
+        guard surfaceBottomConstraint?.constant != 0 || multiPaneBottomConstraint?.constant != 0 else {
+            logger.debug("⌨️ Keyboard will hide (no-op, constraints already at 0)")
             return
         }
         

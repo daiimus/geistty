@@ -563,6 +563,10 @@ class RawTerminalUIViewController: UIViewController {
     // Constraint for bottom edge - adjusted based on keyboard visibility
     var surfaceBottomConstraint: NSLayoutConstraint?
     
+    // Cached safe area top inset — used to avoid redundant layout updates
+    // when viewDidLayoutSubviews fires without an actual inset change. (#44 Bug 2)
+    private var lastSafeAreaTopInset: CGFloat = -1
+    
     // Settings observation
     private var settingsObserver: NSObjectProtocol?
     
@@ -624,7 +628,15 @@ class RawTerminalUIViewController: UIViewController {
     }
     
     override var prefersStatusBarHidden: Bool {
-        !showStatusBar
+        // On iPad, never force-hide the status bar. Doing so puts the app into
+        // full-screen immersive mode which suppresses the iPadOS system menu bar
+        // (File/Edit/View/Terminal/Connection/Help) that users with hardware
+        // keyboards depend on. The status bar is minimal on iPad and the menu bar
+        // is critical for discoverability.
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return false
+        }
+        return !showStatusBar
     }
     
     override var preferredStatusBarStyle: UIStatusBarStyle {
@@ -891,8 +903,15 @@ class RawTerminalUIViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         
-        // Update top constraint based on status bar visibility
-        updateTopConstraint()
+        // Only update the top constraint when the safe area has actually changed.
+        // viewDidLayoutSubviews can fire frequently (hover, animation frames, etc.)
+        // and redundant updateTerminalTopConstraint() calls trigger unnecessary
+        // layout animations that cause visible jitter. (#44 Bug 2)
+        let currentTopInset = view.safeAreaInsets.top
+        if currentTopInset != lastSafeAreaTopInset {
+            lastSafeAreaTopInset = currentTopInset
+            updateTopConstraint()
+        }
         
         // Refresh divider overlay positions after container bounds change
         // (e.g., rotation, keyboard show/hide, multitasking resize)

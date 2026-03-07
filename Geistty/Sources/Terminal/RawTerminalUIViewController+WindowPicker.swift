@@ -100,7 +100,15 @@ extension RawTerminalUIViewController {
     
     /// Update the terminal view's top constraint based on window picker visibility
     func updateTerminalTopConstraint() {
-        let topInset: CGFloat = showStatusBar ? view.safeAreaInsets.top : 0
+        // On iPad, the status bar is always shown (to preserve the system menu bar),
+        // so always apply the safe area inset. On iPhone, respect the user's setting.
+        let statusBarVisible: Bool
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            statusBarVisible = true
+        } else {
+            statusBarVisible = showStatusBar
+        }
+        let topInset: CGFloat = statusBarVisible ? view.safeAreaInsets.top : 0
         let pickerOffset: CGFloat = isShowingWindowPicker ? windowPickerHeight : 0
         
         surfaceTopConstraint?.constant = topInset + pickerOffset
