@@ -105,6 +105,11 @@ class TmuxSessionManager: ObservableObject {
     /// Each entry is (paneId, isObserver). Observers should always come before primaries.
     var teardownOrderForTesting: [(paneId: String, isObserver: Bool)] = []
     
+    /// Test-only: set lastRefreshSize so syncSplitRatioToTmux() can calculate dimensions
+    func setLastRefreshSizeForTesting(cols: Int, rows: Int) {
+        lastRefreshSize = (cols, rows)
+    }
+    
     // ARCHIVED: Session 127 — needsReattach + needsReattachForTesting removed
     // (destroy-and-recreate approach). See docs/archive/REATTACH_PRESERVED_SURFACES_FEB_2026.swift
     #endif

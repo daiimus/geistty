@@ -3538,10 +3538,232 @@ extension TmuxSessionManagerTests {
         mock.resetCallTracking()
         mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
         
-        XCTAssertFalse(factoryCalls.isEmpty,
+         XCTAssertFalse(factoryCalls.isEmpty,
                        "Factory should be called again after reconnect restores isConnected")
         XCTAssertEqual(Set(factoryCalls), Set(["%15", "%16"]),
                        "Factory should be called for all panes after reconnect")
+    }
+}
+
+// MARK: - syncSplitRatioToTmux Tests
+
+extension TmuxSessionManagerTests {
+
+    /// syncSplitRatioToTmux should early-return when there is no split tree.
+    @MainActor
+    func testSyncSplitRatioNoSplitTree() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.syncSplitRatioToTmux(forPaneId: 0, ratio: 0.5)
+        XCTAssertTrue(log.commands.isEmpty,
+                      "No command should be sent when there is no split tree")
+    }
+
+    /// syncSplitRatioToTmux should early-return when lastRefreshSize is nil.
+    @MainActor
+    func testSyncSplitRatioNoLastRefreshSize() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 0, paneB: 1)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [0, 1]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.configureSurfaceManagement(
+            factory: { _ in nil },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+
+        // Split tree exists but lastRefreshSize is nil — should early-return
+        log.commands.removeAll()
+        mgr.syncSplitRatioToTmux(forPaneId: 0, ratio: 0.5)
+        XCTAssertTrue(log.commands.isEmpty,
+                      "No command should be sent when lastRefreshSize is nil")
+    }
+
+    /// syncSplitRatioToTmux should send resize-pane -x for a horizontal split.
+    @MainActor
+    func testSyncSplitRatioHorizontalSendsResizePane() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 0, paneB: 1, totalCols: 80, rows: 24)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [0, 1]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.viewerBecameReady()
+        mgr.configureSurfaceManagement(
+            factory: { _ in nil },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+
+        // Set lastRefreshSize AFTER controlModeActivated (which resets it to nil)
+        #if DEBUG
+        mgr.setLastRefreshSizeForTesting(cols: 80, rows: 24)
+        #endif
+
+        log.commands.removeAll()
+        mgr.syncSplitRatioToTmux(forPaneId: 0, ratio: 0.6)
+
+        // Should send a resize-pane -x command (horizontal split = -x flag)
+        XCTAssertEqual(log.commands.count, 1, "Exactly one resize command should be sent")
+        let cmd = log.commands.first ?? ""
+        XCTAssertTrue(cmd.hasPrefix("resize-pane -t %0 -x "),
+                      "Command should use -x flag for horizontal split, got: \(cmd)")
+        // Expected: available = 80 - 1 (divider) = 79, new size = max(1, Int(79 * 0.6)) = 47
+        XCTAssertTrue(cmd.contains("47\n"),
+                      "resize-pane should target 47 columns (79 * 0.6), got: \(cmd)")
+    }
+
+    /// syncSplitRatioToTmux should send resize-pane -y for a vertical split.
+    @MainActor
+    func testSyncSplitRatioVerticalSendsResizePane() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        let layout = verticalSplitLayout(paneA: 0, paneB: 1, cols: 80, totalRows: 24)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [0, 1]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.viewerBecameReady()
+        mgr.configureSurfaceManagement(
+            factory: { _ in nil },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+
+        // Set lastRefreshSize AFTER controlModeActivated (which resets it to nil)
+        #if DEBUG
+        mgr.setLastRefreshSizeForTesting(cols: 80, rows: 24)
+        #endif
+
+        log.commands.removeAll()
+        mgr.syncSplitRatioToTmux(forPaneId: 0, ratio: 0.5)
+
+        XCTAssertEqual(log.commands.count, 1, "Exactly one resize command should be sent")
+        let cmd = log.commands.first ?? ""
+        XCTAssertTrue(cmd.hasPrefix("resize-pane -t %0 -y "),
+                      "Command should use -y flag for vertical split, got: \(cmd)")
+        // Expected: available = 24 - 1 (divider) = 23, new size = max(1, Int(23 * 0.5)) = 11
+        XCTAssertTrue(cmd.contains("11\n"),
+                      "resize-pane should target 11 rows (23 * 0.5), got: \(cmd)")
+    }
+}
+
+// MARK: - Pending Input Display Tests
+
+extension TmuxSessionManagerTests {
+
+    /// displayPendingInput should not crash when no surface exists for focused pane.
+    @MainActor
+    func testDisplayPendingInputNoSurface() {
+        let mgr = TmuxSessionManager()
+        // No surfaces configured — should early-return without crash
+        mgr.displayPendingInput("hello")
+    }
+
+    /// clearPendingInputDisplay should not crash when no surface exists for focused pane.
+    @MainActor
+    func testClearPendingInputDisplayNoSurface() {
+        let mgr = TmuxSessionManager()
+        // No surfaces configured — should early-return without crash
+        mgr.clearPendingInputDisplay()
+    }
+}
+
+// MARK: - activeSurfaces / focusedWindow Property Tests
+
+extension TmuxSessionManagerTests {
+
+    /// activeSurfaces should return empty dict on a fresh manager.
+    @MainActor
+    func testActiveSurfacesEmptyOnFreshManager() {
+        let mgr = TmuxSessionManager()
+        XCTAssertTrue(mgr.activeSurfaces.isEmpty,
+                      "activeSurfaces should be empty on fresh manager")
+    }
+
+    /// focusedWindow should return nil when no windows exist.
+    @MainActor
+    func testFocusedWindowNilWhenNoWindows() {
+        let mgr = TmuxSessionManager()
+        XCTAssertNil(mgr.focusedWindow,
+                     "focusedWindow should be nil when no windows exist")
+    }
+
+    /// focusedWindow should return the correct window after state reconciliation.
+    @MainActor
+    func testFocusedWindowReturnsCorrectWindowAfterReconciliation() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = singlePaneLayout(paneId: 5)
+        mock.stubbedWindows = [
+            TmuxWindowInfo(id: 3, width: 80, height: 24, name: "vim"),
+        ]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 3
+        mock.stubbedPaneIds = [5]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.configureSurfaceManagement(
+            factory: { _ in nil },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 1)
+
+        let window = mgr.focusedWindow
+        XCTAssertNotNil(window, "focusedWindow should not be nil after reconciliation")
+        XCTAssertEqual(window?.name, "vim", "focusedWindow should return the active window")
+    }
+
+    /// activeSurfaces should still be empty when factory returns nil (no real Ghostty surfaces).
+    @MainActor
+    func testActiveSurfacesEmptyWhenFactoryReturnsNil() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let layout = singlePaneLayout(paneId: 0)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [0]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.configureSurfaceManagement(
+            factory: { _ in nil },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 1)
+
+        // Factory returns nil, so no real surfaces are created
+        XCTAssertTrue(mgr.activeSurfaces.isEmpty,
+                      "activeSurfaces should be empty when factory returns nil")
     }
 }
 
