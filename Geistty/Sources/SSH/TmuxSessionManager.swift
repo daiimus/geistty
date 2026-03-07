@@ -1081,6 +1081,21 @@ class TmuxSessionManager: ObservableObject {
         
         // Use the atomic assignment helper — this sets up cell size callbacks
         assignPrimarySurface(remainingSurface, forPaneId: firstRemainingPaneId)
+        
+        // The remaining surface was an observer (isMultiPaneObserver=true,
+        // canBecomeFirstResponder=false, minimal gestures). Promote it:
+        // clear observer flag, restore full gesture suite, acquire focus.
+        // NOTE: Do NOT call detachTmuxPane() — the Zig-level pane binding
+        // must stay intact (shared mutex + pane terminal pointer).
+        remainingSurface.promoteFromObserver()
+        
+        // Acquire keyboard focus. Must happen after promoteFromObserver()
+        // clears isMultiPaneObserver, otherwise canBecomeFirstResponder
+        // returns false and becomeFirstResponder() silently fails.
+        DispatchQueue.main.async {
+            _ = remainingSurface.becomeFirstResponder()
+        }
+        
         logger.info("Reassigned primarySurface to \(firstRemainingPaneId)")
     }
     

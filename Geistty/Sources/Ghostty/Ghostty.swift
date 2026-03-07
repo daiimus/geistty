@@ -1465,22 +1465,33 @@ extension Ghostty {
         
         /// Handle copy action
         @objc override func copy(_ sender: Any?) {
-            guard let surface = surface else { return }
+            guard let surface = surface else {
+                logger.warning("copy: surface is nil, cannot read selection")
+                return
+            }
             
             var textStruct = ghostty_text_s()
             if ghostty_surface_read_selection(surface, &textStruct) {
                 if let textPtr = textStruct.text, textStruct.text_len > 0 {
                     let selectedText = String(cString: textPtr)
                     UIPasteboard.general.string = selectedText
+                    logger.info("copy: copied \(textStruct.text_len) bytes to clipboard")
+                } else {
+                    logger.warning("copy: selection read succeeded but text is nil or empty")
                 }
                 ghostty_surface_free_text(surface, &textStruct)
+            } else {
+                logger.warning("copy: ghostty_surface_read_selection returned false (no selection?)")
             }
         }
         
         /// Handle paste action using Ghostty's paste_from_clipboard action
         /// This properly handles bracketed paste mode for tmux/vim
         @objc override func paste(_ sender: Any?) {
-            guard let surface = surface else { return }
+            guard let surface = surface else {
+                logger.warning("paste: surface is nil, cannot paste")
+                return
+            }
             let action = "paste_from_clipboard"
             if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
                 // Fallback to direct insertion if action fails
@@ -1489,7 +1500,7 @@ extension Ghostty {
                 }
                 logger.warning("paste_from_clipboard action failed, falling back to direct insert")
             } else {
-                logger.debug("📋 Paste via Ghostty (bracketed paste mode aware)")
+                logger.debug("paste: via Ghostty (bracketed paste mode aware)")
             }
         }
         
@@ -2241,6 +2252,84 @@ extension Ghostty {
             isMultiPaneObserver = false
             onPaneTap = nil
             logger.debug("detachTmuxPane: complete")
+        }
+        
+        /// Promote this observer surface to primary status.
+        ///
+        /// Reverses the Swift-level effects of attachToTmuxPane() WITHOUT calling
+        /// ghostty_surface_tmux_detach_pane(). The Zig-level tmux_pane_binding must
+        /// stay intact — the promoted surface still renders via the shared mutex
+        /// and pane terminal pointer. Only the Swift flags and gesture suite change.
+        ///
+        /// Call this when the primary surface's pane closes and an observer is
+        /// elected as the new primarySurface.
+        func promoteFromObserver() {
+            guard isMultiPaneObserver else {
+                logger.warning("promoteFromObserver: surface is not an observer, skipping")
+                return
+            }
+            
+            // 1. Clear observer flag so canBecomeFirstResponder returns true
+            isMultiPaneObserver = false
+            
+            // 2. Restore the full gesture suite (mirrors init gesture setup)
+            gestureRecognizers?.forEach { removeGestureRecognizer($0) }
+            
+            let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+            addGestureRecognizer(tapGesture)
+            
+            let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTapGesture.numberOfTapsRequired = 2
+            addGestureRecognizer(doubleTapGesture)
+            tapGesture.require(toFail: doubleTapGesture)
+            
+            let tripleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTripleTap(_:)))
+            tripleTapGesture.numberOfTapsRequired = 3
+            addGestureRecognizer(tripleTapGesture)
+            doubleTapGesture.require(toFail: tripleTapGesture)
+            
+            let twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
+            twoFingerTapGesture.numberOfTouchesRequired = 2
+            addGestureRecognizer(twoFingerTapGesture)
+            
+            let twoFingerDoubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerDoubleTap(_:)))
+            twoFingerDoubleTapGesture.numberOfTouchesRequired = 2
+            twoFingerDoubleTapGesture.numberOfTapsRequired = 2
+            addGestureRecognizer(twoFingerDoubleTapGesture)
+            twoFingerTapGesture.require(toFail: twoFingerDoubleTapGesture)
+            
+            let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+            longPressGesture.minimumPressDuration = 0.3
+            longPressGesture.delegate = self
+            addGestureRecognizer(longPressGesture)
+            
+            let singleFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleSingleFingerScroll(_:)))
+            singleFingerScrollGesture.minimumNumberOfTouches = 1
+            singleFingerScrollGesture.maximumNumberOfTouches = 1
+            singleFingerScrollGesture.delegate = self
+            addGestureRecognizer(singleFingerScrollGesture)
+            
+            let twoFingerScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+            twoFingerScrollGesture.minimumNumberOfTouches = 2
+            twoFingerScrollGesture.maximumNumberOfTouches = 2
+            addGestureRecognizer(twoFingerScrollGesture)
+            
+            let trackpadScrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleTrackpadScroll(_:)))
+            trackpadScrollGesture.allowedScrollTypesMask = [.continuous, .discrete]
+            trackpadScrollGesture.minimumNumberOfTouches = 0
+            trackpadScrollGesture.maximumNumberOfTouches = 0
+            addGestureRecognizer(trackpadScrollGesture)
+            
+            let hoverGesture = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
+            addGestureRecognizer(hoverGesture)
+            
+            let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            addGestureRecognizer(pinchGesture)
+            
+            let pointerInteraction = UIPointerInteraction(delegate: self)
+            addInteraction(pointerInteraction)
+            
+            logger.info("promoteFromObserver: observer promoted to primary (gestures restored, canBecomeFirstResponder=true)")
         }
         
         // MARK: - tmux Window API
