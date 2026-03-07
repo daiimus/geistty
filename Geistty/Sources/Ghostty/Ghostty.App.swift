@@ -654,16 +654,22 @@ extension Ghostty {
             // The clipboard request state pointer is heap-allocated by Zig and
             // remains valid until completeClipboardRequest is called, so async
             // completion is safe (GTK backend does the same).
-            guard let userdata = userdata else { return }
+            guard let userdata = userdata else {
+                logger.warning("readClipboard: userdata is nil")
+                return
+            }
             let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
             
             DispatchQueue.main.async {
-                guard let surface = surfaceView.surface else { return }
+                guard let surface = surfaceView.surface else {
+                    logger.warning("readClipboard: surface became nil before main queue dispatch")
+                    return
+                }
                 let str = UIPasteboard.general.string ?? ""
                 str.withCString { ptr in
                     ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
                 }
-                logger.debug("Clipboard read: \(str.count) chars")
+                logger.debug("readClipboard: sent \(str.count) chars to Ghostty")
             }
         }
         
