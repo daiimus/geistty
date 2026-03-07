@@ -41,6 +41,7 @@
 		B100001D /* QuickConnectInlineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200002D /* QuickConnectInlineTests.swift */; };
 		B100001E /* MenuBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200002E /* MenuBarTests.swift */; };
 		B100001F /* LayoutStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200002F /* LayoutStabilityTests.swift */; };
+		B1000020 /* KeyboardShortcutRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000030 /* KeyboardShortcutRoutingTests.swift */; };
 		A1000001 /* GeisttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* GeisttyApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* TerminalContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* TerminalContainerView.swift */; };
@@ -203,6 +204,7 @@
 		B200002D /* QuickConnectInlineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickConnectInlineTests.swift; sourceTree = "<group>"; };
 		B200002E /* MenuBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarTests.swift; sourceTree = "<group>"; };
 		B200002F /* LayoutStabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutStabilityTests.swift; sourceTree = "<group>"; };
+		B2000030 /* KeyboardShortcutRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutRoutingTests.swift; sourceTree = "<group>"; };
 		B2000010 /* GeisttyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000001 /* GeisttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeisttyApp.swift; sourceTree = "<group>"; };
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -514,6 +516,7 @@
 				B2000024 /* TmuxWindowTests.swift */,
 				B2000025 /* OrientationTests.swift */,
 				B2000026 /* StressTests.swift */,
+				B2000030 /* KeyboardShortcutRoutingTests.swift */,
 			);
 			path = ConnectedTests;
 			sourceTree = "<group>";
@@ -813,6 +816,7 @@
 				B100001D /* QuickConnectInlineTests.swift in Sources */,
 				B100001E /* MenuBarTests.swift in Sources */,
 				B100001F /* LayoutStabilityTests.swift in Sources */,
+				B1000020 /* KeyboardShortcutRoutingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
