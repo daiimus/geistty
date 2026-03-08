@@ -1619,7 +1619,7 @@ class TmuxSessionManager: ObservableObject {
     /// Fired when a format subscription value changes (registered via refresh-client -B).
     /// The name identifies the subscription and the value is the new format expansion.
     func handleSubscriptionChanged(name: String, value: String) {
-        logger.info("tmux subscription changed: \(name)=\(value)")
+        logger.debug("tmux subscription changed: \(name), valueLength=\(value.count)")
     }
 
     /// Copy the tmux paste buffer to the iOS clipboard.
