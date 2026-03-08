@@ -939,7 +939,7 @@ extension Ghostty {
                 let name = String(cString: namePtr)
                 let value = String(cString: valuePtr)
                 
-                logger.info("tmux subscription changed: name=\(name)")
+                logger.debug("tmux subscription changed: name=\(name)")
                 
                 let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
                     Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
