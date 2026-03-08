@@ -4873,6 +4873,15 @@ extension TmuxSessionManagerTests {
         mgr.handleFocusedPaneChanged(windowId: UInt32.max, paneId: UInt32.max)
     }
 
+    @MainActor
+    func testHandleSubscriptionChangedDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        mgr.handleSubscriptionChanged(name: "pane_title", value: "my title")
+        mgr.handleSubscriptionChanged(name: "pane_title", value: "")
+        mgr.handleSubscriptionChanged(name: "", value: "")
+    }
+
     // MARK: - setOption Viewer Not Ready Queuing
 
     @MainActor

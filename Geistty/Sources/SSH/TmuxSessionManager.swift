@@ -1615,6 +1615,13 @@ class TmuxSessionManager: ObservableObject {
         logger.info("tmux focused pane changed: @\(windowId) %\(paneId)")
     }
 
+    /// Handle a tmux `%subscription-changed` notification from the Zig viewer.
+    /// Fired when a format subscription value changes (registered via refresh-client -B).
+    /// The name identifies the subscription and the value is the new format expansion.
+    func handleSubscriptionChanged(name: String, value: String) {
+        logger.debug("tmux subscription changed: \(name), valueLength=\(value.count)")
+    }
+
     /// Copy the tmux paste buffer to the iOS clipboard.
     /// Sends `show-buffer` through the Zig viewer's command queue and
     /// writes the response content to `UIPasteboard.general` on success.
