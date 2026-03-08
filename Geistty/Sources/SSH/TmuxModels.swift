@@ -160,26 +160,69 @@ enum TmuxOptionScope: Equatable, Sendable {
     /// Build the tmux `show-options` command for this scope.
     /// Uses `-v` to get just the value (not `option value` pair).
     func showCommand(for option: String) -> String {
+        let safeOption = Self.sanitizeOptionName(option)
         switch self {
         case .global:
-            return "show-options -gv \(option)"
+            return "show-options -gv \(safeOption)"
         case .session:
-            return "show-options -v \(option)"
+            return "show-options -v \(safeOption)"
         case .window:
-            return "show-window-options -v \(option)"
+            return "show-window-options -v \(safeOption)"
         }
     }
     
     /// Build the tmux `set-option` command for this scope.
+    ///
+    /// Option names are sanitized to remove whitespace/control characters.
+    /// Values are quoted and escaped to prevent command injection over the
+    /// SSH control channel (newlines normalized to spaces, backslashes and
+    /// double quotes escaped, wrapped in double quotes).
     func setCommand(for option: String, value: String) -> String {
+        let safeOption = Self.sanitizeOptionName(option)
+        let safeValue = Self.quoteTmuxValue(value)
         switch self {
         case .global:
-            return "set-option -g \(option) \(value)"
+            return "set-option -g \(safeOption) \(safeValue)"
         case .session:
-            return "set-option \(option) \(value)"
+            return "set-option \(safeOption) \(safeValue)"
         case .window:
-            return "set-option -w \(option) \(value)"
+            return "set-option -w \(safeOption) \(safeValue)"
         }
+    }
+    
+    /// Sanitize a tmux option name by stripping whitespace and control characters.
+    private static func sanitizeOptionName(_ option: String) -> String {
+        let filtered = option.unicodeScalars.filter { scalar in
+            !CharacterSet.whitespacesAndNewlines.contains(scalar) &&
+            !CharacterSet.controlCharacters.contains(scalar)
+        }
+        return String(String.UnicodeScalarView(filtered))
+    }
+    
+    /// Quote and escape a tmux option value for safe interpolation into a command.
+    ///
+    /// - Newlines (`\n`, `\r`) are normalized to a single space to prevent
+    ///   injecting extra commands (the SSH writer appends its own newline).
+    /// - Other control characters are dropped.
+    /// - Backslashes and double quotes are escaped with a backslash.
+    /// - The entire value is wrapped in double quotes.
+    private static func quoteTmuxValue(_ value: String) -> String {
+        let cleaned = value.unicodeScalars.compactMap { scalar -> UnicodeScalar? in
+            if CharacterSet.controlCharacters.contains(scalar) {
+                return (scalar == "\n" || scalar == "\r") ? UnicodeScalar(0x20) : nil
+            }
+            return scalar
+        }
+        
+        var escaped = ""
+        escaped.reserveCapacity(String(String.UnicodeScalarView(cleaned)).count + 2)
+        for ch in String(String.UnicodeScalarView(cleaned)) {
+            if ch == "\\" || ch == "\"" {
+                escaped.append("\\")
+            }
+            escaped.append(ch)
+        }
+        return "\"\(escaped)\""
     }
 }
 
@@ -189,20 +232,26 @@ enum TmuxOptionScope: Equatable, Sendable {
 /// (boolean on/off, integer, choice). This struct preserves the raw string
 /// and provides typed accessors for common patterns.
 struct TmuxOptionValue: Equatable, Sendable {
-    /// Raw string value as returned by `show-options -v`.
-    /// Empty string if the option is unset or the query failed.
+    /// Raw, non-empty string value as returned by `show-options -v`.
+    /// If the option is unset or the query yields no value, `parse(response:)` returns `nil`
+    /// instead of constructing a `TmuxOptionValue`.
     let rawValue: String
     
     /// Parse a `show-options -v` response into a `TmuxOptionValue`.
     ///
     /// The `-v` flag makes tmux return just the value with no option name prefix.
-    /// Response may contain a trailing newline which is stripped.
+    /// Response typically has a trailing newline/CR which is stripped, but
+    /// meaningful leading/trailing spaces are preserved (e.g., status formats).
     ///
     /// Returns `nil` if the response is empty (option does not exist at this scope).
     static func parse(response: String) -> TmuxOptionValue? {
-        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return TmuxOptionValue(rawValue: trimmed)
+        // Only strip trailing line terminators, not spaces/tabs which may be meaningful
+        var value = response
+        while let last = value.last, last == "\n" || last == "\r" {
+            value.removeLast()
+        }
+        guard !value.isEmpty else { return nil }
+        return TmuxOptionValue(rawValue: value)
     }
     
     /// Boolean interpretation: `"on"` → `true`, `"off"` → `false`, else `nil`.

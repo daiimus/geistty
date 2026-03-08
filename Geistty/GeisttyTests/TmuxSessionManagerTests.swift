@@ -4477,28 +4477,28 @@ extension TmuxSessionManagerTests {
     func testSetOptionGlobal() {
         let (mgr, log) = managerWithCommandLog()
         mgr.setOption(name: "mouse", value: "on", scope: .global)
-        XCTAssertEqual(log.commands, ["set-option -g mouse on\n"])
+        XCTAssertEqual(log.commands, ["set-option -g mouse \"on\"\n"])
     }
 
     @MainActor
     func testSetOptionSession() {
         let (mgr, log) = managerWithCommandLog()
         mgr.setOption(name: "escape-time", value: "200", scope: .session)
-        XCTAssertEqual(log.commands, ["set-option escape-time 200\n"])
+        XCTAssertEqual(log.commands, ["set-option escape-time \"200\"\n"])
     }
 
     @MainActor
     func testSetOptionWindow() {
         let (mgr, log) = managerWithCommandLog()
         mgr.setOption(name: "mode-keys", value: "vi", scope: .window)
-        XCTAssertEqual(log.commands, ["set-option -w mode-keys vi\n"])
+        XCTAssertEqual(log.commands, ["set-option -w mode-keys \"vi\"\n"])
     }
 
     @MainActor
     func testSetOptionDefaultScopeIsGlobal() {
         let (mgr, log) = managerWithCommandLog()
         mgr.setOption(name: "mouse", value: "off")
-        XCTAssertEqual(log.commands, ["set-option -g mouse off\n"])
+        XCTAssertEqual(log.commands, ["set-option -g mouse \"off\"\n"])
     }
 
     // MARK: - setOption() Optimistic Cache Update

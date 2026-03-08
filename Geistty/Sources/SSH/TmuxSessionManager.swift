@@ -1614,6 +1614,11 @@ class TmuxSessionManager: ObservableObject {
     /// Populated by `queryInitialOptions()` at connect time and updated
     /// by `queryOption()` / `setOption()`. UI can observe this to react
     /// to option changes (e.g., mouse mode toggle).
+    ///
+    /// Note: The cache is keyed by option name only, not by scope. If the same
+    /// option is queried at multiple scopes, only the last-fetched value is stored.
+    /// This is acceptable because `queryInitialOptions()` queries each option at
+    /// exactly one scope (global), and `setOption()` callers know which scope they set.
     @Published private(set) var tmuxOptions: [String: TmuxOptionValue] = [:]
     
     /// Fetch the list of sessions from the tmux server.
@@ -1764,6 +1769,14 @@ class TmuxSessionManager: ObservableObject {
     ///   - value: Value string (e.g., "on", "off", "500")
     ///   - scope: Which scope to set (global, session, window)
     func setOption(name: String, value: String, scope: TmuxOptionScope = .global) {
+        // Only apply optimistic cache update if we can actually send the command.
+        // If writeToSSH is nil, sendCommandFireAndForget logs a warning and returns
+        // without sending — updating the cache would leave it permanently wrong.
+        guard writeToSSH != nil else {
+            logger.warning("setOption: cannot set '\(name)' — no write function available")
+            return
+        }
+        
         let command = scope.setCommand(for: name, value: value)
         sendCommandFireAndForget(command)
         

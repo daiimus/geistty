@@ -311,17 +311,33 @@ final class TmuxModelsTests: XCTestCase {
     
     func testSetCommandGlobal() {
         let cmd = TmuxOptionScope.global.setCommand(for: "mouse", value: "on")
-        XCTAssertEqual(cmd, "set-option -g mouse on")
+        XCTAssertEqual(cmd, "set-option -g mouse \"on\"")
     }
     
     func testSetCommandSession() {
         let cmd = TmuxOptionScope.session.setCommand(for: "escape-time", value: "500")
-        XCTAssertEqual(cmd, "set-option escape-time 500")
+        XCTAssertEqual(cmd, "set-option escape-time \"500\"")
     }
     
     func testSetCommandWindow() {
         let cmd = TmuxOptionScope.window.setCommand(for: "mode-keys", value: "vi")
-        XCTAssertEqual(cmd, "set-option -w mode-keys vi")
+        XCTAssertEqual(cmd, "set-option -w mode-keys \"vi\"")
+    }
+    
+    func testSetCommandEscapesQuotesAndBackslashes() {
+        let cmd = TmuxOptionScope.global.setCommand(for: "status-left", value: "\"hello\\world\"")
+        XCTAssertEqual(cmd, "set-option -g status-left \"\\\"hello\\\\world\\\"\"")
+    }
+    
+    func testSetCommandNormalizesNewlines() {
+        let cmd = TmuxOptionScope.global.setCommand(for: "status-left", value: "line1\nline2\rline3")
+        XCTAssertEqual(cmd, "set-option -g status-left \"line1 line2 line3\"")
+    }
+    
+    func testShowCommandSanitizesOptionName() {
+        // Control chars and whitespace in option name are stripped
+        let cmd = TmuxOptionScope.global.showCommand(for: "mouse\n; kill-server")
+        XCTAssertEqual(cmd, "show-options -gv mouse;kill-server")
     }
     
     // MARK: - TmuxOptionValue Parsing
@@ -339,9 +355,11 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testParseOptionValueWithLeadingWhitespace() {
+        // Spaces are preserved (meaningful for status formats etc.)
+        // Only trailing \n/\r are stripped.
         let value = TmuxOptionValue.parse(response: "  500  \n")
         XCTAssertNotNil(value)
-        XCTAssertEqual(value?.rawValue, "500")
+        XCTAssertEqual(value?.rawValue, "  500  ")
     }
     
     func testParseOptionValueEmptyReturnsNil() {
@@ -349,7 +367,8 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testParseOptionValueWhitespaceOnlyReturnsNil() {
-        XCTAssertNil(TmuxOptionValue.parse(response: "   \n\n  "))
+        // Pure newlines/CR return nil (no meaningful content)
+        XCTAssertNil(TmuxOptionValue.parse(response: "\n\n"))
     }
     
     func testParseOptionValueComplexString() {
