@@ -4819,6 +4819,60 @@ extension TmuxSessionManagerTests {
         mgr.handleTmuxMessage(text: "window @3 renamed: 'foo \"bar\" \\baz'")
     }
 
+    @MainActor
+    func testHandlePasteBufferChangedDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        mgr.handlePasteBufferChanged(name: "buffer0")
+        mgr.handlePasteBufferChanged(name: "")
+        mgr.handlePasteBufferChanged(name: "my-custom-buffer")
+    }
+
+    @MainActor
+    func testHandlePasteBufferDeletedDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        mgr.handlePasteBufferDeleted(name: "buffer0")
+        mgr.handlePasteBufferDeleted(name: "")
+        mgr.handlePasteBufferDeleted(name: "my-custom-buffer")
+    }
+
+    @MainActor
+    func testHandleSessionsChangedDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        // Should not crash when called multiple times
+        mgr.handleSessionsChanged()
+        mgr.handleSessionsChanged()
+    }
+
+    @MainActor
+    func testHandlePaneModeChangedDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        mgr.handlePaneModeChanged(paneId: 0)
+        mgr.handlePaneModeChanged(paneId: 42)
+        mgr.handlePaneModeChanged(paneId: UInt32.max)
+    }
+
+    @MainActor
+    func testHandleSessionRenamedDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        mgr.handleSessionRenamed(name: "my-session")
+        mgr.handleSessionRenamed(name: "")
+        mgr.handleSessionRenamed(name: "session with spaces and 'quotes'")
+    }
+
+    @MainActor
+    func testHandleFocusedPaneChangedDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        mgr.handleFocusedPaneChanged(windowId: 1, paneId: 0)
+        mgr.handleFocusedPaneChanged(windowId: 0, paneId: 0)
+        mgr.handleFocusedPaneChanged(windowId: UInt32.max, paneId: UInt32.max)
+    }
+
     // MARK: - setOption Viewer Not Ready Queuing
 
     @MainActor

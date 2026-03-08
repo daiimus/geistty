@@ -1573,6 +1573,48 @@ class TmuxSessionManager: ObservableObject {
         logger.info("tmux message: \(text)")
     }
 
+    /// Handle a tmux `%paste-buffer-changed` notification from the Zig viewer.
+    /// Fired when a paste buffer is created or its content changes (tmux 3.4+).
+    /// Currently log-only; future work may auto-sync with iOS clipboard.
+    func handlePasteBufferChanged(name: String) {
+        logger.info("tmux paste buffer changed: \(name)")
+    }
+
+    /// Handle a tmux `%paste-buffer-deleted` notification from the Zig viewer.
+    /// Fired when a paste buffer is deleted (tmux 3.4+).
+    /// Currently log-only.
+    func handlePasteBufferDeleted(name: String) {
+        logger.info("tmux paste buffer deleted: \(name)")
+    }
+
+    /// Handle a tmux `%sessions-changed` notification from the Zig viewer.
+    /// Fired when a session is created or destroyed.
+    /// Currently log-only; future work may refresh a session picker UI.
+    func handleSessionsChanged() {
+        logger.info("tmux sessions changed")
+    }
+
+    /// Handle a tmux `%pane-mode-changed` notification from the Zig viewer.
+    /// Fired when a pane enters or exits copy mode, view mode, etc.
+    /// Currently log-only; future work may update pane mode indicators.
+    func handlePaneModeChanged(paneId: UInt32) {
+        logger.info("tmux pane mode changed: %\(paneId)")
+    }
+
+    /// Handle a tmux `%session-renamed` notification from the Zig viewer.
+    /// Fired when the attached session is renamed.
+    /// Currently log-only; future work may update the session title in the UI.
+    func handleSessionRenamed(name: String) {
+        logger.info("tmux session renamed: \(name)")
+    }
+
+    /// Handle a tmux `%window-pane-changed` notification from the Zig viewer.
+    /// Fired when the focused pane within a window changes (e.g., via select-pane).
+    /// Currently log-only; future work may update pane focus indicators.
+    func handleFocusedPaneChanged(windowId: UInt32, paneId: UInt32) {
+        logger.info("tmux focused pane changed: @\(windowId) %\(paneId)")
+    }
+
     /// Copy the tmux paste buffer to the iOS clipboard.
     /// Sends `show-buffer` through the Zig viewer's command queue and
     /// writes the response content to `UIPasteboard.general` on success.
