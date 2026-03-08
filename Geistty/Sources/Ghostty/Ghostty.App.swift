@@ -932,8 +932,12 @@ extension Ghostty {
                 }
                 
                 let payload = action.action.tmux_subscription_changed
-                let name = String(cString: payload.name)
-                let value = String(cString: payload.value)
+                guard let namePtr = payload.name, let valuePtr = payload.value else {
+                    logger.error("tmux subscription changed: missing name or value pointer")
+                    return false
+                }
+                let name = String(cString: namePtr)
+                let value = String(cString: valuePtr)
                 
                 logger.info("tmux subscription changed: name=\(name)")
                 
