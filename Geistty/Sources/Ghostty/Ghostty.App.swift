@@ -925,6 +925,29 @@ extension Ghostty {
                 )
                 return true
                 
+            case GHOSTTY_ACTION_TMUX_SUBSCRIPTION_CHANGED:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let payload = action.action.tmux_subscription_changed
+                let name = String(cString: payload.name)
+                let value = String(cString: payload.value)
+                
+                logger.info("tmux subscription changed: name=\(name)")
+                
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxSubscriptionChanged,
+                    object: surfaceView,
+                    userInfo: ["name": name, "value": value]
+                )
+                return true
+                
             case GHOSTTY_ACTION_QUIT_TIMER:
                 // Ghostty fires quit_timer when all surfaces are gone (e.g., after
                 // tmux viewer teardown on background). On macOS this quits the app.

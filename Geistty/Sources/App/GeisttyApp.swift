@@ -276,6 +276,7 @@ extension Notification.Name {
     static let tmuxPaneModeChanged = Notification.Name("tmuxPaneModeChanged")
     static let tmuxSessionRenamed = Notification.Name("tmuxSessionRenamed")
     static let tmuxFocusedPaneChanged = Notification.Name("tmuxFocusedPaneChanged")
+    static let tmuxSubscriptionChanged = Notification.Name("tmuxSubscriptionChanged")
     
     // tmux session management
     static let showTmuxSessions = Notification.Name("showTmuxSessions")
