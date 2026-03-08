@@ -489,6 +489,46 @@ class TmuxSessionManager: ObservableObject {
         let paneIds: [Int]
     }
     
+    /// Handle TMUX_ACTIVE_WINDOW_CHANGED from Ghostty's native tmux viewer.
+    /// Fires when `%session-window-changed` arrives — before the full
+    /// TMUX_STATE_CHANGED reconciliation. Pre-emptively updates the focused
+    /// window ID and current split tree so the window picker reflects the
+    /// change immediately without waiting for the heavier state refresh.
+    ///
+    /// Surface reconciliation (creating/destroying pane surfaces for the new
+    /// window) is deferred to the subsequent `handleTmuxStateChanged` call —
+    /// the new window's panes may not exist in `paneSurfaces` yet.
+    func handleActiveWindowChanged(windowId: Int) {
+        let newFocusedWindowId = "@\(windowId)"
+        
+        guard newFocusedWindowId != focusedWindowId else {
+            // Already focused on this window — no-op.
+            return
+        }
+        
+        logger.info("Active window changed: \(focusedWindowId) → \(newFocusedWindowId)")
+        
+        // Update focused window if we already know about it (e.g., switching
+        // back to a previously visited window). For new windows we've never
+        // seen, the subsequent TMUX_STATE_CHANGED creates the window entry.
+        guard windows[newFocusedWindowId] != nil else {
+            logger.info("Window \(newFocusedWindowId) not yet known; deferring to TMUX_STATE_CHANGED")
+            return
+        }
+        
+        focusedWindowId = newFocusedWindowId
+        
+        // Swap the split tree so the UI shows the new window's layout.
+        // If the window has no parsed split tree (e.g., layout parse failed),
+        // clear currentSplitTree so we don't briefly show a stale layout.
+        if let tree = windowSplitTrees[newFocusedWindowId] {
+            currentSplitTree = tree
+        } else {
+            logger.info("Active window \(newFocusedWindowId) has no split tree; clearing currentSplitTree")
+            currentSplitTree = TmuxSplitTree()
+        }
+    }
+    
     /// Handle TMUX_STATE_CHANGED from Ghostty's native tmux viewer.
     /// This is the primary state update path in the native Ghostty tmux architecture.
     /// Called from SSHSession's notification observer when Ghostty fires
