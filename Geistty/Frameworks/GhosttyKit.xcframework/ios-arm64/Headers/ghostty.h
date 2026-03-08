@@ -893,6 +893,35 @@ typedef struct {
   uint32_t window_id;
 } ghostty_action_tmux_active_window_changed_s;
 
+// apprt.action.TmuxPasteBufferChanged
+typedef struct {
+  const char* data;
+  size_t len;
+} ghostty_action_tmux_paste_buffer_changed_s;
+
+// apprt.action.TmuxPasteBufferDeleted
+typedef struct {
+  const char* data;
+  size_t len;
+} ghostty_action_tmux_paste_buffer_deleted_s;
+
+// apprt.action.TmuxPaneModeChanged
+typedef struct {
+  uint32_t pane_id;
+} ghostty_action_tmux_pane_mode_changed_s;
+
+// apprt.action.TmuxSessionRenamed
+typedef struct {
+  const char* data;
+  size_t len;
+} ghostty_action_tmux_session_renamed_s;
+
+// apprt.action.TmuxFocusedPaneChanged
+typedef struct {
+  uint32_t window_id;
+  uint32_t pane_id;
+} ghostty_action_tmux_focused_pane_changed_s;
+
 // terminal.Scrollbar
 typedef struct {
   uint64_t total;
@@ -972,6 +1001,12 @@ typedef enum {
   GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE,
   GHOSTTY_ACTION_TMUX_MESSAGE,
   GHOSTTY_ACTION_TMUX_ACTIVE_WINDOW_CHANGED,
+  GHOSTTY_ACTION_TMUX_PASTE_BUFFER_CHANGED,
+  GHOSTTY_ACTION_TMUX_PASTE_BUFFER_DELETED,
+  GHOSTTY_ACTION_TMUX_SESSIONS_CHANGED,
+  GHOSTTY_ACTION_TMUX_PANE_MODE_CHANGED,
+  GHOSTTY_ACTION_TMUX_SESSION_RENAMED,
+  GHOSTTY_ACTION_TMUX_FOCUSED_PANE_CHANGED,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -1017,6 +1052,11 @@ typedef union {
   ghostty_action_tmux_exit_s tmux_exit;
   ghostty_action_tmux_message_s tmux_message;
   ghostty_action_tmux_active_window_changed_s tmux_active_window_changed;
+  ghostty_action_tmux_paste_buffer_changed_s tmux_paste_buffer_changed;
+  ghostty_action_tmux_paste_buffer_deleted_s tmux_paste_buffer_deleted;
+  ghostty_action_tmux_pane_mode_changed_s tmux_pane_mode_changed;
+  ghostty_action_tmux_session_renamed_s tmux_session_renamed;
+  ghostty_action_tmux_focused_pane_changed_s tmux_focused_pane_changed;
 } ghostty_action_u;
 
 typedef struct {
