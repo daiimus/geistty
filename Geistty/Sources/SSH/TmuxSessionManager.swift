@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import UIKit
 import os.log
 private let logger = Logger(subsystem: "com.geistty", category: "TmuxSession")
 
@@ -135,6 +136,11 @@ class TmuxSessionManager: ObservableObject {
         lastRefreshSize = (cols, rows)
     }
     
+    /// Test-only: number of pending command response handlers
+    var pendingResponseHandlerCountForTesting: Int {
+        pendingResponseHandlers.count
+    }
+    
     // ARCHIVED: Session 127 — needsReattach + needsReattachForTesting removed
     // (destroy-and-recreate approach). See docs/archive/REATTACH_PRESERVED_SURFACES_FEB_2026.swift
     #endif
@@ -197,6 +203,15 @@ class TmuxSessionManager: ObservableObject {
     /// Commands queued while the viewer's startup sequence is in progress.
     /// Flushed in order when `viewerBecameReady()` is called.
     private var pendingCommands: [String] = []
+    
+    // MARK: - Command/Response Tracking
+    
+    /// Pending command response handlers, dispatched FIFO.
+    /// When `sendTmuxCommand` is called via the C API, the viewer queues
+    /// the command and responds with GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE.
+    /// Responses arrive in the same order commands were sent (tmux guarantees
+    /// ordering within a control mode client).
+    private var pendingResponseHandlers: [(_ content: String, _ isError: Bool) -> Void] = []
     
     // MARK: - Initialization
     
@@ -1491,6 +1506,97 @@ class TmuxSessionManager: ObservableObject {
         sendCommandFireAndForget("detach-client")
     }
     
+    // MARK: - Clipboard / Buffer Integration
+    
+    /// Handle a tmux command response from the Zig viewer.
+    /// Dispatches to the first pending handler in FIFO order.
+    func handleCommandResponse(content: String, isError: Bool) {
+        guard !pendingResponseHandlers.isEmpty else {
+            logger.warning("Received tmux command response with no pending handler (content=\(content.prefix(80)), isError=\(isError))")
+            return
+        }
+        let handler = pendingResponseHandlers.removeFirst()
+        handler(content, isError)
+    }
+    
+    /// Copy the tmux paste buffer to the iOS clipboard.
+    /// Sends `show-buffer` through the Zig viewer's command queue and
+    /// writes the response content to `UIPasteboard.general` on success.
+    func copyTmuxBuffer() {
+        guard let surface = tmuxQuerySurface else {
+            logger.warning("copyTmuxBuffer: no tmux query surface available")
+            return
+        }
+        
+        // Register handler BEFORE sending command (FIFO ordering guarantee)
+        pendingResponseHandlers.append { content, isError in
+            if isError {
+                logger.warning("show-buffer failed: \(content)")
+                return
+            }
+            UIPasteboard.general.string = content
+            logger.info("Copied tmux buffer to clipboard (\(content.count) chars)")
+        }
+        
+        if !surface.sendTmuxCommand("show-buffer") {
+            // Command failed to queue — remove the handler we just added
+            _ = pendingResponseHandlers.popLast()
+            logger.warning("copyTmuxBuffer: failed to queue show-buffer command")
+        }
+    }
+    
+    /// Paste iOS clipboard content into the focused tmux pane.
+    /// Sets the tmux buffer via `set-buffer` and then pastes into the
+    /// focused pane via fire-and-forget `paste-buffer`.
+    func pasteTmuxBuffer() {
+        guard let clipboardContent = UIPasteboard.general.string, !clipboardContent.isEmpty else {
+            logger.info("pasteTmuxBuffer: clipboard is empty")
+            return
+        }
+        
+        guard let surface = tmuxQuerySurface else {
+            logger.warning("pasteTmuxBuffer: no tmux query surface available")
+            return
+        }
+        
+        guard !focusedPaneId.isEmpty else {
+            logger.warning("pasteTmuxBuffer: no focused pane ID — cannot target paste-buffer")
+            return
+        }
+        
+        // Escape the content for tmux set-buffer:
+        // - Backslashes must be doubled
+        // - Double quotes must be escaped
+        // - Newlines and carriage returns must be escaped to prevent breaking
+        //   the tmux control-mode command framing (one command per line)
+        // - Use -- to prevent content starting with - from being parsed as flags
+        let escaped = clipboardContent
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        
+        // Capture paneId eagerly so the handler doesn't depend on mutable state
+        let paneId = focusedPaneId
+        
+        // Register handler for the set-buffer response
+        pendingResponseHandlers.append { [weak self] content, isError in
+            guard let self = self else { return }
+            if isError {
+                logger.warning("set-buffer failed: \(content)")
+                return
+            }
+            // Buffer set successfully — now paste it into the focused pane
+            self.sendCommandFireAndForget("paste-buffer -t %\(paneId)")
+            logger.info("Pasted clipboard to tmux pane %\(paneId) (\(clipboardContent.count) chars)")
+        }
+        
+        if !surface.sendTmuxCommand("set-buffer -- \"\(escaped)\"") {
+            _ = pendingResponseHandlers.popLast()
+            logger.warning("pasteTmuxBuffer: failed to queue set-buffer command")
+        }
+    }
+    
     // MARK: - Pending Input Visual Feedback
     
     /// Display pending input text as preedit (inverted preview) in the focused pane
@@ -1572,6 +1678,9 @@ class TmuxSessionManager: ObservableObject {
         lastResizeCols = 0
         lastResizeRows = 0
         lastRefreshSize = nil
+        
+        // Discard any pending command response handlers
+        pendingResponseHandlers.removeAll()
         
         logger.info("TmuxSessionManager cleaned up")
     }

@@ -69,6 +69,12 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
     /// Texts passed to `sendText(_:)`, in order
     var sendTextCalls: [String] = []
     
+    /// Commands passed to `sendTmuxCommand(_:)`, in order
+    var sendTmuxCommandCalls: [String] = []
+    
+    /// Value returned by `sendTmuxCommand(_:)`
+    var stubbedSendTmuxCommandResult: Bool = true
+    
     /// Number of times `getTmuxPaneIds()` was called
     var getTmuxPaneIdsCallCount: Int = 0
     
@@ -133,6 +139,12 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
         sendTextCalls.append(text)
     }
     
+    @discardableResult
+    func sendTmuxCommand(_ command: String) -> Bool {
+        sendTmuxCommandCalls.append(command)
+        return stubbedSendTmuxCommandResult
+    }
+    
     // MARK: - Reset
     
     /// Clear all call tracking (but keep stubbed values)
@@ -140,6 +152,7 @@ final class MockTmuxSurface: TmuxSurfaceProtocol {
         setActiveTmuxPaneCalls.removeAll()
         setActiveTmuxPaneInputOnlyCalls.removeAll()
         sendTextCalls.removeAll()
+        sendTmuxCommandCalls.removeAll()
         getTmuxPaneIdsCallCount = 0
         getAllTmuxWindowsCallCount = 0
         getTmuxWindowLayoutCalls.removeAll()

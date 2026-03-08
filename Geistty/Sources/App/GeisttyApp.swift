@@ -260,6 +260,7 @@ extension Notification.Name {
     static let tmuxStateChanged = Notification.Name("tmuxStateChanged")
     static let tmuxExited = Notification.Name("tmuxExited")
     static let tmuxReady = Notification.Name("tmuxReady")
+    static let tmuxCommandResponse = Notification.Name("tmuxCommandResponse")
 }
 
 /// Global application state

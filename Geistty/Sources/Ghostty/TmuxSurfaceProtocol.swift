@@ -74,4 +74,14 @@ protocol TmuxSurfaceProtocol: AnyObject {
     
     /// Send text input (routed through Ghostty for send-keys wrapping in tmux mode)
     func sendText(_ text: String)
+    
+    // MARK: - Command/Response
+    
+    /// Send a tmux command through the viewer's command queue.
+    /// Unlike fire-and-forget commands written directly to SSH stdin,
+    /// this goes through Ghostty's viewer which tracks the %begin/%end
+    /// response and delivers it as GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE.
+    /// Returns true if the command was queued successfully.
+    @discardableResult
+    func sendTmuxCommand(_ command: String) -> Bool
 }

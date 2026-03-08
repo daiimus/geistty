@@ -2470,6 +2470,17 @@ extension Ghostty {
             return Int(ghostty_surface_tmux_window_focused_pane_id(surface, index))
         }
         
+        /// Send a tmux command through the viewer's command queue.
+        /// The response arrives asynchronously via GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE.
+        /// Returns true if the command was queued successfully.
+        @discardableResult
+        func sendTmuxCommand(_ command: String) -> Bool {
+            guard let surface = surface else { return false }
+            return command.withCString { ptr in
+                ghostty_surface_tmux_send_command(surface, ptr, command.utf8.count)
+            }
+        }
+        
         // MARK: - Search
         
         /// Start a search (opens UI, Ghostty will callback with START_SEARCH action)
