@@ -4709,5 +4709,17 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.tmuxOptions["mouse"]?.rawValue, "on",
                        "Cache should be updated even when command is queued")
     }
+
+    // MARK: - handleTmuxMessage Tests
+
+    @MainActor
+    func testHandleTmuxMessageDoesNotCrash() {
+        // handleTmuxMessage is a log-only method today (UX TBD).
+        // Verify it accepts arbitrary text without crashing.
+        let mgr = TmuxSessionManager()
+        mgr.handleTmuxMessage(text: "1 window renamed")
+        mgr.handleTmuxMessage(text: "")
+        mgr.handleTmuxMessage(text: String(repeating: "x", count: 10_000))
+    }
 }
 

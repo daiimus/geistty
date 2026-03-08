@@ -1525,6 +1525,15 @@ class TmuxSessionManager: ObservableObject {
         handler(content, isError)
     }
     
+    /// Handle a `%message` notification from tmux control mode.
+    ///
+    /// tmux sends `%message <text>` when `display-message` is invoked or when
+    /// the server itself generates a status-line message (e.g., "1 window renamed").
+    /// For now we log the message. Future UX (toast/banner) is TBD.
+    func handleTmuxMessage(text: String) {
+        logger.info("tmux message received: \(text)")
+    }
+    
     /// Copy the tmux paste buffer to the iOS clipboard.
     /// Sends `show-buffer` through the Zig viewer's command queue and
     /// writes the response content to `UIPasteboard.general` on success.
