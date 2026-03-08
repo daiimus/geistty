@@ -1620,6 +1620,15 @@ class TmuxSessionManager: ObservableObject {
     /// The name identifies the subscription and the value is the new format expansion.
     func handleSubscriptionChanged(name: String, value: String) {
         logger.debug("tmux subscription changed: \(name), valueLength=\(value.count)")
+        
+        switch name {
+        case "status_left":
+            statusLeft = value
+        case "status_right":
+            statusRight = value
+        default:
+            break
+        }
     }
 
     /// Copy the tmux paste buffer to the iOS clipboard.
@@ -1718,6 +1727,16 @@ class TmuxSessionManager: ObservableObject {
     /// This is acceptable because `queryInitialOptions()` queries each option at
     /// exactly one scope (global), and `setOption()` callers know which scope they set.
     @Published private(set) var tmuxOptions: [String: TmuxOptionValue] = [:]
+    
+    // MARK: - Status Bar (from format subscriptions)
+    
+    /// Expanded status-left text from tmux (via format subscription).
+    /// Updated reactively when tmux sends %subscription-changed for "status_left".
+    @Published private(set) var statusLeft: String = ""
+    
+    /// Expanded status-right text from tmux (via format subscription).
+    /// Updated reactively when tmux sends %subscription-changed for "status_right".
+    @Published private(set) var statusRight: String = ""
     
     /// Fetch the list of sessions from the tmux server.
     /// Sends `list-sessions` through the command/response pipeline and
