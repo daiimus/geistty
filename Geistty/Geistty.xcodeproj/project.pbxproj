@@ -104,6 +104,7 @@
 		A1000092 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = AE000003 /* NIOTransportServices */; };
 		A1000096 /* TmuxSessionNameResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000096 /* TmuxSessionNameResolver.swift */; };
 		A1000C08 /* TmuxWireDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C08 /* TmuxWireDiagnostics.swift */; };
+		A1000C09 /* SelectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C09 /* SelectionOverlay.swift */; };
 
 		D1000013 /* FontMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000013 /* FontMappingTests.swift */; };
 
@@ -129,6 +130,7 @@
 		D1000034 /* TmuxSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000034 /* TmuxSessionManagerTests.swift */; };
 		D1000035 /* CommandPaletteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000035 /* CommandPaletteTests.swift */; };
 		D1000036 /* TmuxWireDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000036 /* TmuxWireDiagnosticsTests.swift */; };
+		D1000038 /* SelectionOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000038 /* SelectionOverlayTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -270,6 +272,7 @@
 		A20000A2 /* KeyTableIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTableIndicatorView.swift; sourceTree = "<group>"; };
 		A2000096 /* TmuxSessionNameResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionNameResolver.swift; sourceTree = "<group>"; };
 		A2000C08 /* TmuxWireDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWireDiagnostics.swift; sourceTree = "<group>"; };
+		A2000C09 /* SelectionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlay.swift; sourceTree = "<group>"; };
 
 		D1000001 /* GeisttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeisttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D2000013 /* FontMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMappingTests.swift; sourceTree = "<group>"; };
@@ -296,6 +299,7 @@
 		D2000034 /* TmuxSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionManagerTests.swift; sourceTree = "<group>"; };
 		D2000035 /* CommandPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteTests.swift; sourceTree = "<group>"; };
 		D2000036 /* TmuxWireDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWireDiagnosticsTests.swift; sourceTree = "<group>"; };
+		D2000038 /* SelectionOverlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlayTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -420,6 +424,7 @@
 				A20000A0 /* FontMapping.swift */,
 				A2000014 /* GhosttyInput.swift */,
 				A2000080 /* SurfaceSearchOverlay.swift */,
+				A2000C09 /* SelectionOverlay.swift */,
 			);
 			path = Ghostty;
 			sourceTree = "<group>";
@@ -578,6 +583,7 @@
 				D2000035 /* CommandPaletteTests.swift */,
 				D2000036 /* TmuxWireDiagnosticsTests.swift */,
 				D2000037 /* BackgroundTaskTests.swift */,
+				D2000038 /* SelectionOverlayTests.swift */,
 		);
 		path = GeisttyTests;
 			sourceTree = "<group>";
@@ -747,6 +753,7 @@
 				A10000A0 /* FontMapping.swift in Sources */,
 				A1000013 /* GhosttyInput.swift in Sources */,
 				A1000080 /* SurfaceSearchOverlay.swift in Sources */,
+				A1000C09 /* SelectionOverlay.swift in Sources */,
 				A1000003 /* TerminalContainerView.swift in Sources */,
 				A10000A3 /* TerminalToolbar.swift in Sources */,
 				A10000A4 /* RawTerminalUIViewController+Keyboard.swift in Sources */,
@@ -847,6 +854,7 @@
 				D1000035 /* CommandPaletteTests.swift in Sources */,
 				D1000036 /* TmuxWireDiagnosticsTests.swift in Sources */,
 				D1000037 /* BackgroundTaskTests.swift in Sources */,
+				D1000038 /* SelectionOverlayTests.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
