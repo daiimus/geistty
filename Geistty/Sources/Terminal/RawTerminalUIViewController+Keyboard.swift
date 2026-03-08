@@ -94,7 +94,8 @@ extension RawTerminalUIViewController {
         
         CATransaction.commit()
         
-        logger.debug("⌨️ Keyboard will show, height: \(keyboardHeight)")
+        currentKeyboardHeight = keyboardHeight
+        logger.debug("Keyboard will show, height: \(keyboardHeight)")
     }
     
     func handleKeyboardWillHide(_ notification: Notification) {
@@ -106,9 +107,14 @@ extension RawTerminalUIViewController {
         
         // If the bottom constraint is already at the resting position (e.g. we
         // ignored a small keyboardWillShow), skip the hide animation to avoid
-        // unnecessary layout. The resting position is -statusBarHeight when the
-        // tmux status bar is visible, or 0 otherwise. (#44 Bug 2)
-        let restingOffset: CGFloat = isShowingTmuxStatusBar ? -tmuxStatusBarHeight : 0
+        // unnecessary layout. The resting position accounts for the status bar
+        // height and safe area when the tmux status bar is visible. (#44 Bug 2)
+        let restingOffset: CGFloat
+        if isShowingTmuxStatusBar {
+            restingOffset = -(tmuxStatusBarHeight + view.safeAreaInsets.bottom)
+        } else {
+            restingOffset = 0
+        }
         guard surfaceBottomConstraint?.constant != restingOffset || multiPaneBottomConstraint?.constant != restingOffset else {
             logger.debug("Keyboard will hide (no-op, constraints already at resting position)")
             return
@@ -118,10 +124,10 @@ extension RawTerminalUIViewController {
         
         // Calculate the new size BEFORE animating (full height minus top offset).
         // Account for top offset (safe area + window picker) and bottom offset
-        // (status bar) so the pre-render hint matches the surface's actual frame
-        // after layout. (#44 T9)
+        // (status bar + safe area) so the pre-render hint matches the surface's
+        // actual frame after layout. (#44 T9)
         let topOffset = surfaceTopConstraint?.constant ?? 0
-        let bottomOffset: CGFloat = isShowingTmuxStatusBar ? tmuxStatusBarHeight : 0
+        let bottomOffset: CGFloat = isShowingTmuxStatusBar ? (tmuxStatusBarHeight + view.safeAreaInsets.bottom) : 0
         let newSize = CGSize(width: view.bounds.width, height: max(0, view.bounds.height - topOffset - bottomOffset))
         
         // Notify Ghostty of size change BEFORE animation to pre-render
@@ -140,8 +146,15 @@ extension RawTerminalUIViewController {
             options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
             animations: {
                 // When the status bar is visible, restore to its offset
-                // instead of 0 so the terminal doesn't overlap it.
-                let bottomOffset: CGFloat = self.isShowingTmuxStatusBar ? -self.tmuxStatusBarHeight : 0
+                // (status bar height + safe area) instead of 0 so the terminal
+                // doesn't overlap it. The status bar is pinned to
+                // safeAreaLayoutGuide.bottomAnchor.
+                let bottomOffset: CGFloat
+                if self.isShowingTmuxStatusBar {
+                    bottomOffset = -(self.tmuxStatusBarHeight + self.view.safeAreaInsets.bottom)
+                } else {
+                    bottomOffset = 0
+                }
                 self.surfaceBottomConstraint?.constant = bottomOffset
                 self.multiPaneBottomConstraint?.constant = bottomOffset
                 self.view.layoutIfNeeded()
@@ -150,6 +163,7 @@ extension RawTerminalUIViewController {
         
         CATransaction.commit()
         
-        logger.debug("⌨️ Keyboard will hide")
+        currentKeyboardHeight = 0
+        logger.debug("Keyboard will hide")
     }
 }

@@ -67,11 +67,11 @@ extension RawTerminalUIViewController {
         view.addSubview(hostingController.view)
         hostingController.didMove(toParent: self)
 
-        // Position at the bottom of the view
+        // Position at the bottom of the safe area to avoid the home indicator
         NSLayoutConstraint.activate([
             hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             hostingController.view.heightAnchor.constraint(equalToConstant: tmuxStatusBarHeight)
         ])
 
@@ -106,13 +106,17 @@ extension RawTerminalUIViewController {
     /// needs to account for the status bar height. When the keyboard IS visible, the
     /// keyboard height dominates (the status bar is pushed off-screen by the keyboard).
     func updateTerminalBottomConstraint() {
-        let statusBarOffset: CGFloat = isShowingTmuxStatusBar ? -tmuxStatusBarHeight : 0
+        // The status bar is pinned to safeAreaLayoutGuide.bottomAnchor, so the
+        // terminal must clear both the safe area inset and the status bar height.
+        let safeBottom = view.safeAreaInsets.bottom
+        let statusBarOffset: CGFloat = isShowingTmuxStatusBar ? -(tmuxStatusBarHeight + safeBottom) : 0
 
         // Only apply status bar offset if the keyboard is not already pushing
-        // the terminal up. When the keyboard is visible, the keyboard handler
-        // sets a larger negative constant that already clears the status bar.
-        let currentBottom = surfaceBottomConstraint?.constant ?? 0
-        let keyboardIsUp = currentBottom < statusBarOffset
+        // the terminal up. Use the tracked keyboard height rather than reading
+        // the constraint value, which could be stale during state transitions
+        // (e.g. hiding the status bar while the constraint is still at
+        // -statusBarHeight would be misidentified as "keyboard is up").
+        let keyboardIsUp = currentKeyboardHeight > 0
 
         if !keyboardIsUp {
             surfaceBottomConstraint?.constant = statusBarOffset

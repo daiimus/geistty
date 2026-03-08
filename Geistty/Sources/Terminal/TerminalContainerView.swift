@@ -583,6 +583,10 @@ class RawTerminalUIViewController: UIViewController {
     var keyboardWillShowObserver: NSObjectProtocol?
     var keyboardWillHideObserver: NSObjectProtocol?
     
+    // Tracked keyboard height — used by status bar constraint logic to determine
+    // whether the keyboard is currently pushing the terminal up.
+    var currentKeyboardHeight: CGFloat = 0
+    
     // Search overlay hosting controller
     var searchOverlayHostingController: UIHostingController<Ghostty.SurfaceSearchOverlay>?
     
