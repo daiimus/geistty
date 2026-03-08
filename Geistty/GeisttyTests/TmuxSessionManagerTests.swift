@@ -4803,6 +4803,22 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
     }
 
+    // MARK: - handleTmuxMessage
+
+    @MainActor
+    func testHandleTmuxMessageDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+
+        // Should not crash on normal message
+        mgr.handleTmuxMessage(text: "session created: $1")
+
+        // Should not crash on empty message
+        mgr.handleTmuxMessage(text: "")
+
+        // Should not crash on message with special characters
+        mgr.handleTmuxMessage(text: "window @3 renamed: 'foo \"bar\" \\baz'")
+    }
+
     // MARK: - setOption Viewer Not Ready Queuing
 
     @MainActor

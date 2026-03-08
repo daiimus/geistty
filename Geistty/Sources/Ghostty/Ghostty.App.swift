@@ -705,6 +705,43 @@ extension Ghostty {
                 )
                 return true
                 
+            case GHOSTTY_ACTION_TMUX_MESSAGE:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let msg = action.action.tmux_message
+                let text: String
+                if msg.len > 0, let ptr = msg.data {
+                    text = String(
+                        decoding: UnsafeRawBufferPointer(
+                            start: UnsafeRawPointer(ptr),
+                            count: msg.len
+                        ),
+                        as: UTF8.self
+                    )
+                } else {
+                    text = ""
+                }
+                
+                logger.info("tmux message: len=\(msg.len)")
+                
+                // Extract the SurfaceView from userdata so observers can filter
+                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
+                // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
+                // the multi-surface identity guard.
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxMessage,
+                    object: surfaceView,
+                    userInfo: ["text": text]
+                )
+                return true
+                
             case GHOSTTY_ACTION_QUIT_TIMER:
                 // Ghostty fires quit_timer when all surfaces are gone (e.g., after
                 // tmux viewer teardown on background). On macOS this quits the app.
