@@ -689,10 +689,18 @@ extension Ghostty {
                 let windowId = action.action.tmux_active_window_changed.window_id
                 logger.info("🪟 tmux active window changed: @\(windowId)")
                 
+                // Extract the SurfaceView from userdata so observers can filter
+                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
+                // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
+                // the multi-surface identity guard.
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
                 // Post synchronously — already on main thread via tick().
                 NotificationCenter.default.post(
                     name: .tmuxActiveWindowChanged,
-                    object: surface,
+                    object: surfaceView,
                     userInfo: ["windowId": windowId]
                 )
                 return true
