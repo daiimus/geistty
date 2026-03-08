@@ -335,9 +335,13 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testShowCommandSanitizesOptionName() {
-        // Allowlist strips everything except [A-Za-z0-9@_-.]
-        // Semicolons, spaces, newlines, and control chars are all removed
-        let cmd = TmuxOptionScope.global.showCommand(for: "mouse\n; kill-server")
+        // sanitizeOptionName is called by the caller (queryOption/setOption),
+        // not by showCommand itself. Verify the full flow:
+        guard let safeName = TmuxOptionScope.sanitizeOptionName("mouse\n; kill-server") else {
+            XCTFail("Expected sanitized name, got nil")
+            return
+        }
+        let cmd = TmuxOptionScope.global.showCommand(for: safeName)
         XCTAssertEqual(cmd, "show-options -gv mousekill-server")
     }
     
@@ -353,14 +357,28 @@ final class TmuxModelsTests: XCTestCase {
         XCTAssertEqual(result, "mousekill-serverrm-rf")
     }
     
+    func testSanitizeOptionNameReturnsNilForEmpty() {
+        // All characters stripped → empty → nil
+        let result = TmuxOptionScope.sanitizeOptionName("; | \" \\")
+        XCTAssertNil(result)
+    }
+    
+    func testSanitizeOptionNameReturnsNilForFlagLike() {
+        // Starts with "-" after sanitization → would be parsed as tmux flag
+        let result = TmuxOptionScope.sanitizeOptionName("-g")
+        XCTAssertNil(result)
+    }
+    
     func testNormalizeOptionValuePassthroughSimple() {
         let result = TmuxOptionScope.normalizeOptionValue("on")
         XCTAssertEqual(result, "on")
     }
     
-    func testNormalizeOptionValueEscapesQuotesAndBackslashes() {
+    func testNormalizeOptionValuePreservesQuotesAndBackslashes() {
+        // normalizeOptionValue cleans control chars but does NOT escape —
+        // the value should match what tmux stores after unescaping
         let result = TmuxOptionScope.normalizeOptionValue("\"hello\\world\"")
-        XCTAssertEqual(result, "\\\"hello\\\\world\\\"")
+        XCTAssertEqual(result, "\"hello\\world\"")
     }
     
     func testNormalizeOptionValueNormalizesNewlines() {

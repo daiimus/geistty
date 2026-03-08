@@ -1734,7 +1734,11 @@ class TmuxSessionManager: ObservableObject {
         // Sanitize once and use the sanitized name for both the command and cache key.
         // This prevents a mismatch where the command uses a sanitized name but the
         // cache stores the result under the original (unsanitized) name.
-        let safeName = TmuxOptionScope.sanitizeOptionName(name)
+        guard let safeName = TmuxOptionScope.sanitizeOptionName(name) else {
+            logger.warning("queryOption: invalid option name '\(name)' (empty or flag-like after sanitization)")
+            handler(nil)
+            return
+        }
         let command = scope.showCommand(for: safeName)
         
         // Register handler BEFORE sending command (FIFO ordering guarantee)
@@ -1783,18 +1787,20 @@ class TmuxSessionManager: ObservableObject {
         
         // Sanitize the option name once — use the sanitized name for both the
         // command and the cache key, so they stay consistent.
-        let safeName = TmuxOptionScope.sanitizeOptionName(name)
+        guard let safeName = TmuxOptionScope.sanitizeOptionName(name) else {
+            logger.warning("setOption: invalid option name '\(name)' (empty or flag-like after sanitization)")
+            return
+        }
         let command = scope.setCommand(for: safeName, value: value)
         sendCommandFireAndForget(command)
         
-        // Optimistic cache update — store the NORMALIZED value (same transformation
-        // that quoteTmuxValue applies: newlines → spaces, control chars dropped,
-        // backslashes and quotes escaped). This keeps the cache consistent with
-        // what the server actually receives.
-        let normalizedValue = TmuxOptionScope.normalizeOptionValue(value)
-        tmuxOptions[safeName] = TmuxOptionValue(rawValue: normalizedValue)
+        // Optimistic cache update — store the cleaned (but not escaped) value so
+        // it matches what tmux will report via `show-options -v`. Escaping for
+        // command-line safety is handled by `setCommand(for:value:)` above.
+        let cleanedValue = TmuxOptionScope.normalizeOptionValue(value)
+        tmuxOptions[safeName] = TmuxOptionValue(rawValue: cleanedValue)
         
-        logger.info("Set tmux option '\(safeName)' = '\(normalizedValue)' (scope: \(String(describing: scope)))")
+        logger.info("Set tmux option '\(safeName)' = '\(cleanedValue)' (scope: \(String(describing: scope)))")
     }
     
     /// Query critical tmux options on connect.
