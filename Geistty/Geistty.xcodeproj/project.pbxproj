@@ -99,6 +99,7 @@
 		A1000086 /* TmuxSplitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000086 /* TmuxSplitView.swift */; };
 		A1000087 /* TmuxMultiPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000087 /* TmuxMultiPaneView.swift */; };
 		A1000088 /* TmuxWindowPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000088 /* TmuxWindowPickerView.swift */; };
+		A1000089 /* TmuxSessionPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000089 /* TmuxSessionPickerView.swift */; };
 		A1000090 /* NIOSSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000090 /* NIOSSHConnection.swift */; };
 		A1000091 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AE000002 /* NIOSSH */; };
 		A1000092 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = AE000003 /* NIOTransportServices */; };
@@ -266,6 +267,7 @@
 		A2000086 /* TmuxSplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSplitView.swift; sourceTree = "<group>"; };
 		A2000087 /* TmuxMultiPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxMultiPaneView.swift; sourceTree = "<group>"; };
 		A2000088 /* TmuxWindowPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxWindowPickerView.swift; sourceTree = "<group>"; };
+		A2000089 /* TmuxSessionPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSessionPickerView.swift; sourceTree = "<group>"; };
 		A2000090 /* NIOSSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NIOSSHConnection.swift; sourceTree = "<group>"; };
 		A2000026 /* SSHCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHCommandRunner.swift; sourceTree = "<group>"; };
 		A20000A0 /* FontMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontMapping.swift; sourceTree = "<group>"; };
@@ -381,6 +383,7 @@
 				A2000087 /* TmuxMultiPaneView.swift */,
 				A2000086 /* TmuxSplitView.swift */,
 				A2000088 /* TmuxWindowPickerView.swift */,
+				A2000089 /* TmuxSessionPickerView.swift */,
 				A2000C07 /* CommandPaletteView.swift */,
 			);
 			path = Terminal;
@@ -774,6 +777,7 @@
 				A1000086 /* TmuxSplitView.swift in Sources */,
 				A1000087 /* TmuxMultiPaneView.swift in Sources */,
 				A1000088 /* TmuxWindowPickerView.swift in Sources */,
+				A1000089 /* TmuxSessionPickerView.swift in Sources */,
 				A1000020 /* KeychainManager.swift in Sources */,
 				A1000021 /* SSHKeyManager.swift in Sources */,
 				A1000022 /* ConnectionProfile.swift in Sources */,
