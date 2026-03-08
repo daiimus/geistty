@@ -307,6 +307,8 @@ class TmuxSessionManager: ObservableObject {
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
         availableSessions.removeAll()
+        tmuxOptions.removeAll()
+        pendingResponseHandlers.removeAll()
         
         // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
@@ -462,6 +464,9 @@ class TmuxSessionManager: ObservableObject {
         } else {
             logger.info("Viewer ready — no queued commands to flush")
         }
+        
+        // Query critical tmux options now that the channel is clear
+        queryInitialOptions()
     }
     
     // MARK: - Notification Handling
@@ -1604,6 +1609,19 @@ class TmuxSessionManager: ObservableObject {
     /// Published so UI can observe and display the session picker.
     @Published private(set) var availableSessions: [TmuxSessionInfo] = []
     
+    // MARK: - tmux Option State
+    
+    /// Cached tmux option values, keyed by option name.
+    /// Populated by `queryInitialOptions()` at connect time and updated
+    /// by `queryOption()` / `setOption()`. UI can observe this to react
+    /// to option changes (e.g., mouse mode toggle).
+    ///
+    /// Note: The cache is keyed by option name only, not by scope. If the same
+    /// option is queried at multiple scopes, only the last-fetched value is stored.
+    /// This is acceptable because `queryInitialOptions()` queries each option at
+    /// exactly one scope (global), and `setOption()` callers know which scope they set.
+    @Published private(set) var tmuxOptions: [String: TmuxOptionValue] = [:]
+    
     /// Fetch the list of sessions from the tmux server.
     /// Sends `list-sessions` through the command/response pipeline and
     /// updates `availableSessions` on success.
@@ -1689,6 +1707,137 @@ class TmuxSessionManager: ObservableObject {
         logger.info("Renaming session \(sessionId) to '\(name)'")
     }
     
+    // MARK: - tmux Options (Read/Write)
+    
+    /// Query a tmux option value asynchronously.
+    ///
+    /// Sends `show-options -v` (or `show-window-options -v`) through the viewer's
+    /// command queue. The `-v` flag returns just the value, not the `option value` pair.
+    ///
+    /// The result is delivered to the `handler` closure and also cached in `tmuxOptions`.
+    /// If the option doesn't exist at the specified scope, the handler receives `nil`.
+    ///
+    /// - Parameters:
+    ///   - name: tmux option name (e.g., "mouse", "escape-time", "status")
+    ///   - scope: Which scope to query (global, session, window)
+    ///   - handler: Called with the parsed value (nil if not set or on error)
+    func queryOption(
+        name: String,
+        scope: TmuxOptionScope = .global,
+        handler: @escaping (TmuxOptionValue?) -> Void
+    ) {
+        guard let surface = tmuxQuerySurface else {
+            logger.warning("queryOption: no tmux query surface available")
+            handler(nil)
+            return
+        }
+        
+        // Sanitize once and use the sanitized name for both the command and cache key.
+        // This prevents a mismatch where the command uses a sanitized name but the
+        // cache stores the result under the original (unsanitized) name.
+        guard let safeName = TmuxOptionScope.sanitizeOptionName(name) else {
+            logger.warning("queryOption: invalid option name '\(name)' (empty or flag-like after sanitization)")
+            handler(nil)
+            return
+        }
+        let command = scope.showCommand(for: safeName)
+        
+        // Register handler BEFORE sending command (FIFO ordering guarantee)
+        pendingResponseHandlers.append { [weak self] content, isError in
+            guard let self = self else {
+                handler(nil)
+                return
+            }
+            if isError {
+                logger.warning("show-options failed for '\(safeName)': \(content)")
+                self.tmuxOptions.removeValue(forKey: safeName)
+                handler(nil)
+                return
+            }
+            let value = TmuxOptionValue.parse(response: content)
+            if let value = value {
+                self.tmuxOptions[safeName] = value
+            } else {
+                // Option was unset or response was empty — evict stale cache entry
+                self.tmuxOptions.removeValue(forKey: safeName)
+            }
+            handler(value)
+        }
+        
+        if !surface.sendTmuxCommand(command) {
+            _ = pendingResponseHandlers.popLast()
+            logger.warning("queryOption: failed to queue '\(command)'")
+            handler(nil)
+        }
+    }
+    
+    /// Set a tmux option value (fire-and-forget).
+    ///
+    /// Sends `set-option` through the direct SSH write path. No response is
+    /// expected — tmux applies the change immediately. The local `tmuxOptions`
+    /// cache is updated optimistically.
+    ///
+    /// - Parameters:
+    ///   - name: tmux option name (e.g., "mouse", "escape-time")
+    ///   - value: Value string (e.g., "on", "off", "500")
+    ///   - scope: Which scope to set (global, session, window)
+    func setOption(name: String, value: String, scope: TmuxOptionScope = .global) {
+        // Only apply optimistic cache update if we can actually send the command.
+        // If writeToSSH is nil, sendCommandFireAndForget logs a warning and returns
+        // without sending — updating the cache would leave it permanently wrong.
+        guard writeToSSH != nil else {
+            logger.warning("setOption: cannot set '\(name)' — no write function available")
+            return
+        }
+        
+        // Sanitize the option name once — use the sanitized name for both the
+        // command and the cache key, so they stay consistent.
+        guard let safeName = TmuxOptionScope.sanitizeOptionName(name) else {
+            logger.warning("setOption: invalid option name '\(name)' (empty or flag-like after sanitization)")
+            return
+        }
+        let command = scope.setCommand(for: safeName, value: value)
+        sendCommandFireAndForget(command)
+        
+        // Optimistic cache update — store the cleaned (but not escaped) value so
+        // it matches what tmux will report via `show-options -v`. Escaping for
+        // command-line safety is handled by `setCommand(for:value:)` above.
+        let cleanedValue = TmuxOptionScope.normalizeOptionValue(value)
+        if cleanedValue.isEmpty {
+            // An empty normalized value means the option is effectively unset —
+            // remove any stale cache entry rather than storing an empty value.
+            tmuxOptions.removeValue(forKey: safeName)
+        } else {
+            tmuxOptions[safeName] = TmuxOptionValue(rawValue: cleanedValue)
+        }
+        
+        if viewerReady {
+            logger.info("Set tmux option '\(safeName)' = '\(cleanedValue)' (scope: \(String(describing: scope)))")
+        } else {
+            logger.info("Queued tmux option '\(safeName)' = '\(cleanedValue)' (scope: \(String(describing: scope)); viewer not ready)")
+        }
+    }
+    
+    /// Query critical tmux options on connect.
+    ///
+    /// Called from `viewerBecameReady()` after the viewer's startup command queue
+    /// drains. These options influence how Geistty behaves:
+    /// - `mouse`: Whether to handle mouse events in tmux panes
+    /// - `escape-time`: Delay before ESC is sent (affects key handling)
+    /// - `window-size`: How tmux sizes windows for multiple clients
+    private func queryInitialOptions() {
+        let criticalOptions = ["mouse", "escape-time", "window-size"]
+        for option in criticalOptions {
+            queryOption(name: option, scope: .global) { value in
+                if let value = value {
+                    logger.info("Initial option '\(option)' = '\(value.rawValue)'")
+                } else {
+                    logger.debug("Initial option '\(option)' not set or query failed")
+                }
+            }
+        }
+    }
+    
     // MARK: - Pending Input Visual Feedback
     
     /// Display pending input text as preedit (inverted preview) in the focused pane
@@ -1762,6 +1911,7 @@ class TmuxSessionManager: ObservableObject {
         currentSplitTree = TmuxSplitTree()
         currentSession = nil
         availableSessions.removeAll()
+        tmuxOptions.removeAll()
         isConnected = false
         connectionState = .disconnected
         focusedPaneId = ""
