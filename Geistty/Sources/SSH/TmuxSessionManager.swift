@@ -1559,12 +1559,25 @@ class TmuxSessionManager: ObservableObject {
             return
         }
         
+        guard !focusedPaneId.isEmpty else {
+            logger.warning("pasteTmuxBuffer: no focused pane ID — cannot target paste-buffer")
+            return
+        }
+        
         // Escape the content for tmux set-buffer:
         // - Backslashes must be doubled
+        // - Double quotes must be escaped
+        // - Newlines and carriage returns must be escaped to prevent breaking
+        //   the tmux control-mode command framing (one command per line)
         // - Use -- to prevent content starting with - from being parsed as flags
         let escaped = clipboardContent
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        
+        // Capture paneId eagerly so the handler doesn't depend on mutable state
+        let paneId = focusedPaneId
         
         // Register handler for the set-buffer response
         pendingResponseHandlers.append { [weak self] content, isError in
@@ -1574,8 +1587,8 @@ class TmuxSessionManager: ObservableObject {
                 return
             }
             // Buffer set successfully — now paste it into the focused pane
-            self.sendCommandFireAndForget("paste-buffer -t %\(self.focusedPaneId)")
-            logger.info("Pasted clipboard to tmux pane %\(self.focusedPaneId) (\(clipboardContent.count) chars)")
+            self.sendCommandFireAndForget("paste-buffer -t %\(paneId)")
+            logger.info("Pasted clipboard to tmux pane %\(paneId) (\(clipboardContent.count) chars)")
         }
         
         if !surface.sendTmuxCommand("set-buffer -- \"\(escaped)\"") {
