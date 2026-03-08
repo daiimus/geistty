@@ -150,6 +150,10 @@ extension Ghostty {
         /// Set to true by attachToTmuxPane().
         var isMultiPaneObserver: Bool = false
         
+        /// Selection overlay providing iOS-native drag handles and context menu
+        /// on top of Ghostty's GPU-rendered selection highlight.
+        private var selectionOverlay: SelectionOverlay?
+        
         /// Callback invoked when an observer surface is tapped in multi-pane mode.
         /// UIKit's gesture recognizer mutual exclusion prevents a parent view's tap
         /// gesture from firing when a child view's tap gesture recognizes first (the
@@ -553,6 +557,13 @@ extension Ghostty {
             // Add pinch gesture for font size zoom
             let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             addGestureRecognizer(pinchGesture)
+            
+            // Setup selection overlay (handles + context menu for text selection)
+            let overlay = SelectionOverlay(frame: bounds)
+            overlay.surfaceView = self
+            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            addSubview(overlay)
+            selectionOverlay = overlay
             
             // Setup scroll indicator
             setupScrollIndicator()
@@ -1019,6 +1030,11 @@ extension Ghostty {
                 isMouseSelecting = false
                 isSelecting = false
                 markJustFinishedSelecting()
+                
+                // Show selection overlay for mouse/trackpad selections too
+                if ghostty_surface_has_selection(surface) {
+                    selectionOverlay?.showSelection(menuSourcePoint: point)
+                }
             }
             super.touchesEnded(touches, with: event)
         }
@@ -1106,6 +1122,8 @@ extension Ghostty {
             // Don't process tap if we just finished selecting (prevents clearing selection)
             if justFinishedSelecting {
                 justFinishedSelecting = false
+                // Re-present context menu when tapping near the selection
+                selectionOverlay?.showSelection()
                 return
             }
             
@@ -1116,6 +1134,10 @@ extension Ghostty {
             }
             
             _ = becomeFirstResponder()
+            
+            // Hide selection overlay — a regular tap clears any existing selection
+            // (Ghostty clears the selection on the next mouse click internally)
+            selectionOverlay?.hideSelection()
             
             // In multi-pane mode, tapping the primary surface must also route
             // input back to the primary's pane. The onPaneTap callback (set by
@@ -1182,6 +1204,10 @@ extension Ghostty {
             
             // Provide haptic feedback
             hapticLight.impactOccurred()
+            
+            // Show selection overlay (handles + context menu)
+            markJustFinishedSelecting()
+            selectionOverlay?.showSelection(menuSourcePoint: point)
         }
         
         /// Handle triple-tap for line selection
@@ -1202,6 +1228,10 @@ extension Ghostty {
             
             // Provide haptic feedback
             hapticMedium.impactOccurred()
+            
+            // Show selection overlay (handles + context menu)
+            markJustFinishedSelecting()
+            selectionOverlay?.showSelection(menuSourcePoint: point)
         }
         
         /// Handle two-finger double-tap to reset font size
@@ -1388,6 +1418,9 @@ extension Ghostty {
             case .began:
                 isSelecting = true
                 
+                // Haptic feedback for selection start
+                hapticMedium.impactOccurred()
+                
                 // Start selection (mouse button press)
                 ghostty_surface_mouse_pos(surface, ghosttyX, ghosttyY, GHOSTTY_MODS_NONE)
                 _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
@@ -1405,6 +1438,9 @@ extension Ghostty {
                     _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
                     isSelecting = false
                     markJustFinishedSelecting()
+                    
+                    // Show selection overlay (handles + context menu)
+                    selectionOverlay?.showSelection(menuSourcePoint: point)
                 }
                 
             case .cancelled, .failed:
@@ -1430,20 +1466,24 @@ extension Ghostty {
         private static let keyRepeatInterval: TimeInterval = 0.05
         
         /// Edit menu interaction for copy/paste (iOS 16+)
-        private var editMenuInteraction: UIEditMenuInteraction?
+        /// ARCHIVED: Superseded by SelectionOverlay which provides handles + context menu.
+        /// Kept for reference. See SelectionOverlay.swift for the replacement.
+        // private var editMenuInteraction: UIEditMenuInteraction?
         
         /// Show a copy menu at the given point using modern UIEditMenuInteraction
-        private func showCopyMenu(at point: CGPoint) {
-            // Create edit menu interaction if needed
-            if editMenuInteraction == nil {
-                let interaction = UIEditMenuInteraction(delegate: nil)
-                editMenuInteraction = interaction
-                addInteraction(interaction)
-            }
-            
-            let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
-            editMenuInteraction?.presentEditMenu(with: config)
-        }
+        /// ARCHIVED: Superseded by SelectionOverlay.showSelection().
+        /// This was dead code (never called). See SelectionOverlay.swift.
+        // private func showCopyMenu(at point: CGPoint) {
+        //     // Create edit menu interaction if needed
+        //     if editMenuInteraction == nil {
+        //         let interaction = UIEditMenuInteraction(delegate: nil)
+        //         editMenuInteraction = interaction
+        //         addInteraction(interaction)
+        //     }
+        //
+        //     let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+        //     editMenuInteraction?.presentEditMenu(with: config)
+        // }
         
         // MARK: - Edit Actions
         

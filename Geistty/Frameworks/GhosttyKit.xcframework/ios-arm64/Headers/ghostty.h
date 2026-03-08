@@ -1163,6 +1163,17 @@ bool ghostty_surface_read_text(ghostty_surface_t,
                                ghostty_text_s*);
 void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
 
+// Selection bounds in viewport coordinates (points).
+// Returns false if no selection or not visible in viewport.
+typedef struct {
+  double start_x; // Top-left of first selected cell (points)
+  double start_y;
+  double end_x;   // Bottom-right of last selected cell (points)
+  double end_y;
+} ghostty_selection_bounds_s;
+bool ghostty_surface_selection_bounds(ghostty_surface_t,
+                                      ghostty_selection_bounds_s*);
+
 #ifdef __APPLE__
 void ghostty_surface_set_display_id(ghostty_surface_t, uint32_t);
 void* ghostty_surface_quicklook_font(ghostty_surface_t);
