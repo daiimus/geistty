@@ -386,12 +386,35 @@ sync_ghostty() {
     rm -rf "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework"
     cp -R "$GHOSTTY_DIR/macos/GhosttyKit.xcframework" "$SCRIPT_DIR/Frameworks/"
 
+    # Remove the macOS slice — Geistty is iOS-only and the macOS slice
+    # doubles LFS storage cost for no benefit.
+    log_info "Removing macOS slice (iOS-only app)..."
+    rm -rf "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework/macos-arm64_x86_64"
+    # Update Info.plist to remove the macOS library entry
+    python3 -c "
+import plistlib, pathlib
+p = pathlib.Path('$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework/Info.plist')
+d = plistlib.loads(p.read_bytes())
+d['AvailableLibraries'] = [l for l in d['AvailableLibraries'] if 'macos' not in l.get('LibraryIdentifier', '')]
+p.write_bytes(plistlib.dumps(d))
+"
+
+    # Strip debug symbols to reduce LFS size (~195MB -> ~89MB per slice).
+    # Debug symbols are not needed for crash symbolication in the committed
+    # framework; developers who need symbols can rebuild locally.
+    log_info "Stripping debug symbols from .a files..."
+    find "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework" -name '*.a' -exec strip -S {} \;
+
     log_info "Renaming module maps (module.modulemap -> GhosttyKit.modulemap)..."
     for dir in "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework"/*/Headers/; do
         if [ -f "${dir}module.modulemap" ]; then
             mv "${dir}module.modulemap" "${dir}GhosttyKit.modulemap"
         fi
     done
+
+    # Report final sizes
+    log_info "Final xcframework sizes:"
+    find "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework" -name '*.a' -exec ls -lh {} \;
 
     log_info "Verifying build with new xcframework..."
     resolve_packages
