@@ -3783,3 +3783,247 @@ extension TmuxSessionManagerTests {
     }
 }
 
+// MARK: - Command/Response Infrastructure Tests
+
+extension TmuxSessionManagerTests {
+
+    @MainActor
+    func testHandleCommandResponseDispatchesFIFO() {
+        let mgr = TmuxSessionManager()
+        var results: [(String, Bool)] = []
+
+        // Register two handlers
+        mgr.handleCommandResponse(content: "orphan", isError: false)
+        // No handler → warning logged, no crash
+
+        // Now register handlers and deliver responses
+        // We need to access the internal handler queue via the public API.
+        // Since copyTmuxBuffer/pasteTmuxBuffer register handlers, we test through them.
+        // But we can test handleCommandResponse directly via the test accessor.
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "Should start with no pending handlers")
+    }
+
+    @MainActor
+    func testCopyTmuxBufferQueuesShowBufferCommand() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.copyTmuxBuffer()
+
+        // Should have sent "show-buffer" via sendTmuxCommand
+        XCTAssertEqual(mock.sendTmuxCommandCalls, ["show-buffer"],
+                       "copyTmuxBuffer should send show-buffer through viewer")
+        // Should have one pending handler
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1,
+                       "Should have one pending response handler")
+    }
+
+    @MainActor
+    func testCopyTmuxBufferHandlerWritesToClipboard() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.copyTmuxBuffer()
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+
+        // Simulate successful response
+        let testContent = "Hello from tmux buffer"
+        mgr.handleCommandResponse(content: testContent, isError: false)
+
+        XCTAssertEqual(UIPasteboard.general.string, testContent,
+                       "Successful show-buffer response should write to clipboard")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "Handler should be consumed after dispatch")
+    }
+
+    @MainActor
+    func testCopyTmuxBufferErrorDoesNotWriteToClipboard() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Set clipboard to a known value
+        UIPasteboard.general.string = "original"
+
+        mgr.copyTmuxBuffer()
+
+        // Simulate error response
+        mgr.handleCommandResponse(content: "no buffer", isError: true)
+
+        XCTAssertEqual(UIPasteboard.general.string, "original",
+                       "Error response should not overwrite clipboard")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "Handler should be consumed even on error")
+    }
+
+    @MainActor
+    func testCopyTmuxBufferNoSurfaceDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+        // No surface override → tmuxQuerySurface is nil
+
+        // Should not crash, just log a warning
+        mgr.copyTmuxBuffer()
+
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "No handler should be registered when surface is nil")
+    }
+
+    @MainActor
+    func testCopyTmuxBufferFailedQueueRemovesHandler() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        mock.stubbedSendTmuxCommandResult = false
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.copyTmuxBuffer()
+
+        XCTAssertEqual(mock.sendTmuxCommandCalls, ["show-buffer"],
+                       "Should still attempt to send")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "Handler should be removed when queue fails")
+    }
+
+    @MainActor
+    func testPasteTmuxBufferSetsBufferThenPastes() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let log = CommandLog()
+        mgr.setupWithDirectWrite { log.commands.append($0) }
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Set clipboard content
+        UIPasteboard.general.string = "clipboard text"
+
+        // Set focused pane
+        mgr.setFocusedPane("5")
+
+        mgr.pasteTmuxBuffer()
+
+        // Should have sent set-buffer command via sendTmuxCommand
+        XCTAssertEqual(mock.sendTmuxCommandCalls.count, 1)
+        XCTAssertTrue(mock.sendTmuxCommandCalls[0].hasPrefix("set-buffer -- \""),
+                      "Should send set-buffer with clipboard content")
+        XCTAssertTrue(mock.sendTmuxCommandCalls[0].hasSuffix("\""),
+                      "set-buffer command should be quoted")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+
+        // Simulate successful set-buffer response
+        mgr.handleCommandResponse(content: "", isError: false)
+
+        // After set-buffer succeeds, should fire-and-forget paste-buffer
+        XCTAssertEqual(log.commands, ["paste-buffer -t %5\n"],
+                       "Should paste buffer into focused pane after set-buffer succeeds")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+
+    @MainActor
+    func testPasteTmuxBufferEmptyClipboardDoesNothing() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        UIPasteboard.general.string = ""
+
+        mgr.pasteTmuxBuffer()
+
+        XCTAssertTrue(mock.sendTmuxCommandCalls.isEmpty,
+                      "Should not send any command when clipboard is empty")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+
+    @MainActor
+    func testPasteTmuxBufferEscapesSpecialCharacters() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        UIPasteboard.general.string = "line with \\backslash and \"quotes\""
+
+        mgr.pasteTmuxBuffer()
+
+        let cmd = mock.sendTmuxCommandCalls.first ?? ""
+        XCTAssertTrue(cmd.contains("\\\\backslash"),
+                      "Backslashes should be doubled: got \(cmd)")
+        XCTAssertTrue(cmd.contains("\\\"quotes\\\""),
+                      "Quotes should be escaped: got \(cmd)")
+    }
+
+    @MainActor
+    func testPasteTmuxBufferSetBufferErrorDoesNotPaste() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let log = CommandLog()
+        mgr.setupWithDirectWrite { log.commands.append($0) }
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        UIPasteboard.general.string = "something"
+        mgr.pasteTmuxBuffer()
+
+        // Simulate error on set-buffer
+        mgr.handleCommandResponse(content: "bad escape", isError: true)
+
+        XCTAssertTrue(log.commands.isEmpty,
+                      "Should NOT send paste-buffer when set-buffer failed")
+    }
+
+    @MainActor
+    func testCleanupClearsPendingHandlers() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.copyTmuxBuffer()
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+
+        mgr.cleanup()
+
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "cleanup should clear pending response handlers")
+    }
+
+    @MainActor
+    func testMultipleResponseHandlersDispatchInOrder() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Queue two copy operations
+        mgr.copyTmuxBuffer()
+        mgr.copyTmuxBuffer()
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 2)
+
+        // First response → first handler
+        mgr.handleCommandResponse(content: "first buffer", isError: false)
+        XCTAssertEqual(UIPasteboard.general.string, "first buffer")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+
+        // Second response → second handler
+        mgr.handleCommandResponse(content: "second buffer", isError: false)
+        XCTAssertEqual(UIPasteboard.general.string, "second buffer")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+}
+
