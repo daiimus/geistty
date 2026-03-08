@@ -578,14 +578,22 @@ extension Ghostty {
                 }
                 
                 let tmuxState = action.action.tmux_state_changed
-                logger.info("🪟 tmux state changed: \(tmuxState.window_count) windows, \(tmuxState.pane_count) panes")
+                logger.info("tmux state changed: \(tmuxState.window_count) windows, \(tmuxState.pane_count) panes")
+                
+                // Extract the SurfaceView from userdata so observers can filter
+                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
+                // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
+                // the multi-surface identity guard.
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
                 
                 // Post synchronously — we're already on main thread (via tick()),
                 // and eliminating the async hop reduces the window between viewer
                 // state changes and Swift reacting to them.
                 NotificationCenter.default.post(
                     name: .tmuxStateChanged,
-                    object: surface,
+                    object: surfaceView,
                     userInfo: [
                         "windowCount": tmuxState.window_count,
                         "paneCount": tmuxState.pane_count
@@ -612,14 +620,20 @@ extension Ghostty {
                     return String(bytes: UnsafeBufferPointer(start: buf, count: len), encoding: .utf8) ?? ""
                 }
                 
-                logger.info("🪟 tmux control mode exited, reason: \(reason.isEmpty ? "(none)" : reason)")
+                logger.info("tmux control mode exited, reason: \(reason.isEmpty ? "(none)" : reason)")
+                
+                // Extract the SurfaceView from userdata so observers can filter
+                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
                 
                 // Post synchronously — already on main thread via tick().
                 // Forward the reason so observers can differentiate voluntary
                 // detach ("detached") from involuntary exit ("server-exited").
                 NotificationCenter.default.post(
                     name: .tmuxExited,
-                    object: surface,
+                    object: surfaceView,
                     userInfo: ["reason": reason]
                 )
                 return true
@@ -633,14 +647,20 @@ extension Ghostty {
                     return false
                 }
                 
-                logger.info("🪟 tmux viewer startup complete")
+                logger.info("tmux viewer startup complete")
+                
+                // Extract the SurfaceView from userdata so observers can filter
+                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
                 
                 // Post synchronously — already on main thread via tick().
                 // This ensures activateFirstTmuxPane() runs immediately,
                 // minimizing the window where active_pane_id is unset.
                 NotificationCenter.default.post(
                     name: .tmuxReady,
-                    object: surface,
+                    object: surfaceView,
                     userInfo: [:]
                 )
                 return true
@@ -667,9 +687,15 @@ extension Ghostty {
                 
                 logger.info("tmux command response: \(resp.is_error ? "ERROR" : "OK") len=\(resp.len)")
                 
+                // Extract the SurfaceView from userdata so observers can filter
+                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
                 NotificationCenter.default.post(
                     name: .tmuxCommandResponse,
-                    object: surface,
+                    object: surfaceView,
                     userInfo: [
                         "content": content,
                         "isError": resp.is_error
@@ -739,6 +765,163 @@ extension Ghostty {
                     name: .tmuxMessage,
                     object: surfaceView,
                     userInfo: ["text": text]
+                )
+                return true
+                
+            case GHOSTTY_ACTION_TMUX_PASTE_BUFFER_CHANGED:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let payload = action.action.tmux_paste_buffer_changed
+                let name: String
+                if payload.len > 0, let ptr = payload.data {
+                    name = String(
+                        decoding: UnsafeRawBufferPointer(
+                            start: UnsafeRawPointer(ptr),
+                            count: payload.len
+                        ),
+                        as: UTF8.self
+                    )
+                } else {
+                    name = ""
+                }
+                
+                logger.info("tmux paste buffer changed: len=\(payload.len)")
+                
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxPasteBufferChanged,
+                    object: surfaceView,
+                    userInfo: ["name": name]
+                )
+                return true
+                
+            case GHOSTTY_ACTION_TMUX_PASTE_BUFFER_DELETED:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let payload = action.action.tmux_paste_buffer_deleted
+                let name: String
+                if payload.len > 0, let ptr = payload.data {
+                    name = String(
+                        decoding: UnsafeRawBufferPointer(
+                            start: UnsafeRawPointer(ptr),
+                            count: payload.len
+                        ),
+                        as: UTF8.self
+                    )
+                } else {
+                    name = ""
+                }
+                
+                logger.info("tmux paste buffer deleted: len=\(payload.len)")
+                
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxPasteBufferDeleted,
+                    object: surfaceView,
+                    userInfo: ["name": name]
+                )
+                return true
+                
+            case GHOSTTY_ACTION_TMUX_SESSIONS_CHANGED:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                logger.info("tmux sessions changed")
+                
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxSessionsChanged,
+                    object: surfaceView
+                )
+                return true
+                
+            case GHOSTTY_ACTION_TMUX_PANE_MODE_CHANGED:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let paneId = action.action.tmux_pane_mode_changed.pane_id
+                logger.info("tmux pane mode changed: %\(paneId)")
+                
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxPaneModeChanged,
+                    object: surfaceView,
+                    userInfo: ["paneId": paneId]
+                )
+                return true
+                
+            case GHOSTTY_ACTION_TMUX_SESSION_RENAMED:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let payload = action.action.tmux_session_renamed
+                let name: String
+                if payload.len > 0, let ptr = payload.data {
+                    name = String(
+                        decoding: UnsafeRawBufferPointer(
+                            start: UnsafeRawPointer(ptr),
+                            count: payload.len
+                        ),
+                        as: UTF8.self
+                    )
+                } else {
+                    name = ""
+                }
+                
+                logger.info("tmux session renamed: len=\(payload.len)")
+                
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxSessionRenamed,
+                    object: surfaceView,
+                    userInfo: ["name": name]
+                )
+                return true
+                
+            case GHOSTTY_ACTION_TMUX_FOCUSED_PANE_CHANGED:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let payload = action.action.tmux_focused_pane_changed
+                logger.info("tmux focused pane changed: @\(payload.window_id) %\(payload.pane_id)")
+                
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                NotificationCenter.default.post(
+                    name: .tmuxFocusedPaneChanged,
+                    object: surfaceView,
+                    userInfo: ["windowId": payload.window_id, "paneId": payload.pane_id]
                 )
                 return true
                 

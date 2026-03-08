@@ -270,6 +270,12 @@ extension Notification.Name {
     static let tmuxCommandResponse = Notification.Name("tmuxCommandResponse")
     static let tmuxActiveWindowChanged = Notification.Name("tmuxActiveWindowChanged")
     static let tmuxMessage = Notification.Name("tmuxMessage")
+    static let tmuxPasteBufferChanged = Notification.Name("tmuxPasteBufferChanged")
+    static let tmuxPasteBufferDeleted = Notification.Name("tmuxPasteBufferDeleted")
+    static let tmuxSessionsChanged = Notification.Name("tmuxSessionsChanged")
+    static let tmuxPaneModeChanged = Notification.Name("tmuxPaneModeChanged")
+    static let tmuxSessionRenamed = Notification.Name("tmuxSessionRenamed")
+    static let tmuxFocusedPaneChanged = Notification.Name("tmuxFocusedPaneChanged")
     
     // tmux session management
     static let showTmuxSessions = Notification.Name("showTmuxSessions")
