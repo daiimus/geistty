@@ -143,14 +143,14 @@ struct TmuxSessionInfo: Identifiable, Equatable {
 /// Scope for tmux option queries and mutations.
 ///
 /// tmux options exist at three levels:
-/// - **Global** (`-g`): Server-wide defaults, read via `show-options -gv`.
+/// - **Global** (`-g`): Global defaults, read via `show-options -gv`.
 /// - **Session**: Per-session overrides, read via `show-options -v`.
 /// - **Window**: Per-window overrides, read via `show-window-options -v`.
 ///
 /// When reading, tmux returns the most-specific value (window > session > global).
 /// When writing, you choose which scope to set with `set-option [-g] [-w]`.
 enum TmuxOptionScope: Equatable, Sendable {
-    /// Server-wide default (show-options -gv, set-option -g)
+    /// Global default (show-options -gv, set-option -g)
     case global
     /// Per-session override (show-options -v)
     case session

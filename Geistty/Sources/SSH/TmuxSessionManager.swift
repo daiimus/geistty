@@ -1800,7 +1800,11 @@ class TmuxSessionManager: ObservableObject {
         let cleanedValue = TmuxOptionScope.normalizeOptionValue(value)
         tmuxOptions[safeName] = TmuxOptionValue(rawValue: cleanedValue)
         
-        logger.info("Set tmux option '\(safeName)' = '\(cleanedValue)' (scope: \(String(describing: scope)))")
+        if viewerReady {
+            logger.info("Set tmux option '\(safeName)' = '\(cleanedValue)' (scope: \(String(describing: scope)))")
+        } else {
+            logger.info("Queued tmux option '\(safeName)' = '\(cleanedValue)' (scope: \(String(describing: scope)); viewer not ready)")
+        }
     }
     
     /// Query critical tmux options on connect.
