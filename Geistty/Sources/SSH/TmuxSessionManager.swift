@@ -1565,6 +1565,14 @@ class TmuxSessionManager: ObservableObject {
         handler(content, isError)
     }
     
+    /// Handle a tmux `%message` notification from the Zig viewer.
+    /// These are informational messages from the tmux server (e.g., session
+    /// created/destroyed notices). Currently log-only; future work may surface
+    /// them in the UI.
+    func handleTmuxMessage(text: String) {
+        logger.info("tmux message: \(text)")
+    }
+
     /// Copy the tmux paste buffer to the iOS clipboard.
     /// Sends `show-buffer` through the Zig viewer's command queue and
     /// writes the response content to `UIPasteboard.general` on success.
