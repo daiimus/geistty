@@ -180,6 +180,13 @@ struct GeisttyApp: App {
                     NotificationCenter.default.post(name: .terminalReconnect, object: nil)
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+                
+                Divider()
+                
+                Button("tmux Sessions\u{2026}") {
+                    NotificationCenter.default.post(name: .showTmuxSessions, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
             }
             
             // MARK: - Connection Menu (Custom)
@@ -261,6 +268,9 @@ extension Notification.Name {
     static let tmuxExited = Notification.Name("tmuxExited")
     static let tmuxReady = Notification.Name("tmuxReady")
     static let tmuxCommandResponse = Notification.Name("tmuxCommandResponse")
+    
+    // tmux session management
+    static let showTmuxSessions = Notification.Name("showTmuxSessions")
 }
 
 /// Global application state

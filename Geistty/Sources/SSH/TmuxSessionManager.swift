@@ -306,6 +306,7 @@ class TmuxSessionManager: ObservableObject {
         windows.removeAll()
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
+        availableSessions.removeAll()
         
         // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
@@ -1597,6 +1598,97 @@ class TmuxSessionManager: ObservableObject {
         }
     }
     
+    // MARK: - Session Management
+    
+    /// Available sessions on the tmux server, populated by `listSessions()`.
+    /// Published so UI can observe and display the session picker.
+    @Published private(set) var availableSessions: [TmuxSessionInfo] = []
+    
+    /// Fetch the list of sessions from the tmux server.
+    /// Sends `list-sessions` through the command/response pipeline and
+    /// updates `availableSessions` on success.
+    func listSessions() {
+        guard let surface = tmuxQuerySurface else {
+            logger.warning("listSessions: no tmux query surface available")
+            return
+        }
+        
+        // Register handler BEFORE sending command (FIFO ordering guarantee)
+        pendingResponseHandlers.append { [weak self] content, isError in
+            guard let self = self else { return }
+            if isError {
+                logger.warning("list-sessions failed: \(content)")
+                return
+            }
+            
+            // Parse the response — currentSession?.id tells us which session we're on
+            let sessions = TmuxSessionInfo.parse(
+                response: content,
+                currentSessionId: self.currentSession?.id
+            )
+            self.availableSessions = sessions
+            logger.info("Listed \(sessions.count) tmux sessions")
+        }
+        
+        let formatString = "#{session_id}:#{session_name}:#{session_windows}:#{session_attached}"
+        if !surface.sendTmuxCommand("list-sessions -F '\(formatString)'") {
+            _ = pendingResponseHandlers.popLast()
+            logger.warning("listSessions: failed to queue list-sessions command")
+        }
+    }
+    
+    /// Switch to a different tmux session.
+    /// tmux will send `%session-changed` which Ghostty's viewer handles
+    /// automatically (resets state, re-queries windows).
+    func switchSession(sessionId: String) {
+        guard TmuxId.isValidSessionId(sessionId) else {
+            logger.warning("switchSession: invalid session ID '\(sessionId)'")
+            return
+        }
+        sendCommandFireAndForget("switch-client -t '\(sessionId)'")
+        logger.info("Switching to session \(sessionId)")
+    }
+    
+    /// Create a new tmux session.
+    /// The `-d` flag creates it detached so we stay in the current session.
+    /// Call `switchSession` afterward to switch to it, or omit `-d` to
+    /// let tmux auto-switch (triggers `%session-changed`).
+    func newSession(name: String? = nil, andSwitch: Bool = true) {
+        var cmd = "new-session"
+        if !andSwitch {
+            cmd += " -d"
+        }
+        if let name = name, !name.isEmpty {
+            let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
+            cmd += " -s '\(safeName)'"
+        }
+        sendCommandFireAndForget(cmd)
+        logger.info("Creating new session\(name.map { " '\($0)'" } ?? "")")
+    }
+    
+    /// Kill (destroy) a tmux session.
+    /// If you kill the current session, tmux will either switch to another
+    /// session (`%session-changed`) or exit (`%exit`) if no sessions remain.
+    func killSession(sessionId: String) {
+        guard TmuxId.isValidSessionId(sessionId) else {
+            logger.warning("killSession: invalid session ID '\(sessionId)'")
+            return
+        }
+        sendCommandFireAndForget("kill-session -t '\(sessionId)'")
+        logger.info("Killing session \(sessionId)")
+    }
+    
+    /// Rename a tmux session.
+    func renameSession(sessionId: String, name: String) {
+        guard TmuxId.isValidSessionId(sessionId) else {
+            logger.warning("renameSession: invalid session ID '\(sessionId)'")
+            return
+        }
+        let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
+        sendCommandFireAndForget("rename-session -t '\(sessionId)' '\(safeName)'")
+        logger.info("Renaming session \(sessionId) to '\(name)'")
+    }
+    
     // MARK: - Pending Input Visual Feedback
     
     /// Display pending input text as preedit (inverted preview) in the focused pane
@@ -1669,6 +1761,7 @@ class TmuxSessionManager: ObservableObject {
         windowSplitTrees.removeAll()
         currentSplitTree = TmuxSplitTree()
         currentSession = nil
+        availableSessions.removeAll()
         isConnected = false
         connectionState = .disconnected
         focusedPaneId = ""

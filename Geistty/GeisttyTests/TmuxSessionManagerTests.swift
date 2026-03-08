@@ -4114,3 +4114,199 @@ extension TmuxSessionManagerTests {
     }
 }
 
+// MARK: - Session Management Command Tests
+
+extension TmuxSessionManagerTests {
+    
+    @MainActor
+    func testSwitchSessionCommand() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.switchSession(sessionId: "$1")
+        XCTAssertEqual(log.commands, ["switch-client -t '$1'\n"])
+    }
+    
+    @MainActor
+    func testSwitchSessionInvalidIdIgnored() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.switchSession(sessionId: "@0")  // Window ID, not session ID
+        XCTAssertTrue(log.commands.isEmpty, "Invalid session ID should be rejected")
+    }
+    
+    @MainActor
+    func testSwitchSessionEmptyIdIgnored() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.switchSession(sessionId: "")
+        XCTAssertTrue(log.commands.isEmpty)
+    }
+    
+    @MainActor
+    func testNewSessionDefaultCommand() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.newSession()
+        XCTAssertEqual(log.commands, ["new-session\n"])
+    }
+    
+    @MainActor
+    func testNewSessionWithNameCommand() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.newSession(name: "work")
+        XCTAssertEqual(log.commands, ["new-session -s 'work'\n"])
+    }
+    
+    @MainActor
+    func testNewSessionDetachedCommand() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.newSession(name: "bg", andSwitch: false)
+        XCTAssertEqual(log.commands, ["new-session -d -s 'bg'\n"])
+    }
+    
+    @MainActor
+    func testNewSessionNameEscapesSingleQuotes() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.newSession(name: "it's mine")
+        XCTAssertEqual(log.commands, ["new-session -s 'it'\\''s mine'\n"])
+    }
+    
+    @MainActor
+    func testNewSessionNoNameDetached() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.newSession(andSwitch: false)
+        XCTAssertEqual(log.commands, ["new-session -d\n"])
+    }
+    
+    @MainActor
+    func testKillSessionCommand() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.killSession(sessionId: "$2")
+        XCTAssertEqual(log.commands, ["kill-session -t '$2'\n"])
+    }
+    
+    @MainActor
+    func testKillSessionInvalidIdIgnored() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.killSession(sessionId: "bad")
+        XCTAssertTrue(log.commands.isEmpty)
+    }
+    
+    @MainActor
+    func testRenameSessionCommand() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.renameSession(sessionId: "$0", name: "production")
+        XCTAssertEqual(log.commands, ["rename-session -t '$0' 'production'\n"])
+    }
+    
+    @MainActor
+    func testRenameSessionEscapesSingleQuotes() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.renameSession(sessionId: "$0", name: "it's a test")
+        XCTAssertEqual(log.commands, ["rename-session -t '$0' 'it'\\''s a test'\n"])
+    }
+    
+    @MainActor
+    func testRenameSessionInvalidIdIgnored() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.renameSession(sessionId: "%%", name: "whatever")
+        XCTAssertTrue(log.commands.isEmpty)
+    }
+    
+    @MainActor
+    func testListSessionsCommand() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        mgr.listSessions()
+        
+        XCTAssertEqual(mock.sendTmuxCommandCalls.count, 1)
+        let cmd = mock.sendTmuxCommandCalls.first ?? ""
+        XCTAssertTrue(cmd.hasPrefix("list-sessions -F"), "Should send list-sessions with format")
+        XCTAssertTrue(cmd.contains("session_id"), "Format should include session_id")
+        XCTAssertTrue(cmd.contains("session_name"), "Format should include session_name")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1, "Should register response handler")
+    }
+    
+    @MainActor
+    func testListSessionsPopulatesAvailableSessions() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        mgr.listSessions()
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+        
+        // Simulate response (currentSession is nil, so no session is marked current)
+        mgr.handleCommandResponse(
+            content: "$0:main:2:1\n$1:work:3:0",
+            isError: false
+        )
+        
+        XCTAssertEqual(mgr.availableSessions.count, 2)
+        XCTAssertEqual(mgr.availableSessions[0].id, "$0")
+        XCTAssertEqual(mgr.availableSessions[1].id, "$1")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+    
+    @MainActor
+    func testListSessionsErrorDoesNotPopulate() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        mgr.listSessions()
+        mgr.handleCommandResponse(content: "server not found", isError: true)
+        
+        XCTAssertTrue(mgr.availableSessions.isEmpty, "Error response should not populate sessions")
+    }
+    
+    @MainActor
+    func testListSessionsNoSurfaceDoesNotCrash() {
+        let mgr = TmuxSessionManager()
+        // No surface configured — should just log and return
+        mgr.listSessions()
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "No handler should be registered when there's no surface")
+    }
+    
+    @MainActor
+    func testControlModeExitedClearsAvailableSessions() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        // Populate sessions
+        mgr.listSessions()
+        mgr.handleCommandResponse(content: "$0:main:1:1", isError: false)
+        XCTAssertEqual(mgr.availableSessions.count, 1)
+        
+        // Exit control mode
+        mgr.controlModeExited()
+        XCTAssertTrue(mgr.availableSessions.isEmpty,
+                      "controlModeExited should clear availableSessions")
+    }
+    
+    @MainActor
+    func testCleanupClearsAvailableSessions() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+        
+        mgr.listSessions()
+        mgr.handleCommandResponse(content: "$0:main:1:1", isError: false)
+        XCTAssertEqual(mgr.availableSessions.count, 1)
+        
+        mgr.cleanup()
+        XCTAssertTrue(mgr.availableSessions.isEmpty,
+                      "cleanup should clear availableSessions")
+    }
+}
+

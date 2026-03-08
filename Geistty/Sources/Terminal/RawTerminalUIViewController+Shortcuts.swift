@@ -124,6 +124,11 @@ extension RawTerminalUIViewController: Ghostty.ShortcutDelegate {
             // Show rename dialog
             showRenameWindowDialog(tmuxManager: tmuxManager)
             return true
+            
+        // MARK: - Session Management
+        case .showSessions:
+            showSessionPicker()
+            return true
         }
     }
     

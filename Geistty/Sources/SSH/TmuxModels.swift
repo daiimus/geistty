@@ -77,6 +77,65 @@ struct TmuxWindow: Identifiable, Equatable {
 // - Comprehensive error handling
 // - Better tree traversal utilities
 
+// MARK: - Session Info (from list-sessions response)
+
+/// Lightweight snapshot of a tmux session returned by `list-sessions`.
+/// Unlike `TmuxSession`, this is a pure value type parsed from a single
+/// command response — no mutable state, no window/pane tracking.
+struct TmuxSessionInfo: Identifiable, Equatable {
+    /// Session ID (e.g., "$0", "$1")
+    let id: String
+    
+    /// Session name
+    let name: String
+    
+    /// Number of windows in this session
+    let windowCount: Int
+    
+    /// Whether this session is currently attached (by any client)
+    let isAttached: Bool
+    
+    /// Whether this is the session we're currently controlling
+    let isCurrent: Bool
+    
+    /// Parse a list of `TmuxSessionInfo` from a `list-sessions` response.
+    ///
+    /// Expected format (one line per session):
+    ///   `$0:mysession:3:1`
+    /// Fields: session_id, session_name, session_windows, session_attached
+    ///
+    /// - Parameters:
+    ///   - response: Raw text from `list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_attached}'`
+    ///   - currentSessionId: The session ID we're currently attached to (for `isCurrent` flag)
+    /// - Returns: Parsed sessions sorted by ID, or empty array if parsing fails
+    static func parse(response: String, currentSessionId: String? = nil) -> [TmuxSessionInfo] {
+        response.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: ":", maxSplits: 3)
+            guard parts.count == 4 else { return nil }
+            
+            let sessionId = String(parts[0])
+            guard TmuxId.isValidSessionId(sessionId) else { return nil }
+            
+            let name = String(parts[1])
+            let windowCount = Int(parts[2]) ?? 0
+            let attachedCount = Int(parts[3]) ?? 0
+            
+            return TmuxSessionInfo(
+                id: sessionId,
+                name: name,
+                windowCount: windowCount,
+                isAttached: attachedCount > 0,
+                isCurrent: sessionId == currentSessionId
+            )
+        }.sorted { a, b in
+            // Sort by numeric ID
+            let aNum = TmuxId.numericSessionId(a.id) ?? Int.max
+            let bNum = TmuxId.numericSessionId(b.id) ?? Int.max
+            return aNum < bNum
+        }
+    }
+}
+
 // MARK: - ID Validation
 
 /// Validates and parses tmux identifiers
