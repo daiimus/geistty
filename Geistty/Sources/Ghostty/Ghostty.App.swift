@@ -677,6 +677,34 @@ extension Ghostty {
                 )
                 return true
                 
+            case GHOSTTY_ACTION_TMUX_ACTIVE_WINDOW_CHANGED:
+                // tmux control mode: active window changed (e.g., user ran next-window).
+                // This fires before TMUX_STATE_CHANGED, giving Swift fast
+                // visual feedback to update the window picker.
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let windowId = action.action.tmux_active_window_changed.window_id
+                logger.info("🪟 tmux active window changed: @\(windowId)")
+                
+                // Extract the SurfaceView from userdata so observers can filter
+                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
+                // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
+                // the multi-surface identity guard.
+                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
+                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+                }
+                
+                // Post synchronously — already on main thread via tick().
+                NotificationCenter.default.post(
+                    name: .tmuxActiveWindowChanged,
+                    object: surfaceView,
+                    userInfo: ["windowId": windowId]
+                )
+                return true
+                
             case GHOSTTY_ACTION_QUIT_TIMER:
                 // Ghostty fires quit_timer when all surfaces are gone (e.g., after
                 // tmux viewer teardown on background). On macOS this quits the app.

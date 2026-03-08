@@ -616,7 +616,26 @@ class SSHSession: ObservableObject, Identifiable {
             self.tmuxSessionManager?.handleCommandResponse(content: content, isError: isError)
         }
         
-        tmuxNotificationObservers = [stateObserver, exitObserver, readyObserver, commandResponseObserver]
+        let activeWindowObserver = NotificationCenter.default.addObserver(
+            forName: .tmuxActiveWindowChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            
+            // H8: Only process notifications for our surface
+            if let notifSurface = notification.object as? Ghostty.SurfaceView {
+                guard notifSurface === self.ghosttySurface else { return }
+            }
+            
+            guard let windowId = notification.userInfo?["windowId"] as? UInt32 else {
+                return
+            }
+            
+            self.tmuxSessionManager?.handleActiveWindowChanged(windowId: Int(windowId))
+        }
+        
+        tmuxNotificationObservers = [stateObserver, exitObserver, readyObserver, commandResponseObserver, activeWindowObserver]
     }
     
     /// Remove tmux notification observers
