@@ -922,6 +922,12 @@ typedef struct {
   uint32_t pane_id;
 } ghostty_action_tmux_focused_pane_changed_s;
 
+// apprt.action.TmuxSubscriptionChanged
+typedef struct {
+  const char* name;
+  const char* value;
+} ghostty_action_tmux_subscription_changed_s;
+
 // terminal.Scrollbar
 typedef struct {
   uint64_t total;
@@ -1007,6 +1013,7 @@ typedef enum {
   GHOSTTY_ACTION_TMUX_PANE_MODE_CHANGED,
   GHOSTTY_ACTION_TMUX_SESSION_RENAMED,
   GHOSTTY_ACTION_TMUX_FOCUSED_PANE_CHANGED,
+  GHOSTTY_ACTION_TMUX_SUBSCRIPTION_CHANGED,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -1057,6 +1064,7 @@ typedef union {
   ghostty_action_tmux_pane_mode_changed_s tmux_pane_mode_changed;
   ghostty_action_tmux_session_renamed_s tmux_session_renamed;
   ghostty_action_tmux_focused_pane_changed_s tmux_focused_pane_changed;
+  ghostty_action_tmux_subscription_changed_s tmux_subscription_changed;
 } ghostty_action_u;
 
 typedef struct {
