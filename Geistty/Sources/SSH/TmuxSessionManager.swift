@@ -506,18 +506,21 @@ class TmuxSessionManager: ObservableObject {
         // Update focused window if we already know about it (e.g., switching
         // back to a previously visited window). For new windows we've never
         // seen, the subsequent TMUX_STATE_CHANGED creates the window entry.
-        if windows[newFocusedWindowId] != nil {
-            focusedWindowId = newFocusedWindowId
-            
-            // Swap the split tree so the UI shows the new window's layout.
-            // If the window has no parsed split tree (e.g., layout parse failed),
-            // clear currentSplitTree so we don't briefly show a stale layout.
-            if let tree = windowSplitTrees[newFocusedWindowId] {
-                currentSplitTree = tree
-            } else {
-                logger.info("Active window \(newFocusedWindowId) has no split tree; clearing currentSplitTree")
-                currentSplitTree = TmuxSplitTree()
-            }
+        guard windows[newFocusedWindowId] != nil else {
+            logger.info("Window \(newFocusedWindowId) not yet known; deferring to TMUX_STATE_CHANGED")
+            return
+        }
+        
+        focusedWindowId = newFocusedWindowId
+        
+        // Swap the split tree so the UI shows the new window's layout.
+        // If the window has no parsed split tree (e.g., layout parse failed),
+        // clear currentSplitTree so we don't briefly show a stale layout.
+        if let tree = windowSplitTrees[newFocusedWindowId] {
+            currentSplitTree = tree
+        } else {
+            logger.info("Active window \(newFocusedWindowId) has no split tree; clearing currentSplitTree")
+            currentSplitTree = TmuxSplitTree()
         }
     }
     
