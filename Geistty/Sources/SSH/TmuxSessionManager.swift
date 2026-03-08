@@ -1513,7 +1513,7 @@ class TmuxSessionManager: ObservableObject {
     /// Dispatches to the first pending handler in FIFO order.
     func handleCommandResponse(content: String, isError: Bool) {
         guard !pendingResponseHandlers.isEmpty else {
-            logger.warning("Received tmux command response with no pending handler (content=\(content.prefix(80)), isError=\(isError))")
+            logger.warning("Received tmux command response with no pending handler (len=\(content.count), isError=\(isError))")
             return
         }
         let handler = pendingResponseHandlers.removeFirst()

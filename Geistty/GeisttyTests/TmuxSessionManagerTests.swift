@@ -3795,8 +3795,6 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
-        var results: [(String, Bool)] = []
-
         // Orphan response (no handler registered) should not crash
         mgr.handleCommandResponse(content: "orphan", isError: false)
         XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
