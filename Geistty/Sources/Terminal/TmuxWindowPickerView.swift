@@ -28,41 +28,78 @@ struct TmuxWindowPickerView: View {
         sessionManager.windows.values.sorted { $0.index < $1.index }
     }
     
+    /// Callback when session picker is requested
+    var onSessionPickerRequested: (() -> Void)?
+    
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    ForEach(sortedWindows) { window in
-                        WindowTab(
-                            window: window,
-                            isSelected: window.id == sessionManager.focusedWindowId,
-                            onSelect: {
-                                selectWindow(window)
-                            },
-                            onClose: {
-                                closeWindow(window)
-                            },
-                            onRename: {
-                                onRenameRequested?(window.id, window.name)
-                            }
+            HStack(spacing: 0) {
+                // Session name button (opens session picker)
+                if let session = sessionManager.currentSession {
+                    Button {
+                        onSessionPickerRequested?()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "server.rack")
+                                .font(.system(size: 10))
+                            Text(session.name)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(white: 0.16))
                         )
-                        .id(window.id)
-                    }
-                    
-                    // New window button
-                    Button(action: {
-                        sessionManager.newWindow()
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("TmuxNewWindowButton")
+                    .accessibilityIdentifier("TmuxSessionButton")
+                    
+                    // Divider between session name and window tabs
+                    Rectangle()
+                        .fill(Color(white: 0.25))
+                        .frame(width: 1, height: 20)
+                        .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, 8)
+                
+                // Window tabs
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(sortedWindows) { window in
+                            WindowTab(
+                                window: window,
+                                isSelected: window.id == sessionManager.focusedWindowId,
+                                onSelect: {
+                                    selectWindow(window)
+                                },
+                                onClose: {
+                                    closeWindow(window)
+                                },
+                                onRename: {
+                                    onRenameRequested?(window.id, window.name)
+                                }
+                            )
+                            .id(window.id)
+                        }
+                        
+                        // New window button
+                        Button(action: {
+                            sessionManager.newWindow()
+                        }) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("TmuxNewWindowButton")
+                    }
+                    .padding(.horizontal, 8)
+                }
             }
             .frame(height: barHeight)
             .background(backgroundColor)

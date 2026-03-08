@@ -55,6 +55,9 @@ enum Ghostty {
         
         // Window operations
         case renameWindow       // Cmd+Shift+R or ,
+        
+        // Session management
+        case showSessions       // Cmd+Shift+S
     }
     
     /// Delegate protocol for handling app-level keyboard shortcuts
@@ -1656,6 +1659,12 @@ extension Ghostty {
                     else if char == "r" && hasShift && !hasOption {
                         // Cmd+Shift+R - Rename tmux window
                         action = .renameWindow
+                    }
+                    
+                    // Session management
+                    else if char == "s" && hasShift && !hasOption {
+                        // Cmd+Shift+S - Show tmux session picker
+                        action = .showSessions
                     }
                     
                     // If we have an action, try to handle it

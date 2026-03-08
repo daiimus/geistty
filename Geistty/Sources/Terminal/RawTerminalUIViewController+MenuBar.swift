@@ -127,6 +127,12 @@ extension RawTerminalUIViewController {
             self?.handleBackButton()
         })
         // Note: terminalReconnect is handled in ContentView which has access to appState
+        
+        // tmux session management
+        menuBarObservers.append(nc.addObserver(forName: .showTmuxSessions, object: nil, queue: .main) { [weak self] _ in
+            guard self?.isInForegroundScene == true else { return }
+            self?.showSessionPicker()
+        })
     }
     
     /// Whether this view controller's window scene is in the foreground.
@@ -348,6 +354,9 @@ final class KeyboardShortcutsHelpController: UIViewController, UITableViewDataSo
             Shortcut(keys: "\u{2318}9", action: "Last Window"),
             Shortcut(keys: "\u{21E7}\u{2318}W", action: "Close Window"),
             Shortcut(keys: "\u{21E7}\u{2318}R", action: "Rename Window"),
+        ]),
+        Section(title: "tmux Sessions", footnote: nil, shortcuts: [
+            Shortcut(keys: "\u{21E7}\u{2318}S", action: "Session Picker"),
         ]),
         Section(title: "Terminal Input", footnote: nil, shortcuts: [
             Shortcut(keys: "\u{2303}C", action: "Interrupt (SIGINT)"),

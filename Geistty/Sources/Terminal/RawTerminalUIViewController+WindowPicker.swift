@@ -53,7 +53,12 @@ extension RawTerminalUIViewController {
         
         logger.info("📑 Showing window picker")
         
-        let pickerView = TmuxWindowPickerView(sessionManager: tmuxManager)
+        let pickerView = TmuxWindowPickerView(
+            sessionManager: tmuxManager,
+            onSessionPickerRequested: { [weak self] in
+                self?.showSessionPicker()
+            }
+        )
         let hostingController = UIHostingController(rootView: pickerView)
         hostingController.view.backgroundColor = .clear
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
@@ -96,6 +101,31 @@ extension RawTerminalUIViewController {
         
         // Restore terminal view's top constraint
         updateTerminalTopConstraint()
+    }
+    
+    /// Show the session picker as a modal sheet
+    func showSessionPicker() {
+        guard let tmuxManager = viewModel?.tmuxManager else { return }
+        
+        // Guard against double-presentation (keyboard shortcut + menu + button)
+        guard presentedViewController == nil else {
+            logger.debug("📑 Session picker already presenting, ignoring")
+            return
+        }
+        
+        logger.info("📑 Showing session picker")
+        
+        // Wrap in a container that owns the @State for isPresented and
+        // dismisses the hosting controller when the user taps "Done".
+        let picker = SessionPickerContainer(
+            sessionManager: tmuxManager,
+            onDismiss: { [weak self] in
+                self?.dismiss(animated: true)
+            }
+        )
+        let hostingController = UIHostingController(rootView: picker)
+        hostingController.modalPresentationStyle = .formSheet
+        present(hostingController, animated: true)
     }
     
     /// Update the terminal view's top constraint based on window picker visibility
