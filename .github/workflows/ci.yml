@@ -20,12 +20,45 @@ jobs:
       DESTINATION: "platform=iOS Simulator,name=iPhone 17 Pro"
       PROJECT: Geistty/Geistty.xcodeproj
       SCHEME: Geistty
+      GIT_LFS_SKIP_SMUDGE: 1
 
     steps:
-      - name: Checkout
+      - name: Checkout (without LFS)
         uses: actions/checkout@v4
+
+      # With GIT_LFS_SKIP_SMUDGE=1, the .a files are LFS pointer files
+      # (small text with the OID). We use their hash as the cache key —
+      # it changes exactly when the underlying binary content changes.
+      - name: Restore LFS cache
+        id: lfs-cache
+        uses: actions/cache@v4
         with:
-          lfs: true
+          path: |
+            Geistty/Frameworks/GhosttyKit.xcframework/ios-arm64/libghostty-fat.a
+            Geistty/Frameworks/GhosttyKit.xcframework/ios-arm64-simulator/libghostty-fat.a
+          key: xcframework-${{ hashFiles('Geistty/Frameworks/GhosttyKit.xcframework/**/*.a') }}
+
+      # On cache miss, download LFS files via media.githubusercontent.com
+      # which serves actual content for public repos without consuming
+      # LFS bandwidth. On cache hit, the files are already restored.
+      - name: Download LFS files (cache miss)
+        if: steps.lfs-cache.outputs.cache-hit != 'true'
+        run: |
+          BASE="https://media.githubusercontent.com/media/${{ github.repository }}/${{ github.sha }}"
+          for path in \
+            "Geistty/Frameworks/GhosttyKit.xcframework/ios-arm64/libghostty-fat.a" \
+            "Geistty/Frameworks/GhosttyKit.xcframework/ios-arm64-simulator/libghostty-fat.a"
+          do
+            echo "Downloading $path..."
+            curl -sL "$BASE/$path" -o "$path"
+            size=$(wc -c < "$path" | tr -d ' ')
+            echo "  $size bytes"
+            if [ "$size" -lt 1000000 ]; then
+              echo "::error::Downloaded file is too small ($size bytes), likely an error page"
+              cat "$path"
+              exit 1
+            fi
+          done
 
       - name: Resolve packages
         run: |
