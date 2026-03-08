@@ -104,20 +104,25 @@ extension RawTerminalUIViewController {
             return
         }
         
-        // If the bottom constraint is already at 0 (e.g. we ignored a small
-        // keyboardWillShow), skip the hide animation to avoid unnecessary layout. (#44 Bug 2)
-        guard surfaceBottomConstraint?.constant != 0 || multiPaneBottomConstraint?.constant != 0 else {
-            logger.debug("⌨️ Keyboard will hide (no-op, constraints already at 0)")
+        // If the bottom constraint is already at the resting position (e.g. we
+        // ignored a small keyboardWillShow), skip the hide animation to avoid
+        // unnecessary layout. The resting position is -statusBarHeight when the
+        // tmux status bar is visible, or 0 otherwise. (#44 Bug 2)
+        let restingOffset: CGFloat = isShowingTmuxStatusBar ? -tmuxStatusBarHeight : 0
+        guard surfaceBottomConstraint?.constant != restingOffset || multiPaneBottomConstraint?.constant != restingOffset else {
+            logger.debug("Keyboard will hide (no-op, constraints already at resting position)")
             return
         }
         
         let curve = UIView.AnimationCurve(rawValue: curveValue) ?? .easeInOut
         
         // Calculate the new size BEFORE animating (full height minus top offset).
-        // Account for top offset (safe area + window picker) so the pre-render
-        // hint matches the surface's actual frame after layout. (#44 T9)
+        // Account for top offset (safe area + window picker) and bottom offset
+        // (status bar) so the pre-render hint matches the surface's actual frame
+        // after layout. (#44 T9)
         let topOffset = surfaceTopConstraint?.constant ?? 0
-        let newSize = CGSize(width: view.bounds.width, height: max(0, view.bounds.height - topOffset))
+        let bottomOffset: CGFloat = isShowingTmuxStatusBar ? tmuxStatusBarHeight : 0
+        let newSize = CGSize(width: view.bounds.width, height: max(0, view.bounds.height - topOffset - bottomOffset))
         
         // Notify Ghostty of size change BEFORE animation to pre-render
         if let surface = self.surfaceView, !isMultiPaneMode {
@@ -134,8 +139,11 @@ extension RawTerminalUIViewController {
             delay: 0,
             options: UIView.AnimationOptions(rawValue: UInt(curve.rawValue << 16)),
             animations: {
-                self.surfaceBottomConstraint?.constant = 0
-                self.multiPaneBottomConstraint?.constant = 0
+                // When the status bar is visible, restore to its offset
+                // instead of 0 so the terminal doesn't overlap it.
+                let bottomOffset: CGFloat = self.isShowingTmuxStatusBar ? -self.tmuxStatusBarHeight : 0
+                self.surfaceBottomConstraint?.constant = bottomOffset
+                self.multiPaneBottomConstraint?.constant = bottomOffset
                 self.view.layoutIfNeeded()
             }
         )

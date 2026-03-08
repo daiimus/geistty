@@ -628,6 +628,12 @@ class RawTerminalUIViewController: UIViewController {
     var isShowingWindowPicker = false
     let windowPickerHeight: CGFloat = 36
     
+    // tmux status bar (shown at bottom when tmux provides status-left/right)
+    var statusBarHostingController: UIHostingController<TmuxStatusBarView>?
+    var statusBarObserver: AnyCancellable?
+    var isShowingTmuxStatusBar = false
+    let tmuxStatusBarHeight: CGFloat = TmuxStatusBarView.barHeight
+    
     // Status bar preference (read from UserDefaults)
     var showStatusBar: Bool {
         UserDefaults.standard.bool(forKey: UserDefaultsKey.showStatusBar)
@@ -675,6 +681,9 @@ class RawTerminalUIViewController: UIViewController {
         
         // Observe windows changes for window picker
         setupWindowsObserver()
+        
+        // Observe status bar changes for tmux status-left/right
+        setupStatusBarObserver()
         
         // Also observe connection state - tmux manager may not exist yet at viewDidLoad
         setupConnectionObserver()
@@ -1084,6 +1093,12 @@ class RawTerminalUIViewController: UIViewController {
         splitTreeObserver = nil
         connectionObserver?.cancel()
         connectionObserver = nil
+        
+        // Cancel status bar observer and remove overlay
+        statusBarObserver?.cancel()
+        statusBarObserver = nil
+        hideTmuxStatusBar()
+        
         transitionToSingleSurfaceMode()
         
         viewModel?.disconnect()
@@ -1110,6 +1125,7 @@ class RawTerminalUIViewController: UIViewController {
         connectionObserver?.cancel()
         keyTableObserver?.cancel()
         reconnectingObserver?.cancel()
+        statusBarObserver?.cancel()
     }
 }
 

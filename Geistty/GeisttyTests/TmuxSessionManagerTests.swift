@@ -4882,6 +4882,42 @@ extension TmuxSessionManagerTests {
         mgr.handleSubscriptionChanged(name: "", value: "")
     }
 
+    @MainActor
+    func testHandleSubscriptionChangedUpdatesStatusLeft() {
+        let mgr = TmuxSessionManager()
+        XCTAssertEqual(mgr.statusLeft, "")
+
+        mgr.handleSubscriptionChanged(name: "status_left", value: "[0] bash")
+        XCTAssertEqual(mgr.statusLeft, "[0] bash")
+
+        // Updating again overwrites
+        mgr.handleSubscriptionChanged(name: "status_left", value: "[0] zsh")
+        XCTAssertEqual(mgr.statusLeft, "[0] zsh")
+
+        // Empty value clears it
+        mgr.handleSubscriptionChanged(name: "status_left", value: "")
+        XCTAssertEqual(mgr.statusLeft, "")
+    }
+
+    @MainActor
+    func testHandleSubscriptionChangedUpdatesStatusRight() {
+        let mgr = TmuxSessionManager()
+        XCTAssertEqual(mgr.statusRight, "")
+
+        mgr.handleSubscriptionChanged(name: "status_right", value: "\"host\" 15:30")
+        XCTAssertEqual(mgr.statusRight, "\"host\" 15:30")
+    }
+
+    @MainActor
+    func testHandleSubscriptionChangedUnknownNameIgnored() {
+        let mgr = TmuxSessionManager()
+
+        mgr.handleSubscriptionChanged(name: "unknown_sub", value: "some value")
+        // Should not affect status properties
+        XCTAssertEqual(mgr.statusLeft, "")
+        XCTAssertEqual(mgr.statusRight, "")
+    }
+
     // MARK: - setOption Viewer Not Ready Queuing
 
     @MainActor
