@@ -12,6 +12,12 @@ import os
 
 private let logger = Logger(subsystem: "com.geistty", category: "TmuxSessionPicker")
 
+/// Delay before refreshing the session list after a fire-and-forget mutation
+/// (kill, rename). These commands use `sendCommandFireAndForget` which bypasses
+/// the command/response pipeline, so we can't trigger refresh on response.
+/// The delay gives tmux time to process the mutation before we re-query.
+private let sessionRefreshDelay: TimeInterval = 0.3
+
 // MARK: - Session Picker View
 
 struct TmuxSessionPickerView: View {
@@ -26,18 +32,25 @@ struct TmuxSessionPickerView: View {
     @State private var renamingSessionId: String? = nil
     @State private var renameText: String = ""
     
+    /// Tracks whether we've completed at least one listSessions() fetch.
+    /// Distinguishes "still loading" from "loaded but empty" (no sessions).
+    @State private var didLoadSessions: Bool = false
+    
     var body: some View {
         NavigationView {
             List {
                 // Existing sessions
                 Section {
-                    if sessionManager.availableSessions.isEmpty {
+                    if sessionManager.availableSessions.isEmpty && !didLoadSessions {
                         HStack {
                             ProgressView()
                                 .padding(.trailing, 8)
                             Text("Loading sessions\u{2026}")
                                 .foregroundStyle(.secondary)
                         }
+                    } else if sessionManager.availableSessions.isEmpty {
+                        Text("No sessions available")
+                            .foregroundStyle(.secondary)
                     } else {
                         ForEach(sessionManager.availableSessions) { session in
                             SessionRow(
@@ -125,6 +138,9 @@ struct TmuxSessionPickerView: View {
             // Fetch sessions when sheet appears
             sessionManager.listSessions()
         }
+        .onReceive(sessionManager.$availableSessions) { _ in
+            didLoadSessions = true
+        }
         .accessibilityIdentifier("TmuxSessionPicker")
     }
     
@@ -170,8 +186,7 @@ struct TmuxSessionPickerView: View {
     private func killSession(_ session: TmuxSessionInfo) {
         logger.info("Killing session \(session.id) '\(session.name)'")
         sessionManager.killSession(sessionId: session.id)
-        // Refresh the list after a short delay to let tmux process the command
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + sessionRefreshDelay) {
             sessionManager.listSessions()
         }
     }
@@ -194,8 +209,7 @@ struct TmuxSessionPickerView: View {
         logger.info("Renaming session \(session.id) to '\(name)'")
         sessionManager.renameSession(sessionId: session.id, name: name)
         renamingSessionId = nil
-        // Refresh to show the new name
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + sessionRefreshDelay) {
             sessionManager.listSessions()
         }
     }

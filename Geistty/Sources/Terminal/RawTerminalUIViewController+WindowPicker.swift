@@ -107,6 +107,12 @@ extension RawTerminalUIViewController {
     func showSessionPicker() {
         guard let tmuxManager = viewModel?.tmuxManager else { return }
         
+        // Guard against double-presentation (keyboard shortcut + menu + button)
+        guard presentedViewController == nil else {
+            logger.debug("📑 Session picker already presenting, ignoring")
+            return
+        }
+        
         logger.info("📑 Showing session picker")
         
         // Wrap in a container that owns the @State for isPresented and

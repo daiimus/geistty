@@ -100,17 +100,19 @@ struct TmuxSessionInfo: Identifiable, Equatable {
     
     /// Parse a list of `TmuxSessionInfo` from a `list-sessions` response.
     ///
-    /// Expected format (one line per session):
-    ///   `$0:mysession:3:1`
+    /// Expected format (one line per session, tab-separated):
+    ///   `$0\tmysession\t3\t1`
     /// Fields: session_id, session_name, session_windows, session_attached
     ///
+    /// Tab delimiter is used because session names can contain colons but not tabs.
+    ///
     /// - Parameters:
-    ///   - response: Raw text from `list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_attached}'`
+    ///   - response: Raw text from `list-sessions -F '#{session_id}\t#{session_name}\t#{session_windows}\t#{session_attached}'`
     ///   - currentSessionId: The session ID we're currently attached to (for `isCurrent` flag)
-    /// - Returns: Parsed sessions sorted by ID, or empty array if parsing fails
+    /// - Returns: Parsed sessions sorted by ID. Malformed lines are silently skipped.
     static func parse(response: String, currentSessionId: String? = nil) -> [TmuxSessionInfo] {
         response.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: ":", maxSplits: 3)
+            let parts = line.split(separator: "\t", maxSplits: 3)
             guard parts.count == 4 else { return nil }
             
             let sessionId = String(parts[0])

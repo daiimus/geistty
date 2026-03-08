@@ -1630,7 +1630,7 @@ class TmuxSessionManager: ObservableObject {
             logger.info("Listed \(sessions.count) tmux sessions")
         }
         
-        let formatString = "#{session_id}:#{session_name}:#{session_windows}:#{session_attached}"
+        let formatString = "#{session_id}\t#{session_name}\t#{session_windows}\t#{session_attached}"
         if !surface.sendTmuxCommand("list-sessions -F '\(formatString)'") {
             _ = pendingResponseHandlers.popLast()
             logger.warning("listSessions: failed to queue list-sessions command")

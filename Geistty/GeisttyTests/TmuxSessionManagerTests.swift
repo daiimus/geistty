@@ -4240,7 +4240,7 @@ extension TmuxSessionManagerTests {
         
         // Simulate response (currentSession is nil, so no session is marked current)
         mgr.handleCommandResponse(
-            content: "$0:main:2:1\n$1:work:3:0",
+             content: "$0\tmain\t2\t1\n$1\twork\t3\t0",
             isError: false
         )
         
@@ -4283,13 +4283,13 @@ extension TmuxSessionManagerTests {
         
         // Populate sessions
         mgr.listSessions()
-        mgr.handleCommandResponse(content: "$0:main:1:1", isError: false)
+        mgr.handleCommandResponse(content: "$0\tmain\t1\t1", isError: false)
         XCTAssertEqual(mgr.availableSessions.count, 1)
         
         // Exit control mode
         mgr.controlModeExited()
         XCTAssertTrue(mgr.availableSessions.isEmpty,
-                      "controlModeExited should clear availableSessions")
+                       "controlModeExited should clear availableSessions")
     }
     
     @MainActor
@@ -4301,7 +4301,7 @@ extension TmuxSessionManagerTests {
         #endif
         
         mgr.listSessions()
-        mgr.handleCommandResponse(content: "$0:main:1:1", isError: false)
+        mgr.handleCommandResponse(content: "$0\tmain\t1\t1", isError: false)
         XCTAssertEqual(mgr.availableSessions.count, 1)
         
         mgr.cleanup()

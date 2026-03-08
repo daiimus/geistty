@@ -164,7 +164,7 @@ final class TmuxModelsTests: XCTestCase {
     // MARK: - TmuxSessionInfo Parsing
     
     func testParseBasicSessionList() {
-        let response = "$0:main:3:1\n$1:work:2:0"
+        let response = "$0\tmain\t3\t1\n$1\twork\t2\t0"
         let sessions = TmuxSessionInfo.parse(response: response, currentSessionId: "$0")
         
         XCTAssertEqual(sessions.count, 2)
@@ -183,7 +183,7 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testParseSingleSession() {
-        let response = "$5:dev:1:1"
+        let response = "$5\tdev\t1\t1"
         let sessions = TmuxSessionInfo.parse(response: response, currentSessionId: "$5")
         
         XCTAssertEqual(sessions.count, 1)
@@ -203,27 +203,20 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testParseSessionNameWithColons() {
-        // Session name "my:server:app" contains colons — maxSplits: 3 handles this
-        let response = "$0:my:server:app:2:1"
+        // Session names can contain colons — tab delimiter handles this correctly
+        let response = "$0\tmy:server:app\t2\t1"
         let sessions = TmuxSessionInfo.parse(response: response, currentSessionId: nil)
         
-        // With maxSplits: 3, parts = ["$0", "my", "server", "app:2:1"]
-        // This means the name gets "my", windowCount gets "server" (nil → 0),
-        // and attached gets "app:2:1" (nil → 0). This is the expected behavior
-        // with the current 4-field colon-separated format — session names with
-        // colons produce incorrect parses. The format would need escaping to fix.
-        //
-        // What actually happens: split with maxSplits:3 produces 4 parts max.
-        // "$0:my:server:app:2:1" → ["$0", "my", "server", "app:2:1"]
-        // parts[1] = "my" (name), parts[2] = "server" (windowCount → 0), parts[3] = "app:2:1" (attached → 0)
         XCTAssertEqual(sessions.count, 1)
         XCTAssertEqual(sessions[0].id, "$0")
-        XCTAssertEqual(sessions[0].name, "my")
-        XCTAssertEqual(sessions[0].windowCount, 0, "Colon in name causes misparse of windowCount")
+        XCTAssertEqual(sessions[0].name, "my:server:app",
+                       "Colons in session name must be preserved")
+        XCTAssertEqual(sessions[0].windowCount, 2)
+        XCTAssertTrue(sessions[0].isAttached)
     }
     
     func testParseNoCurrentSession() {
-        let response = "$0:main:2:1\n$1:bg:1:0"
+        let response = "$0\tmain\t2\t1\n$1\tbg\t1\t0"
         let sessions = TmuxSessionInfo.parse(response: response, currentSessionId: nil)
         
         XCTAssertEqual(sessions.count, 2)
@@ -233,7 +226,7 @@ final class TmuxModelsTests: XCTestCase {
     
     func testParseSortsByNumericId() {
         // Feed in reverse order — should come back sorted
-        let response = "$10:ten:1:0\n$2:two:1:0\n$0:zero:1:0"
+        let response = "$10\tten\t1\t0\n$2\ttwo\t1\t0\n$0\tzero\t1\t0"
         let sessions = TmuxSessionInfo.parse(response: response)
         
         XCTAssertEqual(sessions.count, 3)
@@ -243,7 +236,7 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testParseMalformedLineSkipped() {
-        let response = "$0:main:2:1\nbadline\n$1:work:3:0"
+        let response = "$0\tmain\t2\t1\nbadline\n$1\twork\t3\t0"
         let sessions = TmuxSessionInfo.parse(response: response)
         
         XCTAssertEqual(sessions.count, 2, "Malformed line should be skipped")
@@ -253,7 +246,7 @@ final class TmuxModelsTests: XCTestCase {
     
     func testParseInvalidSessionIdSkipped() {
         // "@0" is a window ID, not a session ID
-        let response = "@0:bogus:1:0\n$0:real:2:1"
+        let response = "@0\tbogus\t1\t0\n$0\treal\t2\t1"
         let sessions = TmuxSessionInfo.parse(response: response)
         
         XCTAssertEqual(sessions.count, 1)
@@ -262,7 +255,7 @@ final class TmuxModelsTests: XCTestCase {
     
     func testParseMultipleAttachedClients() {
         // session_attached > 1 means multiple clients attached
-        let response = "$0:shared:4:3"
+        let response = "$0\tshared\t4\t3"
         let sessions = TmuxSessionInfo.parse(response: response)
         
         XCTAssertEqual(sessions.count, 1)
@@ -271,7 +264,7 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testParseZeroWindows() {
-        let response = "$0:empty:0:0"
+        let response = "$0\tempty\t0\t0"
         let sessions = TmuxSessionInfo.parse(response: response)
         
         XCTAssertEqual(sessions.count, 1)
@@ -293,7 +286,7 @@ final class TmuxModelsTests: XCTestCase {
     
     func testParseTrailingNewline() {
         // Response from tmux often has a trailing newline
-        let response = "$0:main:2:1\n$1:bg:1:0\n"
+        let response = "$0\tmain\t2\t1\n$1\tbg\t1\t0\n"
         let sessions = TmuxSessionInfo.parse(response: response, currentSessionId: "$0")
         
         XCTAssertEqual(sessions.count, 2, "Trailing newline should not create extra entry")
