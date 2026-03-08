@@ -23,6 +23,9 @@ enum TmuxConnectionState: Equatable {
     /// Fully connected and operational
     case connected
     
+    /// Voluntarily detached from tmux session (session still alive on server)
+    case detached
+    
     /// Connection lost, may attempt reconnect
     case connectionLost(reason: String?)
 }
@@ -269,11 +272,19 @@ class TmuxSessionManager: ObservableObject {
     
     /// Called when control mode exits
     func controlModeExited(reason: String? = nil) {
-        logger.info("🔌 Control mode exited, cleaning up state. Reason: \(reason ?? "unknown")")
+        let isDetach = reason == "detached"
+        logger.info("🔌 Control mode exited, cleaning up state. Reason: \(reason ?? "unknown"), isDetach: \(isDetach)")
         
-        // Update connection state
+        // Update connection state — distinguish voluntary detach from crash/exit.
+        // "detached" means the user (or Geistty) sent detach-client and tmux
+        // cleanly ended control mode. The session is still alive on the server
+        // and can be reattached.
         isConnected = false
-        connectionState = reason != nil ? .connectionLost(reason: reason) : .disconnected
+        if isDetach {
+            connectionState = .detached
+        } else {
+            connectionState = reason != nil ? .connectionLost(reason: reason) : .disconnected
+        }
         
         currentSession = nil
         sessions.removeAll()
