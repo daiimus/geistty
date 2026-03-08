@@ -4310,3 +4310,350 @@ extension TmuxSessionManagerTests {
     }
 }
 
+// MARK: - tmux Options (Read/Write) Tests
+
+extension TmuxSessionManagerTests {
+
+    // MARK: - queryOption() Command Formatting
+
+    @MainActor
+    func testQueryOptionGlobalSendsShowOptionsGv() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.queryOption(name: "mouse", scope: .global) { _ in }
+
+        XCTAssertEqual(mock.sendTmuxCommandCalls, ["show-options -gv mouse"])
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+    }
+
+    @MainActor
+    func testQueryOptionSessionSendsShowOptionsV() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.queryOption(name: "escape-time", scope: .session) { _ in }
+
+        XCTAssertEqual(mock.sendTmuxCommandCalls, ["show-options -v escape-time"])
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+    }
+
+    @MainActor
+    func testQueryOptionWindowSendsShowWindowOptions() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.queryOption(name: "mode-keys", scope: .window) { _ in }
+
+        XCTAssertEqual(mock.sendTmuxCommandCalls, ["show-window-options -v mode-keys"])
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+    }
+
+    @MainActor
+    func testQueryOptionDefaultScopeIsGlobal() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // No scope argument — should default to global
+        mgr.queryOption(name: "status") { _ in }
+
+        XCTAssertEqual(mock.sendTmuxCommandCalls, ["show-options -gv status"])
+    }
+
+    // MARK: - queryOption() Response Handling
+
+    @MainActor
+    func testQueryOptionSuccessCallsHandlerWithValue() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        var result: TmuxOptionValue?
+        mgr.queryOption(name: "mouse") { result = $0 }
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
+
+        mgr.handleCommandResponse(content: "on\n", isError: false)
+
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.rawValue, "on")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+
+    @MainActor
+    func testQueryOptionCachesValueInTmuxOptions() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.queryOption(name: "escape-time") { _ in }
+        mgr.handleCommandResponse(content: "500", isError: false)
+
+        XCTAssertEqual(mgr.tmuxOptions["escape-time"]?.rawValue, "500")
+        XCTAssertEqual(mgr.tmuxOptions["escape-time"]?.intValue, 500)
+    }
+
+    @MainActor
+    func testQueryOptionErrorCallsHandlerWithNil() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        var result: TmuxOptionValue? = TmuxOptionValue(rawValue: "sentinel")
+        mgr.queryOption(name: "nonexistent") { result = $0 }
+        mgr.handleCommandResponse(content: "unknown option", isError: true)
+
+        XCTAssertNil(result, "Error response should yield nil")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+
+    @MainActor
+    func testQueryOptionEmptyResponseCallsHandlerWithNil() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        var result: TmuxOptionValue? = TmuxOptionValue(rawValue: "sentinel")
+        mgr.queryOption(name: "unset-option") { result = $0 }
+        mgr.handleCommandResponse(content: "", isError: false)
+
+        XCTAssertNil(result, "Empty response should yield nil (option not set)")
+    }
+
+    @MainActor
+    func testQueryOptionNoSurfaceCallsHandlerWithNil() {
+        let mgr = TmuxSessionManager()
+        // No surface override → tmuxQuerySurface is nil
+
+        var result: TmuxOptionValue? = TmuxOptionValue(rawValue: "sentinel")
+        mgr.queryOption(name: "mouse") { result = $0 }
+
+        XCTAssertNil(result, "No surface → handler should get nil immediately")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "No handler should be registered when surface is nil")
+    }
+
+    @MainActor
+    func testQueryOptionFailedQueueRemovesHandlerAndCallsNil() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        mock.stubbedSendTmuxCommandResult = false
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        var result: TmuxOptionValue? = TmuxOptionValue(rawValue: "sentinel")
+        mgr.queryOption(name: "mouse") { result = $0 }
+
+        XCTAssertNil(result, "Failed queue → handler should get nil")
+        XCTAssertEqual(mock.sendTmuxCommandCalls, ["show-options -gv mouse"],
+                       "Should still attempt to send")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "Handler should be removed when queue fails")
+    }
+
+    // MARK: - setOption() Command Formatting
+
+    @MainActor
+    func testSetOptionGlobal() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.setOption(name: "mouse", value: "on", scope: .global)
+        XCTAssertEqual(log.commands, ["set-option -g mouse on\n"])
+    }
+
+    @MainActor
+    func testSetOptionSession() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.setOption(name: "escape-time", value: "200", scope: .session)
+        XCTAssertEqual(log.commands, ["set-option escape-time 200\n"])
+    }
+
+    @MainActor
+    func testSetOptionWindow() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.setOption(name: "mode-keys", value: "vi", scope: .window)
+        XCTAssertEqual(log.commands, ["set-option -w mode-keys vi\n"])
+    }
+
+    @MainActor
+    func testSetOptionDefaultScopeIsGlobal() {
+        let (mgr, log) = managerWithCommandLog()
+        mgr.setOption(name: "mouse", value: "off")
+        XCTAssertEqual(log.commands, ["set-option -g mouse off\n"])
+    }
+
+    // MARK: - setOption() Optimistic Cache Update
+
+    @MainActor
+    func testSetOptionUpdatesCache() {
+        let (mgr, _) = managerWithCommandLog()
+        mgr.setOption(name: "mouse", value: "on")
+        XCTAssertEqual(mgr.tmuxOptions["mouse"]?.rawValue, "on")
+        XCTAssertEqual(mgr.tmuxOptions["mouse"]?.boolValue, true)
+    }
+
+    @MainActor
+    func testSetOptionOverwritesPreviousCache() {
+        let (mgr, _) = managerWithCommandLog()
+        mgr.setOption(name: "mouse", value: "on")
+        XCTAssertEqual(mgr.tmuxOptions["mouse"]?.boolValue, true)
+
+        mgr.setOption(name: "mouse", value: "off")
+        XCTAssertEqual(mgr.tmuxOptions["mouse"]?.boolValue, false)
+    }
+
+    // MARK: - queryInitialOptions()
+
+    @MainActor
+    func testViewerBecameReadyQueriesInitialOptions() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let log = CommandLog()
+        mgr.setupWithDirectWrite { log.commands.append($0) }
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Simulate control mode activation (sets viewerReady = false)
+        mgr.controlModeActivated()
+        XCTAssertTrue(mock.sendTmuxCommandCalls.isEmpty,
+                      "No commands should be sent during activation")
+
+        // Simulate viewer becoming ready
+        mgr.viewerBecameReady()
+
+        // Should have queried 3 critical options: mouse, escape-time, window-size
+        XCTAssertEqual(mock.sendTmuxCommandCalls.count, 3,
+                       "Should query 3 initial options")
+        XCTAssertTrue(mock.sendTmuxCommandCalls.contains("show-options -gv mouse"))
+        XCTAssertTrue(mock.sendTmuxCommandCalls.contains("show-options -gv escape-time"))
+        XCTAssertTrue(mock.sendTmuxCommandCalls.contains("show-options -gv window-size"))
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 3,
+                       "Should have 3 pending response handlers")
+    }
+
+    @MainActor
+    func testViewerBecameReadyPopulatesOptionsOnResponse() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let log = CommandLog()
+        mgr.setupWithDirectWrite { log.commands.append($0) }
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.viewerBecameReady()
+
+        // Deliver responses in order (FIFO)
+        mgr.handleCommandResponse(content: "on\n", isError: false)    // mouse
+        mgr.handleCommandResponse(content: "500\n", isError: false)   // escape-time
+        mgr.handleCommandResponse(content: "smallest\n", isError: false) // window-size
+
+        XCTAssertEqual(mgr.tmuxOptions["mouse"]?.rawValue, "on")
+        XCTAssertEqual(mgr.tmuxOptions["mouse"]?.boolValue, true)
+        XCTAssertEqual(mgr.tmuxOptions["escape-time"]?.rawValue, "500")
+        XCTAssertEqual(mgr.tmuxOptions["escape-time"]?.intValue, 500)
+        XCTAssertEqual(mgr.tmuxOptions["window-size"]?.rawValue, "smallest")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+
+    // MARK: - Cleanup Clears Options
+
+    @MainActor
+    func testControlModeExitedClearsTmuxOptions() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Populate an option
+        mgr.queryOption(name: "mouse") { _ in }
+        mgr.handleCommandResponse(content: "on", isError: false)
+        XCTAssertFalse(mgr.tmuxOptions.isEmpty)
+
+        mgr.controlModeExited()
+        XCTAssertTrue(mgr.tmuxOptions.isEmpty,
+                      "controlModeExited should clear tmuxOptions cache")
+    }
+
+    @MainActor
+    func testCleanupClearsTmuxOptions() {
+        let (mgr, _) = managerWithCommandLog()
+        mgr.setOption(name: "mouse", value: "on")
+        XCTAssertFalse(mgr.tmuxOptions.isEmpty)
+
+        mgr.cleanup()
+        XCTAssertTrue(mgr.tmuxOptions.isEmpty,
+                      "cleanup should clear tmuxOptions cache")
+    }
+
+    // MARK: - Multiple queryOption FIFO Ordering
+
+    @MainActor
+    func testMultipleQueryOptionsFIFODispatch() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        var mouseResult: TmuxOptionValue?
+        var escapeResult: TmuxOptionValue?
+
+        mgr.queryOption(name: "mouse") { mouseResult = $0 }
+        mgr.queryOption(name: "escape-time") { escapeResult = $0 }
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 2)
+
+        // First response goes to first handler (mouse)
+        mgr.handleCommandResponse(content: "off", isError: false)
+        XCTAssertEqual(mouseResult?.rawValue, "off")
+        XCTAssertNil(escapeResult, "Second handler not dispatched yet")
+
+        // Second response goes to second handler (escape-time)
+        mgr.handleCommandResponse(content: "300", isError: false)
+        XCTAssertEqual(escapeResult?.rawValue, "300")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
+    }
+
+    // MARK: - setOption Viewer Not Ready Queuing
+
+    @MainActor
+    func testSetOptionQueuedWhenViewerNotReady() {
+        let (mgr, log) = managerWithCommandLog()
+
+        // Activate control mode (viewerReady becomes false)
+        mgr.controlModeActivated()
+
+        mgr.setOption(name: "mouse", value: "on")
+
+        // Command should be queued, not sent
+        XCTAssertTrue(log.commands.isEmpty,
+                      "Commands should be queued when viewer not ready")
+
+        // But cache should still be updated optimistically
+        XCTAssertEqual(mgr.tmuxOptions["mouse"]?.rawValue, "on",
+                       "Cache should be updated even when command is queued")
+    }
+}
+

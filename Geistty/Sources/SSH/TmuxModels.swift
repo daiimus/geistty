@@ -138,6 +138,88 @@ struct TmuxSessionInfo: Identifiable, Equatable {
     }
 }
 
+// MARK: - tmux Options
+
+/// Scope for tmux option queries and mutations.
+///
+/// tmux options exist at three levels:
+/// - **Global** (`-g`): Server-wide defaults, read via `show-options -gv`.
+/// - **Session**: Per-session overrides, read via `show-options -v`.
+/// - **Window**: Per-window overrides, read via `show-window-options -v`.
+///
+/// When reading, tmux returns the most-specific value (window > session > global).
+/// When writing, you choose which scope to set with `set-option [-g] [-w]`.
+enum TmuxOptionScope: Equatable, Sendable {
+    /// Server-wide default (show-options -gv, set-option -g)
+    case global
+    /// Per-session override (show-options -v)
+    case session
+    /// Per-window override (show-window-options -v, set-option -w)
+    case window
+    
+    /// Build the tmux `show-options` command for this scope.
+    /// Uses `-v` to get just the value (not `option value` pair).
+    func showCommand(for option: String) -> String {
+        switch self {
+        case .global:
+            return "show-options -gv \(option)"
+        case .session:
+            return "show-options -v \(option)"
+        case .window:
+            return "show-window-options -v \(option)"
+        }
+    }
+    
+    /// Build the tmux `set-option` command for this scope.
+    func setCommand(for option: String, value: String) -> String {
+        switch self {
+        case .global:
+            return "set-option -g \(option) \(value)"
+        case .session:
+            return "set-option \(option) \(value)"
+        case .window:
+            return "set-option -w \(option) \(value)"
+        }
+    }
+}
+
+/// Parsed value from a tmux `show-options -v` response.
+///
+/// tmux option values are always strings, but many have semantic types
+/// (boolean on/off, integer, choice). This struct preserves the raw string
+/// and provides typed accessors for common patterns.
+struct TmuxOptionValue: Equatable, Sendable {
+    /// Raw string value as returned by `show-options -v`.
+    /// Empty string if the option is unset or the query failed.
+    let rawValue: String
+    
+    /// Parse a `show-options -v` response into a `TmuxOptionValue`.
+    ///
+    /// The `-v` flag makes tmux return just the value with no option name prefix.
+    /// Response may contain a trailing newline which is stripped.
+    ///
+    /// Returns `nil` if the response is empty (option does not exist at this scope).
+    static func parse(response: String) -> TmuxOptionValue? {
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return TmuxOptionValue(rawValue: trimmed)
+    }
+    
+    /// Boolean interpretation: `"on"` → `true`, `"off"` → `false`, else `nil`.
+    var boolValue: Bool? {
+        switch rawValue.lowercased() {
+        case "on": return true
+        case "off": return false
+        default: return nil
+        }
+    }
+    
+    /// Integer interpretation, or `nil` if the value isn't a valid integer.
+    var intValue: Int? {
+        Int(rawValue)
+    }
+}
+
 // MARK: - ID Validation
 
 /// Validates and parses tmux identifiers

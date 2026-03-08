@@ -291,4 +291,134 @@ final class TmuxModelsTests: XCTestCase {
         
         XCTAssertEqual(sessions.count, 2, "Trailing newline should not create extra entry")
     }
+    
+    // MARK: - TmuxOptionScope Command Building
+    
+    func testShowCommandGlobal() {
+        let cmd = TmuxOptionScope.global.showCommand(for: "mouse")
+        XCTAssertEqual(cmd, "show-options -gv mouse")
+    }
+    
+    func testShowCommandSession() {
+        let cmd = TmuxOptionScope.session.showCommand(for: "escape-time")
+        XCTAssertEqual(cmd, "show-options -v escape-time")
+    }
+    
+    func testShowCommandWindow() {
+        let cmd = TmuxOptionScope.window.showCommand(for: "mode-keys")
+        XCTAssertEqual(cmd, "show-window-options -v mode-keys")
+    }
+    
+    func testSetCommandGlobal() {
+        let cmd = TmuxOptionScope.global.setCommand(for: "mouse", value: "on")
+        XCTAssertEqual(cmd, "set-option -g mouse on")
+    }
+    
+    func testSetCommandSession() {
+        let cmd = TmuxOptionScope.session.setCommand(for: "escape-time", value: "500")
+        XCTAssertEqual(cmd, "set-option escape-time 500")
+    }
+    
+    func testSetCommandWindow() {
+        let cmd = TmuxOptionScope.window.setCommand(for: "mode-keys", value: "vi")
+        XCTAssertEqual(cmd, "set-option -w mode-keys vi")
+    }
+    
+    // MARK: - TmuxOptionValue Parsing
+    
+    func testParseOptionValueSimpleString() {
+        let value = TmuxOptionValue.parse(response: "on")
+        XCTAssertNotNil(value)
+        XCTAssertEqual(value?.rawValue, "on")
+    }
+    
+    func testParseOptionValueWithTrailingNewline() {
+        let value = TmuxOptionValue.parse(response: "off\n")
+        XCTAssertNotNil(value)
+        XCTAssertEqual(value?.rawValue, "off")
+    }
+    
+    func testParseOptionValueWithLeadingWhitespace() {
+        let value = TmuxOptionValue.parse(response: "  500  \n")
+        XCTAssertNotNil(value)
+        XCTAssertEqual(value?.rawValue, "500")
+    }
+    
+    func testParseOptionValueEmptyReturnsNil() {
+        XCTAssertNil(TmuxOptionValue.parse(response: ""))
+    }
+    
+    func testParseOptionValueWhitespaceOnlyReturnsNil() {
+        XCTAssertNil(TmuxOptionValue.parse(response: "   \n\n  "))
+    }
+    
+    func testParseOptionValueComplexString() {
+        // window-size has values like "smallest", "largest", "latest", "manual"
+        let value = TmuxOptionValue.parse(response: "smallest")
+        XCTAssertNotNil(value)
+        XCTAssertEqual(value?.rawValue, "smallest")
+    }
+    
+    // MARK: - TmuxOptionValue Bool Accessor
+    
+    func testBoolValueOn() {
+        let value = TmuxOptionValue(rawValue: "on")
+        XCTAssertEqual(value.boolValue, true)
+    }
+    
+    func testBoolValueOff() {
+        let value = TmuxOptionValue(rawValue: "off")
+        XCTAssertEqual(value.boolValue, false)
+    }
+    
+    func testBoolValueCaseInsensitive() {
+        XCTAssertEqual(TmuxOptionValue(rawValue: "ON").boolValue, true)
+        XCTAssertEqual(TmuxOptionValue(rawValue: "Off").boolValue, false)
+        XCTAssertEqual(TmuxOptionValue(rawValue: "oN").boolValue, true)
+    }
+    
+    func testBoolValueNonBoolReturnsNil() {
+        XCTAssertNil(TmuxOptionValue(rawValue: "500").boolValue)
+        XCTAssertNil(TmuxOptionValue(rawValue: "smallest").boolValue)
+        XCTAssertNil(TmuxOptionValue(rawValue: "yes").boolValue)
+        XCTAssertNil(TmuxOptionValue(rawValue: "true").boolValue)
+    }
+    
+    // MARK: - TmuxOptionValue Int Accessor
+    
+    func testIntValueValid() {
+        XCTAssertEqual(TmuxOptionValue(rawValue: "500").intValue, 500)
+        XCTAssertEqual(TmuxOptionValue(rawValue: "0").intValue, 0)
+        XCTAssertEqual(TmuxOptionValue(rawValue: "10000").intValue, 10000)
+    }
+    
+    func testIntValueNonIntReturnsNil() {
+        XCTAssertNil(TmuxOptionValue(rawValue: "on").intValue)
+        XCTAssertNil(TmuxOptionValue(rawValue: "smallest").intValue)
+        XCTAssertNil(TmuxOptionValue(rawValue: "3.14").intValue)
+    }
+    
+    // MARK: - TmuxOptionValue Equatable
+    
+    func testOptionValueEquatable() {
+        let a = TmuxOptionValue(rawValue: "on")
+        let b = TmuxOptionValue(rawValue: "on")
+        XCTAssertEqual(a, b)
+    }
+    
+    func testOptionValueNotEqual() {
+        let a = TmuxOptionValue(rawValue: "on")
+        let b = TmuxOptionValue(rawValue: "off")
+        XCTAssertNotEqual(a, b)
+    }
+    
+    // MARK: - TmuxOptionScope Equatable
+    
+    func testOptionScopeEquatable() {
+        XCTAssertEqual(TmuxOptionScope.global, TmuxOptionScope.global)
+        XCTAssertEqual(TmuxOptionScope.session, TmuxOptionScope.session)
+        XCTAssertEqual(TmuxOptionScope.window, TmuxOptionScope.window)
+        XCTAssertNotEqual(TmuxOptionScope.global, TmuxOptionScope.session)
+        XCTAssertNotEqual(TmuxOptionScope.session, TmuxOptionScope.window)
+    }
 }
