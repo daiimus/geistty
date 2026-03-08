@@ -323,4 +323,169 @@ final class TmuxDataFlowTests: XCTestCase {
         XCTAssertEqual(reconstructed, fullData,
                        "Reconstructed stream must exactly match original — any reordering would corrupt DCS state machine")
     }
+    
+    // MARK: - 11. Awaiting Control Mode Suppression (#68)
+    
+    /// When in .awaitingControlMode, data without DCS 1000p should be suppressed
+    /// (not forwarded to delegate). This prevents shell echo of `exec tmux -CC`
+    /// from rendering on screen.
+    @MainActor
+    func testAwaitingControlModeSuppressesNonDCSData() {
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Enter awaitingControlMode state
+        session.setSessionDiscoveryStateAwaitingForTesting()
+        
+        // Simulate shell echo data (no DCS 1000p)
+        let shellEcho = "exec tmux -CC new-session -A -s 'geistty-1'\r\n".data(using: .utf8)!
+        session.simulateReceivedDataForTesting(shellEcho)
+        
+        // Data should NOT be forwarded to delegate
+        XCTAssertEqual(delegate.receivedDataCalls.count, 0,
+                       "Shell echo should be suppressed while awaiting control mode")
+        XCTAssertTrue(session.earlyReceiveBufferForTesting.isEmpty,
+                      "Shell echo should not be buffered either — it's discarded")
+        // Should still be in awaitingControlMode
+        XCTAssertTrue(session.isAwaitingControlModeForTesting,
+                      "Should remain in awaitingControlMode until DCS 1000p arrives")
+    }
+    
+    // MARK: - 12. Awaiting Control Mode Detects DCS 1000p (#68)
+    
+    /// When DCS 1000p arrives while in .awaitingControlMode, the state should
+    /// transition to .idle and the DCS data should be forwarded to the delegate.
+    @MainActor
+    func testAwaitingControlModeForwardsDCS1000p() {
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Enter awaitingControlMode state
+        session.setSessionDiscoveryStateAwaitingForTesting()
+        
+        // Simulate DCS 1000p arriving (tmux control mode activation)
+        let dcs1000p = "\u{1b}P1000p".data(using: .utf8)!
+        session.simulateReceivedDataForTesting(dcs1000p)
+        
+        // DCS data should be forwarded to delegate
+        XCTAssertEqual(delegate.receivedDataCalls.count, 1,
+                       "DCS 1000p should be forwarded to delegate")
+        XCTAssertEqual(delegate.receivedDataCalls[0].data, dcs1000p,
+                       "Forwarded data should be the DCS 1000p sequence")
+        // Should transition to idle
+        XCTAssertTrue(session.isSessionDiscoveryIdleForTesting,
+                      "Should transition to idle after DCS 1000p detected")
+    }
+    
+    // MARK: - 13. Shell Echo Before DCS 1000p in Same Chunk (#68)
+    
+    /// When a single SSH chunk contains both shell echo and DCS 1000p,
+    /// only the DCS 1000p and data after it should be forwarded.
+    @MainActor
+    func testAwaitingControlModeDiscardsPrefixBeforeDCS() {
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Enter awaitingControlMode state
+        session.setSessionDiscoveryStateAwaitingForTesting()
+        
+        // Simulate a chunk with shell echo + DCS 1000p + tmux output
+        let shellEcho = "exec tmux -CC new-session -A -s 'geistty-1'\r\n"
+        let dcsAndOutput = "\u{1b}P1000p%output %0 hello\n"
+        let combined = (shellEcho + dcsAndOutput).data(using: .utf8)!
+        session.simulateReceivedDataForTesting(combined)
+        
+        // Only DCS 1000p onward should be forwarded
+        let expectedForwarded = dcsAndOutput.data(using: .utf8)!
+        XCTAssertEqual(delegate.receivedDataCalls.count, 1,
+                       "Should forward exactly one chunk (DCS + trailing data)")
+        XCTAssertEqual(delegate.receivedDataCalls[0].data, expectedForwarded,
+                       "Should discard shell echo and forward from DCS 1000p onward")
+        XCTAssertTrue(session.isSessionDiscoveryIdleForTesting,
+                      "Should transition to idle")
+    }
+    
+    // MARK: - 14. Multiple Suppressed Chunks Before DCS (#68)
+    
+    /// Multiple data chunks may arrive before DCS 1000p. All should be suppressed.
+    @MainActor
+    func testAwaitingControlModeSuppressesMultipleChunks() {
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Enter awaitingControlMode state
+        session.setSessionDiscoveryStateAwaitingForTesting()
+        
+        // Simulate several chunks of shell output before DCS 1000p
+        let chunk1 = "exec tmux".data(using: .utf8)!
+        let chunk2 = " -CC new-session -A -s 'geistty-1'\r\n".data(using: .utf8)!
+        let chunk3 = "some other shell output\r\n".data(using: .utf8)!
+        
+        session.simulateReceivedDataForTesting(chunk1)
+        session.simulateReceivedDataForTesting(chunk2)
+        session.simulateReceivedDataForTesting(chunk3)
+        
+        // All should be suppressed
+        XCTAssertEqual(delegate.receivedDataCalls.count, 0,
+                       "All pre-DCS chunks should be suppressed")
+        XCTAssertTrue(session.isAwaitingControlModeForTesting,
+                      "Should still be awaiting control mode")
+        
+        // Now DCS 1000p arrives
+        let dcs = "\u{1b}P1000p".data(using: .utf8)!
+        session.simulateReceivedDataForTesting(dcs)
+        
+        // Only this chunk should be forwarded
+        XCTAssertEqual(delegate.receivedDataCalls.count, 1,
+                       "DCS 1000p should be forwarded")
+        XCTAssertTrue(session.isSessionDiscoveryIdleForTesting,
+                      "Should transition to idle")
+    }
+    
+    // MARK: - 15. Normal Data After Control Mode Activated (#68)
+    
+    /// After DCS 1000p arrives and state returns to .idle, subsequent data
+    /// should flow normally to the delegate.
+    @MainActor
+    func testNormalDataFlowAfterControlModeActivated() {
+        let session = SSHSession()
+        let delegate = MockSSHSessionDelegate()
+        session.delegate = delegate
+        
+        // Enter awaitingControlMode, then activate with DCS 1000p
+        session.setSessionDiscoveryStateAwaitingForTesting()
+        let dcs = "\u{1b}P1000p".data(using: .utf8)!
+        session.simulateReceivedDataForTesting(dcs)
+        
+        XCTAssertTrue(session.isSessionDiscoveryIdleForTesting)
+        
+        // Subsequent data should flow normally
+        let normalData = "%output %0 world\n".data(using: .utf8)!
+        session.simulateReceivedDataForTesting(normalData)
+        
+        XCTAssertEqual(delegate.receivedDataCalls.count, 2,
+                       "DCS + subsequent data = 2 delegate calls")
+        XCTAssertEqual(delegate.receivedDataCalls[1].data, normalData,
+                       "Normal data should flow through after idle")
+    }
+    
+    // MARK: - 16. Disconnect Clears Awaiting State (#68)
+    
+    /// Disconnecting while in .awaitingControlMode should reset to .idle.
+    @MainActor
+    func testDisconnectClearsAwaitingControlMode() {
+        let session = SSHSession()
+        
+        session.setSessionDiscoveryStateAwaitingForTesting()
+        XCTAssertTrue(session.isAwaitingControlModeForTesting)
+        
+        session.disconnect()
+        
+        XCTAssertTrue(session.isSessionDiscoveryIdleForTesting,
+                      "Disconnect should reset awaitingControlMode to idle")
+    }
 }
