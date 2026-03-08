@@ -420,6 +420,95 @@ extension TmuxSessionManagerTests {
     }
 }
 
+// MARK: - handleActiveWindowChanged Tests
+
+extension TmuxSessionManagerTests {
+
+    @MainActor
+    func testActiveWindowChangedUpdatesKnownWindow() {
+        let mgr = TmuxSessionManager()
+        let layout0 = singlePaneLayout(paneId: 0)
+        let layout1 = singlePaneLayout(paneId: 1)
+
+        // Populate two windows via reconciliation
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [
+                .init(id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                .init(id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
+            ],
+            activeWindowId: 0,
+            paneIds: [0, 1]
+        ))
+        XCTAssertEqual(mgr.focusedWindowId, "@0")
+
+        // Switch active window via the new notification handler
+        mgr.handleActiveWindowChanged(windowId: 1)
+
+        XCTAssertEqual(mgr.focusedWindowId, "@1")
+    }
+
+    @MainActor
+    func testActiveWindowChangedNoOpForSameWindow() {
+        let mgr = TmuxSessionManager()
+        let layout0 = singlePaneLayout(paneId: 0)
+
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout0, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [0]
+        ))
+        let previousTree = mgr.currentSplitTree
+
+        // "Switching" to the already-focused window — should be a no-op
+        mgr.handleActiveWindowChanged(windowId: 0)
+
+        XCTAssertEqual(mgr.focusedWindowId, "@0")
+        // Split tree reference should be unchanged
+        XCTAssertEqual(mgr.currentSplitTree.paneIds, previousTree.paneIds)
+    }
+
+    @MainActor
+    func testActiveWindowChangedIgnoresUnknownWindow() {
+        let mgr = TmuxSessionManager()
+        let layout0 = singlePaneLayout(paneId: 0)
+
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [.init(id: 0, name: "bash", layout: layout0, focusedPaneId: -1)],
+            activeWindowId: 0,
+            paneIds: [0]
+        ))
+
+        // Switch to a window ID we've never seen — should not update focusedWindowId
+        mgr.handleActiveWindowChanged(windowId: 99)
+
+        XCTAssertEqual(mgr.focusedWindowId, "@0")
+    }
+
+    @MainActor
+    func testActiveWindowChangedUpdatesSplitTree() {
+        let mgr = TmuxSessionManager()
+        let layout0 = singlePaneLayout(paneId: 0)
+        let layout1 = horizontalSplitLayout(paneA: 1, paneB: 2)
+
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [
+                .init(id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                .init(id: 1, name: "vim", layout: layout1, focusedPaneId: -1),
+            ],
+            activeWindowId: 0,
+            paneIds: [0, 1, 2]
+        ))
+        // Window @0 is a single pane — not a split
+        XCTAssertFalse(mgr.currentSplitTree.isSplit)
+
+        // Switch to window @1 (horizontal split) — should update the split tree
+        mgr.handleActiveWindowChanged(windowId: 1)
+
+        XCTAssertTrue(mgr.currentSplitTree.isSplit)
+        XCTAssertEqual(Set(mgr.currentSplitTree.paneIds), Set([1, 2]))
+    }
+}
+
 // MARK: - Cleanup Tests
 
 extension TmuxSessionManagerTests {

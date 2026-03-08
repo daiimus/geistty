@@ -268,6 +268,7 @@ extension Notification.Name {
     static let tmuxExited = Notification.Name("tmuxExited")
     static let tmuxReady = Notification.Name("tmuxReady")
     static let tmuxCommandResponse = Notification.Name("tmuxCommandResponse")
+    static let tmuxActiveWindowChanged = Notification.Name("tmuxActiveWindowChanged")
     
     // tmux session management
     static let showTmuxSessions = Notification.Name("showTmuxSessions")
