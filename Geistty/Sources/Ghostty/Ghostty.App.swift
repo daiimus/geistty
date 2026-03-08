@@ -601,7 +601,7 @@ extension Ghostty {
                 }
                 
                 // Extract the exit reason from the C struct.
-                // The reason is a fixed-size buffer (23 bytes) with a length field,
+                // The reason is a fixed-size C buffer with a length field,
                 // matching tmux's known exit reasons ("detached", "server-exited", etc.).
                 let exitData = action.action.tmux_exit
                 let reason: String = withUnsafePointer(to: exitData.reason) { ptr in
@@ -655,12 +655,12 @@ extension Ghostty {
                 let content: String
                 if resp.len > 0, let ptr = resp.data {
                     content = String(
-                        bytes: UnsafeRawBufferPointer(
+                        decoding: UnsafeRawBufferPointer(
                             start: UnsafeRawPointer(ptr),
                             count: resp.len
                         ),
-                        encoding: .utf8
-                    ) ?? ""
+                        as: UTF8.self
+                    )
                 } else {
                     content = ""
                 }
