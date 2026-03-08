@@ -190,13 +190,55 @@ enum TmuxOptionScope: Equatable, Sendable {
         }
     }
     
-    /// Sanitize a tmux option name by stripping whitespace and control characters.
-    private static func sanitizeOptionName(_ option: String) -> String {
+    /// Allowlist of characters valid in tmux option names.
+    ///
+    /// tmux option names are alphanumeric with hyphens, underscores, and `@`
+    /// (for user options). Dots appear in some server options. Everything else
+    /// — especially `;` (command separator), quotes, backslashes, whitespace,
+    /// and control characters — is stripped to prevent command injection.
+    private static let allowedOptionNameCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@_-."
+    )
+    
+    /// Sanitize a tmux option name by keeping only allowlisted characters.
+    ///
+    /// Only `[A-Za-z0-9@_-.]` are permitted. Everything else (whitespace,
+    /// control characters, semicolons, quotes, backslashes) is stripped.
+    /// This prevents command injection through option names — e.g.,
+    /// `"mouse\n; kill-server"` becomes `"mousekill-server"`.
+    static func sanitizeOptionName(_ option: String) -> String {
         let filtered = option.unicodeScalars.filter { scalar in
-            !CharacterSet.whitespacesAndNewlines.contains(scalar) &&
-            !CharacterSet.controlCharacters.contains(scalar)
+            allowedOptionNameCharacters.contains(scalar)
         }
         return String(String.UnicodeScalarView(filtered))
+    }
+    
+    /// Normalize a tmux option value the same way `quoteTmuxValue` does,
+    /// but without the surrounding double-quote wrapper.
+    ///
+    /// Use this to produce the canonical value for cache storage, so the
+    /// cache stays consistent with what the server actually receives.
+    ///
+    /// - Newlines (`\n`, `\r`) are normalized to a single space.
+    /// - Other control characters are dropped.
+    /// - Backslashes and double quotes are escaped with a backslash.
+    static func normalizeOptionValue(_ value: String) -> String {
+        let cleaned = value.unicodeScalars.compactMap { scalar -> UnicodeScalar? in
+            if CharacterSet.controlCharacters.contains(scalar) {
+                return (scalar == "\n" || scalar == "\r") ? UnicodeScalar(0x20) : nil
+            }
+            return scalar
+        }
+        
+        var escaped = ""
+        escaped.reserveCapacity(String(String.UnicodeScalarView(cleaned)).count)
+        for ch in String(String.UnicodeScalarView(cleaned)) {
+            if ch == "\\" || ch == "\"" {
+                escaped.append("\\")
+            }
+            escaped.append(ch)
+        }
+        return escaped
     }
     
     /// Quote and escape a tmux option value for safe interpolation into a command.
@@ -207,22 +249,7 @@ enum TmuxOptionScope: Equatable, Sendable {
     /// - Backslashes and double quotes are escaped with a backslash.
     /// - The entire value is wrapped in double quotes.
     private static func quoteTmuxValue(_ value: String) -> String {
-        let cleaned = value.unicodeScalars.compactMap { scalar -> UnicodeScalar? in
-            if CharacterSet.controlCharacters.contains(scalar) {
-                return (scalar == "\n" || scalar == "\r") ? UnicodeScalar(0x20) : nil
-            }
-            return scalar
-        }
-        
-        var escaped = ""
-        escaped.reserveCapacity(String(String.UnicodeScalarView(cleaned)).count + 2)
-        for ch in String(String.UnicodeScalarView(cleaned)) {
-            if ch == "\\" || ch == "\"" {
-                escaped.append("\\")
-            }
-            escaped.append(ch)
-        }
-        return "\"\(escaped)\""
+        "\"\(normalizeOptionValue(value))\""
     }
 }
 

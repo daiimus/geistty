@@ -335,9 +335,42 @@ final class TmuxModelsTests: XCTestCase {
     }
     
     func testShowCommandSanitizesOptionName() {
-        // Control chars and whitespace in option name are stripped
+        // Allowlist strips everything except [A-Za-z0-9@_-.]
+        // Semicolons, spaces, newlines, and control chars are all removed
         let cmd = TmuxOptionScope.global.showCommand(for: "mouse\n; kill-server")
-        XCTAssertEqual(cmd, "show-options -gv mouse;kill-server")
+        XCTAssertEqual(cmd, "show-options -gv mousekill-server")
+    }
+    
+    func testSanitizeOptionNameAllowsValidCharacters() {
+        // @user-option, dotted.option, normal-option — all should pass through
+        let result = TmuxOptionScope.sanitizeOptionName("@my_user-opt.v2")
+        XCTAssertEqual(result, "@my_user-opt.v2")
+    }
+    
+    func testSanitizeOptionNameStripsCommandSeparators() {
+        // Semicolons, quotes, backslashes, pipes — all stripped
+        let result = TmuxOptionScope.sanitizeOptionName("mouse; kill-server | rm -rf")
+        XCTAssertEqual(result, "mousekill-serverrm-rf")
+    }
+    
+    func testNormalizeOptionValuePassthroughSimple() {
+        let result = TmuxOptionScope.normalizeOptionValue("on")
+        XCTAssertEqual(result, "on")
+    }
+    
+    func testNormalizeOptionValueEscapesQuotesAndBackslashes() {
+        let result = TmuxOptionScope.normalizeOptionValue("\"hello\\world\"")
+        XCTAssertEqual(result, "\\\"hello\\\\world\\\"")
+    }
+    
+    func testNormalizeOptionValueNormalizesNewlines() {
+        let result = TmuxOptionScope.normalizeOptionValue("line1\nline2\rline3")
+        XCTAssertEqual(result, "line1 line2 line3")
+    }
+    
+    func testNormalizeOptionValueDropsControlChars() {
+        let result = TmuxOptionScope.normalizeOptionValue("hello\u{01}world")
+        XCTAssertEqual(result, "helloworld")
     }
     
     // MARK: - TmuxOptionValue Parsing

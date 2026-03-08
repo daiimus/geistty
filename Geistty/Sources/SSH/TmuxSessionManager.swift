@@ -1731,7 +1731,11 @@ class TmuxSessionManager: ObservableObject {
             return
         }
         
-        let command = scope.showCommand(for: name)
+        // Sanitize once and use the sanitized name for both the command and cache key.
+        // This prevents a mismatch where the command uses a sanitized name but the
+        // cache stores the result under the original (unsanitized) name.
+        let safeName = TmuxOptionScope.sanitizeOptionName(name)
+        let command = scope.showCommand(for: safeName)
         
         // Register handler BEFORE sending command (FIFO ordering guarantee)
         pendingResponseHandlers.append { [weak self] content, isError in
@@ -1740,13 +1744,13 @@ class TmuxSessionManager: ObservableObject {
                 return
             }
             if isError {
-                logger.warning("show-options failed for '\(name)': \(content)")
+                logger.warning("show-options failed for '\(safeName)': \(content)")
                 handler(nil)
                 return
             }
             let value = TmuxOptionValue.parse(response: content)
             if let value = value {
-                self.tmuxOptions[name] = value
+                self.tmuxOptions[safeName] = value
             }
             handler(value)
         }
@@ -1777,15 +1781,20 @@ class TmuxSessionManager: ObservableObject {
             return
         }
         
-        let command = scope.setCommand(for: name, value: value)
+        // Sanitize the option name once — use the sanitized name for both the
+        // command and the cache key, so they stay consistent.
+        let safeName = TmuxOptionScope.sanitizeOptionName(name)
+        let command = scope.setCommand(for: safeName, value: value)
         sendCommandFireAndForget(command)
         
-        // Optimistic cache update — if the server rejects it we'll find out
-        // on the next query, but for common operations (mouse on/off) this
-        // gives immediate UI feedback.
-        tmuxOptions[name] = TmuxOptionValue(rawValue: value)
+        // Optimistic cache update — store the NORMALIZED value (same transformation
+        // that quoteTmuxValue applies: newlines → spaces, control chars dropped,
+        // backslashes and quotes escaped). This keeps the cache consistent with
+        // what the server actually receives.
+        let normalizedValue = TmuxOptionScope.normalizeOptionValue(value)
+        tmuxOptions[safeName] = TmuxOptionValue(rawValue: normalizedValue)
         
-        logger.info("Set tmux option '\(name)' = '\(value)' (scope: \(String(describing: scope)))")
+        logger.info("Set tmux option '\(safeName)' = '\(normalizedValue)' (scope: \(String(describing: scope)))")
     }
     
     /// Query critical tmux options on connect.
