@@ -308,6 +308,7 @@ class TmuxSessionManager: ObservableObject {
         currentSplitTree = TmuxSplitTree()
         availableSessions.removeAll()
         tmuxOptions.removeAll()
+        pendingResponseHandlers.removeAll()
         
         // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
