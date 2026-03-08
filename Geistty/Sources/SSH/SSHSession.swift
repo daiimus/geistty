@@ -541,7 +541,12 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            logger.info("tmux control mode exited via TMUX_EXIT")
+            // Extract the exit reason forwarded from Ghostty's tmux viewer.
+            // Known reasons: "detached" (voluntary), "server-exited" (crash),
+            // "" (empty, e.g. session destroyed).
+            let reason = notification.userInfo?["reason"] as? String ?? ""
+            logger.info("tmux control mode exited via TMUX_EXIT, reason: \(reason.isEmpty ? "(none)" : reason)")
+            
             self.controlModeState = .inactive
             self.tmuxPaneActivated = false
             self.activeTmuxPaneId = nil
@@ -560,7 +565,9 @@ class SSHSession: ObservableObject, Identifiable {
             } else {
                 // Normal tmux exit (user ran `exit`, server killed session, etc.)
                 // Nuclear teardown — destroy all surfaces and reset state.
-                self.tmuxSessionManager?.controlModeExited(reason: "Ghostty tmux viewer exited")
+                // Forward the reason so TmuxSessionManager can distinguish
+                // voluntary detach from involuntary exit.
+                self.tmuxSessionManager?.controlModeExited(reason: reason.isEmpty ? nil : reason)
             }
         }
         

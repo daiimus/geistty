@@ -600,13 +600,27 @@ extension Ghostty {
                     return false
                 }
                 
-                logger.info("🪟 tmux control mode exited")
+                // Extract the exit reason from the C struct.
+                // The reason is a fixed-size buffer (23 bytes) with a length field,
+                // matching tmux's known exit reasons ("detached", "server-exited", etc.).
+                let exitData = action.action.tmux_exit
+                let reason: String = withUnsafePointer(to: exitData.reason) { ptr in
+                    let buf = UnsafeRawPointer(ptr).assumingMemoryBound(to: UInt8.self)
+                    // Clamp to buffer size to prevent out-of-bounds read if
+                    // Zig side ever sets reason_len > sizeof(reason).
+                    let len = min(Int(exitData.reason_len), MemoryLayout.size(ofValue: exitData.reason))
+                    return String(bytes: UnsafeBufferPointer(start: buf, count: len), encoding: .utf8) ?? ""
+                }
+                
+                logger.info("🪟 tmux control mode exited, reason: \(reason.isEmpty ? "(none)" : reason)")
                 
                 // Post synchronously — already on main thread via tick().
+                // Forward the reason so observers can differentiate voluntary
+                // detach ("detached") from involuntary exit ("server-exited").
                 NotificationCenter.default.post(
                     name: .tmuxExited,
                     object: surface,
-                    userInfo: [:]
+                    userInfo: ["reason": reason]
                 )
                 return true
                 
