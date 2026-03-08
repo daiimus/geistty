@@ -1750,12 +1750,16 @@ class TmuxSessionManager: ObservableObject {
             }
             if isError {
                 logger.warning("show-options failed for '\(safeName)': \(content)")
+                self.tmuxOptions.removeValue(forKey: safeName)
                 handler(nil)
                 return
             }
             let value = TmuxOptionValue.parse(response: content)
             if let value = value {
                 self.tmuxOptions[safeName] = value
+            } else {
+                // Option was unset or response was empty — evict stale cache entry
+                self.tmuxOptions.removeValue(forKey: safeName)
             }
             handler(value)
         }
@@ -1799,7 +1803,13 @@ class TmuxSessionManager: ObservableObject {
         // it matches what tmux will report via `show-options -v`. Escaping for
         // command-line safety is handled by `setCommand(for:value:)` above.
         let cleanedValue = TmuxOptionScope.normalizeOptionValue(value)
-        tmuxOptions[safeName] = TmuxOptionValue(rawValue: cleanedValue)
+        if cleanedValue.isEmpty {
+            // An empty normalized value means the option is effectively unset —
+            // remove any stale cache entry rather than storing an empty value.
+            tmuxOptions.removeValue(forKey: safeName)
+        } else {
+            tmuxOptions[safeName] = TmuxOptionValue(rawValue: cleanedValue)
+        }
         
         if viewerReady {
             logger.info("Set tmux option '\(safeName)' = '\(cleanedValue)' (scope: \(String(describing: scope)))")

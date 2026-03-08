@@ -4425,6 +4425,27 @@ extension TmuxSessionManagerTests {
     }
 
     @MainActor
+    func testQueryOptionErrorEvictsStaleCacheEntry() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let log = CommandLog()
+        mgr.setupWithDirectWrite { log.commands.append($0) }
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Pre-populate cache via setOption (the public way)
+        mgr.setOption(name: "nonexistent", value: "stale")
+        XCTAssertNotNil(mgr.tmuxOptions["nonexistent"])
+
+        mgr.queryOption(name: "nonexistent") { _ in }
+        mgr.handleCommandResponse(content: "unknown option", isError: true)
+
+        XCTAssertNil(mgr.tmuxOptions["nonexistent"],
+                     "Error response should evict stale cache entry")
+    }
+
+    @MainActor
     func testQueryOptionEmptyResponseCallsHandlerWithNil() {
         let mgr = TmuxSessionManager()
         let mock = MockTmuxSurface()
@@ -4437,6 +4458,27 @@ extension TmuxSessionManagerTests {
         mgr.handleCommandResponse(content: "", isError: false)
 
         XCTAssertNil(result, "Empty response should yield nil (option not set)")
+    }
+
+    @MainActor
+    func testQueryOptionEmptyResponseEvictsStaleCacheEntry() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        let log = CommandLog()
+        mgr.setupWithDirectWrite { log.commands.append($0) }
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Pre-populate cache via setOption (the public way)
+        mgr.setOption(name: "unset-option", value: "stale")
+        XCTAssertNotNil(mgr.tmuxOptions["unset-option"])
+
+        mgr.queryOption(name: "unset-option") { _ in }
+        mgr.handleCommandResponse(content: "", isError: false)
+
+        XCTAssertNil(mgr.tmuxOptions["unset-option"],
+                     "Empty/nil parse should evict stale cache entry")
     }
 
     @MainActor
@@ -4519,6 +4561,20 @@ extension TmuxSessionManagerTests {
 
         mgr.setOption(name: "mouse", value: "off")
         XCTAssertEqual(mgr.tmuxOptions["mouse"]?.boolValue, false)
+    }
+
+    @MainActor
+    func testSetOptionEmptyValueEvictsCacheEntry() {
+        let (mgr, _) = managerWithCommandLog()
+
+        // Pre-populate cache
+        mgr.setOption(name: "mouse", value: "on")
+        XCTAssertNotNil(mgr.tmuxOptions["mouse"])
+
+        // Setting to a value that normalizes to empty should evict
+        mgr.setOption(name: "mouse", value: "\u{01}\u{02}")
+        XCTAssertNil(mgr.tmuxOptions["mouse"],
+                     "Empty normalized value should evict cache entry, not store empty TmuxOptionValue")
     }
 
     // MARK: - queryInitialOptions()
