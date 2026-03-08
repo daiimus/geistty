@@ -507,6 +507,30 @@ extension TmuxSessionManagerTests {
         XCTAssertTrue(mgr.currentSplitTree.isSplit)
         XCTAssertEqual(Set(mgr.currentSplitTree.paneIds), Set([1, 2]))
     }
+
+    @MainActor
+    func testActiveWindowChangedClearsSplitTreeWhenNoTree() {
+        let mgr = TmuxSessionManager()
+        let layout0 = singlePaneLayout(paneId: 0)
+
+        // Initial reconcile: window @0 has a valid layout, window @1 has an
+        // unparseable layout so windowSplitTrees won't have an entry for it.
+        _ = mgr.reconcileTmuxState(TmuxSessionManager.TmuxStateSnapshot(
+            windows: [
+                .init(id: 0, name: "bash", layout: layout0, focusedPaneId: -1),
+                .init(id: 1, name: "noparse", layout: "INVALID", focusedPaneId: -1),
+            ],
+            activeWindowId: 0,
+            paneIds: [0]
+        ))
+        XCTAssertFalse(mgr.currentSplitTree.isEmpty)
+
+        // Switch to @1 — should clear the split tree rather than keeping stale data.
+        mgr.handleActiveWindowChanged(windowId: 1)
+
+        XCTAssertEqual(mgr.focusedWindowId, "@1")
+        XCTAssertTrue(mgr.currentSplitTree.isEmpty)
+    }
 }
 
 // MARK: - Cleanup Tests

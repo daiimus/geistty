@@ -628,7 +628,9 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            let windowId = notification.userInfo?["windowId"] as? UInt32 ?? 0
+            guard let windowId = notification.userInfo?["windowId"] as? UInt32 else {
+                return
+            }
             
             self.tmuxSessionManager?.handleActiveWindowChanged(windowId: Int(windowId))
         }

@@ -509,9 +509,14 @@ class TmuxSessionManager: ObservableObject {
         if windows[newFocusedWindowId] != nil {
             focusedWindowId = newFocusedWindowId
             
-            // Swap the split tree so the UI shows the new window's layout
+            // Swap the split tree so the UI shows the new window's layout.
+            // If the window has no parsed split tree (e.g., layout parse failed),
+            // clear currentSplitTree so we don't briefly show a stale layout.
             if let tree = windowSplitTrees[newFocusedWindowId] {
                 currentSplitTree = tree
+            } else {
+                logger.info("Active window \(newFocusedWindowId) has no split tree; clearing currentSplitTree")
+                currentSplitTree = TmuxSplitTree()
             }
         }
     }
