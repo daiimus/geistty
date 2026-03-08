@@ -3790,18 +3790,33 @@ extension TmuxSessionManagerTests {
     @MainActor
     func testHandleCommandResponseDispatchesFIFO() {
         let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
         var results: [(String, Bool)] = []
 
-        // Register two handlers
+        // Orphan response (no handler registered) should not crash
         mgr.handleCommandResponse(content: "orphan", isError: false)
-        // No handler → warning logged, no crash
-
-        // Now register handlers and deliver responses
-        // We need to access the internal handler queue via the public API.
-        // Since copyTmuxBuffer/pasteTmuxBuffer register handlers, we test through them.
-        // But we can test handleCommandResponse directly via the test accessor.
         XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
                        "Should start with no pending handlers")
+
+        // Register two handlers manually via copy operations and verify FIFO dispatch
+        mgr.copyTmuxBuffer()
+        mgr.copyTmuxBuffer()
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 2,
+                       "Should have two pending handlers")
+
+        // Deliver first response → first handler
+        mgr.handleCommandResponse(content: "first", isError: false)
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1,
+                       "First handler should be consumed")
+
+        // Deliver second response → second handler
+        mgr.handleCommandResponse(content: "second", isError: false)
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0,
+                       "Second handler should be consumed")
     }
 
     @MainActor
@@ -3830,6 +3845,9 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
         mgr.copyTmuxBuffer()
         XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 1)
 
@@ -3850,6 +3868,9 @@ extension TmuxSessionManagerTests {
         #if DEBUG
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
+
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
 
         // Set clipboard to a known value
         UIPasteboard.general.string = "original"
@@ -3904,6 +3925,9 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
         // Set clipboard content
         UIPasteboard.general.string = "clipboard text"
 
@@ -3937,6 +3961,9 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
         UIPasteboard.general.string = ""
 
         mgr.pasteTmuxBuffer()
@@ -3954,7 +3981,11 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
         UIPasteboard.general.string = "line with \\backslash and \"quotes\""
+        mgr.setFocusedPane("0")
 
         mgr.pasteTmuxBuffer()
 
@@ -3962,7 +3993,56 @@ extension TmuxSessionManagerTests {
         XCTAssertTrue(cmd.contains("\\\\backslash"),
                       "Backslashes should be doubled: got \(cmd)")
         XCTAssertTrue(cmd.contains("\\\"quotes\\\""),
-                      "Quotes should be escaped: got \(cmd)")
+                       "Quotes should be escaped: got \(cmd)")
+    }
+
+    /// Newlines and carriage returns in clipboard content must be escaped
+    /// to prevent breaking tmux control-mode command framing.
+    @MainActor
+    func testPasteTmuxBufferEscapesNewlines() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
+        UIPasteboard.general.string = "line1\nline2\rline3"
+        mgr.setFocusedPane("0")
+
+        mgr.pasteTmuxBuffer()
+
+        let cmd = mock.sendTmuxCommandCalls.first ?? ""
+        XCTAssertTrue(cmd.contains("\\n"),
+                       "Newlines should be escaped: got \(cmd)")
+        XCTAssertTrue(cmd.contains("\\r"),
+                       "Carriage returns should be escaped: got \(cmd)")
+        XCTAssertFalse(cmd.contains("\n"),
+                       "Raw newlines must not appear in command: got \(cmd)")
+    }
+
+    /// pasteTmuxBuffer should bail out when no pane is focused.
+    @MainActor
+    func testPasteTmuxBufferNoFocusedPaneDoesNothing() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
+        UIPasteboard.general.string = "something"
+        // Do NOT set focusedPaneId — it defaults to ""
+
+        mgr.pasteTmuxBuffer()
+
+        XCTAssertTrue(mock.sendTmuxCommandCalls.isEmpty,
+                       "Should not send command when focusedPaneId is empty")
+        XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
     }
 
     @MainActor
@@ -3975,7 +4055,11 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
         UIPasteboard.general.string = "something"
+        mgr.setFocusedPane("0")
         mgr.pasteTmuxBuffer()
 
         // Simulate error on set-buffer
@@ -4009,6 +4093,9 @@ extension TmuxSessionManagerTests {
         #if DEBUG
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
+
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
 
         // Queue two copy operations
         mgr.copyTmuxBuffer()
