@@ -264,11 +264,18 @@ class SSHSession: ObservableObject, Identifiable {
         /// Stores the accumulated buffer and the nonce-based end marker for this query,
         /// so we match only the actual sentinel output and not the echoed command. See #4.
         case querying(buffer: String, endMarker: String)
+        /// Discovery complete, `exec tmux -CC` sent, waiting for DCS 1000p to arrive.
+        /// All data in this state is suppressed (not forwarded to Ghostty) to prevent
+        /// the shell echo of the exec command from rendering on screen. See #68.
+        case awaitingControlMode
     }
     private var sessionDiscoveryState: SessionDiscoveryState = .idle
     
-    /// Timer for session discovery timeout (H6 fix)
-    private var sessionDiscoveryTimer: Task<Void, Never>?
+    /// Single deadline timer for the entire tmux attach flow (#68, H6).
+    /// Covers both session discovery (.querying) and DCS 1000p wait (.awaitingControlMode).
+    /// Started once in attachToTmuxNow(), cancelled when DCS 1000p arrives.
+    /// If it fires, checks the current state and falls back appropriately.
+    private var tmuxAttachTimer: Task<Void, Never>?
     
     // Queue of input data waiting to be sent once control mode activates
     // This prevents input from going to tmux's command prompt before the shell is ready
@@ -313,7 +320,7 @@ class SSHSession: ObservableObject, Identifiable {
         writeContinuation?.finish()
         writeConsumerTask?.cancel()
         backgroundSafetyTimerTask?.cancel()
-        sessionDiscoveryTimer?.cancel()
+        tmuxAttachTimer?.cancel()
         
         // NotificationCenter.removeObserver is thread-safe, so this is safe
         // even though @MainActor deinit may run on an arbitrary thread.
@@ -729,9 +736,16 @@ class SSHSession: ObservableObject, Identifiable {
     private func attachToTmuxNow() {
         guard tmuxMode == .controlMode else { return }
         
+        // Start a single deadline timer for the entire attach flow.
+        // Covers both discovery (.querying) and DCS 1000p wait (.awaitingControlMode).
+        // If the timer fires, it checks which phase we're stuck in and acts accordingly.
+        startTmuxAttachTimer()
+        
         // If the user specified a custom session name, skip discovery
         if let customName = tmuxSessionName, !customName.isEmpty {
             logger.info("Using custom tmux session name: \(customName)")
+            // #68: Suppress shell echo until DCS 1000p arrives
+            sessionDiscoveryState = .awaitingControlMode
             sendTmuxAttachCommand(sessionName: customName)
             return
         }
@@ -742,20 +756,6 @@ class SSHSession: ObservableObject, Identifiable {
         sessionDiscoveryState = .querying(buffer: "", endMarker: marker)
         if let data = query.data(using: .utf8) {
             writeControlCommand(data)
-        }
-        
-        // H6 fix: Start a timeout — if sentinel never arrives within 5 seconds,
-        // fall back to default session name to prevent hanging indefinitely
-        sessionDiscoveryTimer?.cancel()
-        sessionDiscoveryTimer = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            guard !Task.isCancelled else { return }
-            guard let self = self else { return }
-            if case .querying = self.sessionDiscoveryState {
-                logger.warning("Session discovery timed out after 5s, falling back to default name")
-                self.sessionDiscoveryState = .idle
-                self.sendTmuxAttachCommand(sessionName: "\(TmuxSessionNameResolver.prefix)1")
-            }
         }
     }
     
@@ -770,6 +770,29 @@ class SSHSession: ObservableObject, Identifiable {
         // Write directly to connection — don't go through self.write() which would queue it!
         if let data = command.data(using: .utf8) {
             writeControlCommand(data)
+        }
+    }
+    
+    /// Single deadline timer for the entire tmux attach flow (H6 + #68).
+    /// Covers both discovery (.querying) and DCS 1000p wait (.awaitingControlMode).
+    /// If the timer fires in either phase, falls back to .idle so data flows
+    /// normally. 10s is generous — discovery + exec + tmux startup typically < 2s.
+    private func startTmuxAttachTimer() {
+        tmuxAttachTimer?.cancel()
+        tmuxAttachTimer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard !Task.isCancelled else { return }
+            guard let self = self else { return }
+            switch self.sessionDiscoveryState {
+            case .querying:
+                logger.warning("Tmux attach timed out during discovery after 10s, falling back to idle")
+                self.sessionDiscoveryState = .idle
+            case .awaitingControlMode:
+                logger.warning("Tmux attach timed out awaiting DCS 1000p after 10s, falling back to idle")
+                self.sessionDiscoveryState = .idle
+            case .idle:
+                break
+            }
         }
     }
     
@@ -988,8 +1011,8 @@ class SSHSession: ObservableObject, Identifiable {
         viewerReady = false
         backgroundState = nil
         sessionDiscoveryState = .idle
-        sessionDiscoveryTimer?.cancel()
-        sessionDiscoveryTimer = nil
+        tmuxAttachTimer?.cancel()
+        tmuxAttachTimer = nil
         backgroundSafetyTimerTask?.cancel()
         backgroundSafetyTimerTask = nil
         pendingInputQueue.removeAll()
@@ -1185,6 +1208,9 @@ class SSHSession: ObservableObject, Identifiable {
             tmuxPaneActivated = false
             activeTmuxPaneId = nil
             viewerReady = false
+            sessionDiscoveryState = .idle
+            tmuxAttachTimer?.cancel()
+            tmuxAttachTimer = nil
             connection?.delegate = nil
             connection?.disconnect()
             connection = nil
@@ -1350,10 +1376,10 @@ class SSHSession: ObservableObject, Identifiable {
                     
                     logger.info("Session discovery complete: found \(sessions.count) sessions, resolved to '\(resolvedName)'")
                     
-                    // Done with discovery
-                    sessionDiscoveryState = .idle
-                    sessionDiscoveryTimer?.cancel()
-                    sessionDiscoveryTimer = nil
+                    // Done with discovery — transition to awaitingControlMode to suppress
+                    // the shell echo of `exec tmux -CC` until DCS 1000p arrives. See #68.
+                    // The tmuxAttachTimer is still running and covers this phase too.
+                    sessionDiscoveryState = .awaitingControlMode
                     
                     // Now send the actual tmux attach command
                     sendTmuxAttachCommand(sessionName: resolvedName)
@@ -1372,6 +1398,33 @@ class SSHSession: ObservableObject, Identifiable {
                     // Still accumulating response
                     sessionDiscoveryState = .querying(buffer: buffer, endMarker: endMarker)
                 }
+            }
+            return
+        }
+        
+        // #68: After session discovery, suppress data until DCS 1000p arrives.
+        // This prevents the shell echo of `exec tmux -CC new-session ...` from
+        // rendering on the terminal surface before control mode activates.
+        if case .awaitingControlMode = sessionDiscoveryState {
+            // Check if this data contains the DCS 1000p sequence that signals
+            // tmux control mode activation.
+            let dcs1000p = Data([0x1b, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70]) // ESC P 1 0 0 0 p
+            if let dcsRange = data.range(of: dcs1000p) {
+                // Found DCS 1000p — transition to idle and forward from the DCS sequence onward.
+                // Everything before DCS 1000p is shell echo garbage; discard it.
+                logger.info("#68: DCS 1000p detected in \(data.count)B chunk, transitioning to idle")
+                sessionDiscoveryState = .idle
+                tmuxAttachTimer?.cancel()
+                tmuxAttachTimer = nil
+                
+                let dcsAndAfter = data[dcsRange.lowerBound...]
+                if !dcsAndAfter.isEmpty {
+                    self.handleReceivedData(Data(dcsAndAfter))
+                }
+            } else {
+                // No DCS 1000p yet — suppress this data entirely.
+                // It's shell echo from the exec command.
+                logger.debug("#68: Suppressing \(data.count)B while awaiting DCS 1000p")
             }
             return
         }
@@ -1497,6 +1550,28 @@ class SSHSession: ObservableObject, Identifiable {
     /// Get the current connection for testing verification. Only available in DEBUG builds.
     var connectionForTesting: NIOSSHConnection? {
         connection
+    }
+    
+    /// Set session discovery state for testing (#68). Only available in DEBUG builds.
+    func setSessionDiscoveryStateAwaitingForTesting() {
+        sessionDiscoveryState = .awaitingControlMode
+    }
+    
+    /// Set session discovery state to idle for testing. Only available in DEBUG builds.
+    func setSessionDiscoveryStateIdleForTesting() {
+        sessionDiscoveryState = .idle
+    }
+    
+    /// Check if session discovery state is awaitingControlMode. Only available in DEBUG builds.
+    var isAwaitingControlModeForTesting: Bool {
+        if case .awaitingControlMode = sessionDiscoveryState { return true }
+        return false
+    }
+    
+    /// Check if session discovery state is idle. Only available in DEBUG builds.
+    var isSessionDiscoveryIdleForTesting: Bool {
+        if case .idle = sessionDiscoveryState { return true }
+        return false
     }
     #endif
 }
