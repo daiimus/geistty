@@ -645,6 +645,38 @@ extension Ghostty {
                 )
                 return true
                 
+            case GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE:
+                guard target.tag == GHOSTTY_TARGET_SURFACE,
+                      let surface = target.target.surface else {
+                    return false
+                }
+                
+                let resp = action.action.tmux_command_response
+                let content: String
+                if resp.len > 0, let ptr = resp.data {
+                    content = String(
+                        bytes: UnsafeRawBufferPointer(
+                            start: UnsafeRawPointer(ptr),
+                            count: resp.len
+                        ),
+                        encoding: .utf8
+                    ) ?? ""
+                } else {
+                    content = ""
+                }
+                
+                logger.info("tmux command response: \(resp.is_error ? "ERROR" : "OK") len=\(resp.len)")
+                
+                NotificationCenter.default.post(
+                    name: .tmuxCommandResponse,
+                    object: surface,
+                    userInfo: [
+                        "content": content,
+                        "isError": resp.is_error
+                    ]
+                )
+                return true
+                
             case GHOSTTY_ACTION_QUIT_TIMER:
                 // Ghostty fires quit_timer when all surfaces are gone (e.g., after
                 // tmux viewer teardown on background). On macOS this quits the app.
