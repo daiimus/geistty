@@ -649,3 +649,308 @@ extension TmuxWireDiagnosticsTests {
         XCTAssertEqual(unescaped, original)
     }
 }
+
+// MARK: - UTF-8 Integrity Fences (#73)
+//
+// These tests verify that multi-byte UTF-8 sequences survive the full
+// tmux control mode pipeline without corruption. tmux only octal-escapes
+// bytes < 0x20 and backslash — all UTF-8 continuation bytes (>= 0x80)
+// pass through raw. The shadow parser must handle them correctly.
+
+extension TmuxWireDiagnosticsTests {
+    
+    // MARK: - 4-Byte Emoji (U+10000..U+10FFFF)
+    
+    func testUTF8Emoji4ByteValidation() {
+        // 😀 U+1F600 = F0 9F 98 80
+        // tmux sends these raw (all bytes >= 0x80, never octal-escaped)
+        var line = Data("%output %0 ".utf8)
+        line.append(contentsOf: [0xF0, 0x9F, 0x98, 0x80]) // 😀
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "4-byte emoji should be valid UTF-8")
+    }
+    
+    func testUTF8EmojiMultiple4Byte() {
+        // 😀😎🎉 — three 4-byte emoji in one %output
+        var line = Data("%output %2 ".utf8)
+        line.append(contentsOf: [0xF0, 0x9F, 0x98, 0x80]) // 😀 U+1F600
+        line.append(contentsOf: [0xF0, 0x9F, 0x98, 0x8E]) // 😎 U+1F60E
+        line.append(contentsOf: [0xF0, 0x9F, 0x8E, 0x89]) // 🎉 U+1F389
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "Multiple 4-byte emoji should be valid UTF-8")
+    }
+    
+    // MARK: - CJK Ideographs (U+4E00..U+9FFF, 3-byte)
+    
+    func testUTF8CJKIdeographs() {
+        // 中文 = U+4E2D U+6587
+        // 中 = E4 B8 AD, 文 = E6 96 87
+        var line = Data("%output %0 ".utf8)
+        line.append(contentsOf: [0xE4, 0xB8, 0xAD]) // 中
+        line.append(contentsOf: [0xE6, 0x96, 0x87]) // 文
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "CJK ideographs should be valid UTF-8")
+    }
+    
+    func testUTF8CJKMixedWithASCII() {
+        // "Hello中文World" — mixed ASCII and CJK
+        var line = Data("%output %0 Hello".utf8)
+        line.append(contentsOf: [0xE4, 0xB8, 0xAD]) // 中
+        line.append(contentsOf: [0xE6, 0x96, 0x87]) // 文
+        line.append(contentsOf: "World".utf8)
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "Mixed ASCII + CJK should be valid UTF-8")
+    }
+    
+    // MARK: - Braille Patterns (U+2800..U+28FF, 3-byte)
+    
+    func testUTF8BraillePatterns() {
+        // Braille used by CLI graphing tools (e.g., spark, tui-rs)
+        // ⠋ U+280B = E2 A0 8B
+        // ⠙ U+2819 = E2 A0 99
+        // ⠹ U+2839 = E2 A0 B9
+        // ⣿ U+28FF = E2 A3 BF (full 8-dot braille)
+        var line = Data("%output %0 ".utf8)
+        line.append(contentsOf: [0xE2, 0xA0, 0x8B]) // ⠋
+        line.append(contentsOf: [0xE2, 0xA0, 0x99]) // ⠙
+        line.append(contentsOf: [0xE2, 0xA0, 0xB9]) // ⠹
+        line.append(contentsOf: [0xE2, 0xA3, 0xBF]) // ⣿
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "Braille patterns should be valid UTF-8")
+    }
+    
+    // MARK: - ZWJ Sequences (multi-codepoint)
+    
+    func testUTF8ZWJSequence() {
+        // 👨‍💻 = U+1F468 U+200D U+1F4BB
+        // F0 9F 91 A8 + E2 80 8D + F0 9F 92 BB
+        var line = Data("%output %0 ".utf8)
+        line.append(contentsOf: [0xF0, 0x9F, 0x91, 0xA8]) // 👨 U+1F468
+        line.append(contentsOf: [0xE2, 0x80, 0x8D])         // ZWJ U+200D
+        line.append(contentsOf: [0xF0, 0x9F, 0x92, 0xBB])   // 💻 U+1F4BB
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "ZWJ sequence should be valid UTF-8")
+    }
+    
+    func testUTF8FamilyZWJSequence() {
+        // 👨‍👩‍👧‍👦 = U+1F468 U+200D U+1F469 U+200D U+1F467 U+200D U+1F466
+        // 4 * 4-byte + 3 * 3-byte = 25 bytes total
+        var line = Data("%output %0 ".utf8)
+        line.append(contentsOf: [0xF0, 0x9F, 0x91, 0xA8]) // 👨
+        line.append(contentsOf: [0xE2, 0x80, 0x8D])         // ZWJ
+        line.append(contentsOf: [0xF0, 0x9F, 0x91, 0xA9]) // 👩
+        line.append(contentsOf: [0xE2, 0x80, 0x8D])         // ZWJ
+        line.append(contentsOf: [0xF0, 0x9F, 0x91, 0xA7]) // 👧
+        line.append(contentsOf: [0xE2, 0x80, 0x8D])         // ZWJ
+        line.append(contentsOf: [0xF0, 0x9F, 0x91, 0xA6]) // 👦
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "Family ZWJ sequence (25 bytes) should be valid UTF-8")
+    }
+    
+    // MARK: - Mixed Multi-Byte Widths
+    
+    func testUTF8MixedByteWidths() {
+        // 2-byte + 3-byte + 4-byte in one %output
+        // é (U+00E9) = C3 A9 (2-byte)
+        // ┌ (U+250C) = E2 94 8C (3-byte, box-drawing)
+        // 😀 (U+1F600) = F0 9F 98 80 (4-byte)
+        var line = Data("%output %0 ".utf8)
+        line.append(contentsOf: [0xC3, 0xA9])                 // é
+        line.append(contentsOf: [0xE2, 0x94, 0x8C])           // ┌
+        line.append(contentsOf: [0xF0, 0x9F, 0x98, 0x80])     // 😀
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "Mixed 2/3/4-byte UTF-8 should all be valid")
+    }
+    
+    func testUTF8WithOctalEscapedControlChars() {
+        // ESC[32m + 中文 + ESC[0m — control chars are octal-escaped,
+        // CJK bytes pass through raw
+        var line = Data("%output %0 \\033[32m".utf8)
+        line.append(contentsOf: [0xE4, 0xB8, 0xAD]) // 中
+        line.append(contentsOf: [0xE6, 0x96, 0x87]) // 文
+        line.append(contentsOf: "\\033[0m".utf8)
+        line.append(0x0A)
+        
+        diag.analyze(line)
+        
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "CJK with octal-escaped SGR should be valid")
+    }
+    
+    // MARK: - Roundtrip: UTF-8 Multi-Byte Through tmux Escaping
+    
+    /// Byte-level tmux escaping that correctly handles bytes >= 0x80.
+    ///
+    /// tmux's `control_append_data()` escapes bytes < 0x20 and backslash (0x5C)
+    /// as octal `\NNN`. All other bytes — including UTF-8 lead/continuation bytes
+    /// (0x80-0xFF) — are sent as raw bytes on the wire.
+    ///
+    /// The String-based `tmuxOctalEscape` helper cannot represent this correctly
+    /// because `String(UnicodeScalar(byte))` for bytes >= 0x80 produces a
+    /// different UTF-8 encoding (e.g., 0xF0 → U+00F0 "ð" → C3 B0).
+    /// This version operates on raw bytes to match actual wire behavior.
+    static func tmuxOctalEscapeBytes(_ bytes: [UInt8]) -> [UInt8] {
+        var result = [UInt8]()
+        result.reserveCapacity(bytes.count)
+        for byte in bytes {
+            if byte < 0x20 || byte == 0x5C { // < space or backslash
+                // \NNN octal escape as ASCII bytes
+                let octal = String(format: "\\%03o", byte)
+                result.append(contentsOf: octal.utf8)
+            } else {
+                result.append(byte) // raw byte, including >= 0x80
+            }
+        }
+        return result
+    }
+    
+    func testRoundtripUTF8Passthrough() {
+        // tmux only escapes bytes < 0x20 and backslash.
+        // All UTF-8 continuation bytes (0x80-0xBF) and leading bytes
+        // (0xC0-0xF7) are >= 0x20, so they pass through unescaped.
+        // This verifies the roundtrip property.
+        
+        // 😀 U+1F600 = F0 9F 98 80
+        let emoji: [UInt8] = [0xF0, 0x9F, 0x98, 0x80]
+        let escaped = Self.tmuxOctalEscapeBytes(emoji)
+        
+        // None of these bytes should be escaped (all >= 0x80 > 0x20)
+        XCTAssertEqual(escaped, emoji,
+                       "UTF-8 bytes >= 0x80 should pass through raw, not be octal-escaped")
+        
+        let unescaped = TmuxWireDiagnostics.unescapeOctalBytes(escaped)
+        XCTAssertEqual(unescaped, emoji,
+                       "4-byte emoji should survive tmux octal escaping roundtrip")
+    }
+    
+    func testRoundtripCJK() {
+        // 中 = E4 B8 AD
+        let cjk: [UInt8] = [0xE4, 0xB8, 0xAD]
+        let escaped = Self.tmuxOctalEscapeBytes(cjk)
+        XCTAssertEqual(escaped, cjk)
+        
+        let unescaped = TmuxWireDiagnostics.unescapeOctalBytes(escaped)
+        XCTAssertEqual(unescaped, cjk,
+                       "CJK should survive tmux octal escaping roundtrip")
+    }
+    
+    func testRoundtripBraille() {
+        // ⣿ U+28FF = E2 A3 BF
+        let braille: [UInt8] = [0xE2, 0xA3, 0xBF]
+        let escaped = Self.tmuxOctalEscapeBytes(braille)
+        XCTAssertEqual(escaped, braille)
+        
+        let unescaped = TmuxWireDiagnostics.unescapeOctalBytes(escaped)
+        XCTAssertEqual(unescaped, braille,
+                       "Braille should survive tmux octal escaping roundtrip")
+    }
+    
+    func testRoundtripZWJSequence() {
+        // 👨‍💻 = F0 9F 91 A8 + E2 80 8D + F0 9F 92 BB
+        let zwj: [UInt8] = [
+            0xF0, 0x9F, 0x91, 0xA8, // 👨
+            0xE2, 0x80, 0x8D,       // ZWJ
+            0xF0, 0x9F, 0x92, 0xBB, // 💻
+        ]
+        let escaped = Self.tmuxOctalEscapeBytes(zwj)
+        XCTAssertEqual(escaped, zwj)
+        
+        let unescaped = TmuxWireDiagnostics.unescapeOctalBytes(escaped)
+        XCTAssertEqual(unescaped, zwj,
+                       "ZWJ sequence should survive tmux octal escaping roundtrip")
+    }
+    
+    func testRoundtripMixedASCIIAndMultiByte() {
+        // "ls 中文/" + ESC[0m — ASCII + CJK + control char
+        let original: [UInt8] = Array("ls ".utf8)
+            + [0xE4, 0xB8, 0xAD, 0xE6, 0x96, 0x87] // 中文
+            + Array("/".utf8)
+            + [0x1B, 0x5B, 0x30, 0x6D] // ESC[0m
+        
+        let escaped = Self.tmuxOctalEscapeBytes(original)
+        let unescaped = TmuxWireDiagnostics.unescapeOctalBytes(escaped)
+        XCTAssertEqual(unescaped, original,
+                       "Mixed ASCII + CJK + ESC should roundtrip correctly")
+    }
+    
+    // MARK: - Chunk Boundary with UTF-8
+    
+    func testChunkBoundarySplitsUTF8Emoji() {
+        // 4-byte emoji split across two SSH chunks mid-sequence
+        // First chunk: "%output %0 " + first 2 bytes of 😀
+        // Second chunk: last 2 bytes of 😀 + newline
+        var chunk1 = Data("%output %0 ".utf8)
+        chunk1.append(contentsOf: [0xF0, 0x9F]) // first 2 bytes of 😀
+        
+        var chunk2 = Data()
+        chunk2.append(contentsOf: [0x98, 0x80]) // last 2 bytes of 😀
+        chunk2.append(0x0A)
+        
+        diag.analyze(chunk1)
+        XCTAssertEqual(diag.totalOutputLines, 0, "Line not yet complete")
+        
+        diag.analyze(chunk2)
+        XCTAssertEqual(diag.totalOutputLines, 1, "Line complete after second chunk")
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "UTF-8 emoji split across chunks should not trigger anomalies")
+    }
+    
+    func testChunkBoundarySplitsCJKMidSequence() {
+        // 3-byte CJK split: first 1 byte in chunk 1, remaining 2 in chunk 2
+        var chunk1 = Data("%output %0 ".utf8)
+        chunk1.append(0xE4) // first byte of 中 (E4 B8 AD)
+        
+        var chunk2 = Data()
+        chunk2.append(contentsOf: [0xB8, 0xAD]) // remaining bytes of 中
+        chunk2.append(0x0A)
+        
+        diag.analyze(chunk1)
+        XCTAssertEqual(diag.totalOutputLines, 0)
+        
+        diag.analyze(chunk2)
+        XCTAssertEqual(diag.totalOutputLines, 1)
+        XCTAssertEqual(diag.totalAnomalies, 0,
+                       "CJK split across chunks should not trigger anomalies")
+    }
+}
