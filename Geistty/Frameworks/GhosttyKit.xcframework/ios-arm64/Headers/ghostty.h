@@ -869,6 +869,19 @@ typedef struct {
   uint32_t pane_count;
 } ghostty_action_tmux_state_changed_s;
 
+// apprt.action.TmuxCommandResponse
+typedef struct {
+  const char* data;
+  size_t len;
+  bool is_error;
+} ghostty_action_tmux_command_response_s;
+
+// apprt.action.TmuxExit
+typedef struct {
+  char reason[15];
+  uint8_t reason_len;
+} ghostty_action_tmux_exit_s;
+
 // terminal.Scrollbar
 typedef struct {
   uint64_t total;
@@ -945,6 +958,7 @@ typedef enum {
   GHOSTTY_ACTION_TMUX_STATE_CHANGED,
   GHOSTTY_ACTION_TMUX_EXIT,
   GHOSTTY_ACTION_TMUX_READY,
+  GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -986,6 +1000,8 @@ typedef union {
   ghostty_action_search_selected_s search_selected;
   ghostty_action_readonly_e readonly;
   ghostty_action_tmux_state_changed_s tmux_state_changed;
+  ghostty_action_tmux_command_response_s tmux_command_response;
+  ghostty_action_tmux_exit_s tmux_exit;
 } ghostty_action_u;
 
 typedef struct {
@@ -1260,6 +1276,15 @@ bool ghostty_surface_tmux_attach_to_pane(ghostty_surface_t target, ghostty_surfa
 // Detach a target surface from its tmux pane binding. Restores the original
 // mutex and terminal pointer. No-op if not attached.
 void ghostty_surface_tmux_detach_pane(ghostty_surface_t target);
+
+// Send an arbitrary tmux command. The response arrives asynchronously via
+// the tmux_command_response action callback. Returns true if queued/sent,
+// false if not in tmux mode or on error.
+bool ghostty_surface_tmux_send_command(ghostty_surface_t, const char*, size_t);
+
+// Request graceful detach from the tmux session. Sends detach-client to tmux,
+// which causes tmux to send %exit (triggering normal cleanup). Thread-safe.
+void ghostty_surface_tmux_detach(ghostty_surface_t surface);
 #endif
 
 ghostty_inspector_t ghostty_surface_inspector(ghostty_surface_t);

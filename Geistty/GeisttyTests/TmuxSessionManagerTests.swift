@@ -319,6 +319,22 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.connectionState, .disconnected)
     }
 
+    /// Voluntary detach (reason == "detached") should set .detached state,
+    /// not .connectionLost — the session is still alive on the server.
+    @MainActor
+    func testControlModeExitedWithDetachedReason() {
+        let mgr = TmuxSessionManager()
+        mgr.controlModeActivated()
+        XCTAssertTrue(mgr.isConnected)
+
+        mgr.controlModeExited(reason: "detached")
+
+        XCTAssertFalse(mgr.isConnected)
+        XCTAssertEqual(mgr.connectionState, .detached)
+        XCTAssertNil(mgr.currentSession)
+        XCTAssertTrue(mgr.windows.isEmpty)
+    }
+
     @MainActor
     func testControlModeExitedClearsPendingOutput() {
         let mgr = TmuxSessionManager()
