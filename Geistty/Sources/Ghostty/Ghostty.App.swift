@@ -725,7 +725,7 @@ extension Ghostty {
                     text = ""
                 }
                 
-                logger.info("tmux message: \(text)")
+                logger.info("tmux message: len=\(msg.len)")
                 
                 // Extract the SurfaceView from userdata so observers can filter
                 // by identity (notification.object as? SurfaceView === self.ghosttySurface).
