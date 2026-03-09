@@ -3796,6 +3796,50 @@ extension TmuxSessionManagerTests {
         XCTAssertTrue(cmd.contains("11\n"),
                       "resize-pane should target 11 rows (23 * 0.5), got: \(cmd)")
     }
+
+    /// syncSplitRatioToTmux should correctly find and resize the RIGHT child pane.
+    /// This validates finding #14: the old code only checked split.left.leftmostPaneId,
+    /// which would miss panes that are the right child of a split.
+    @MainActor
+    func testSyncSplitRatioRightChildPaneSendsResizePane() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 0, paneB: 1, totalCols: 80, rows: 24)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [0, 1]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.viewerBecameReady()
+        mgr.configureSurfaceManagement(
+            factory: { _ in nil },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+
+        // Set lastRefreshSize AFTER controlModeActivated (which resets it to nil)
+        #if DEBUG
+        mgr.setLastRefreshSizeForTesting(cols: 80, rows: 24)
+        #endif
+
+        log.commands.removeAll()
+        // Resize pane 1 (the RIGHT child) — this was broken before finding #14 fix
+        mgr.syncSplitRatioToTmux(forPaneId: 1, ratio: 0.6)
+
+        // Should send a resize-pane -x command targeting pane 1
+        XCTAssertEqual(log.commands.count, 1, "Exactly one resize command should be sent for right-child pane")
+        let cmd = log.commands.first ?? ""
+        XCTAssertTrue(cmd.hasPrefix("resize-pane -t %1 -x "),
+                      "Command should target pane 1 with -x flag, got: \(cmd)")
+        // Expected: available = 80 - 1 (divider) = 79, new size = max(1, Int(79 * 0.6)) = 47
+        XCTAssertTrue(cmd.contains("47\n"),
+                      "resize-pane should target 47 columns (79 * 0.6), got: \(cmd)")
+    }
 }
 
 // MARK: - Pending Input Display Tests
@@ -4042,8 +4086,8 @@ extension TmuxSessionManagerTests {
         // Set clipboard content
         UIPasteboard.general.string = "clipboard text"
 
-        // Set focused pane
-        mgr.setFocusedPane("5")
+        // Set focused pane (with % prefix, as in production)
+        mgr.setFocusedPane("%5")
 
         mgr.pasteTmuxBuffer()
 
@@ -4096,7 +4140,7 @@ extension TmuxSessionManagerTests {
         defer { UIPasteboard.general.string = savedClipboard }
 
         UIPasteboard.general.string = "line with \\backslash and \"quotes\""
-        mgr.setFocusedPane("0")
+        mgr.setFocusedPane("%0")
 
         mgr.pasteTmuxBuffer()
 
@@ -4121,7 +4165,7 @@ extension TmuxSessionManagerTests {
         defer { UIPasteboard.general.string = savedClipboard }
 
         UIPasteboard.general.string = "line1\nline2\rline3"
-        mgr.setFocusedPane("0")
+        mgr.setFocusedPane("%0")
 
         mgr.pasteTmuxBuffer()
 
@@ -4132,6 +4176,35 @@ extension TmuxSessionManagerTests {
                        "Carriage returns should be escaped: got \(cmd)")
         XCTAssertFalse(cmd.contains("\n"),
                        "Raw newlines must not appear in command: got \(cmd)")
+    }
+
+    /// Dollar signs and backticks must be escaped as defense-in-depth
+    /// against potential expansion when passed to set-buffer.
+    @MainActor
+    func testPasteTmuxBufferEscapesDollarAndBacktick() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
+        UIPasteboard.general.string = "price is $100 and `command`"
+        mgr.setFocusedPane("%0")
+
+        mgr.pasteTmuxBuffer()
+
+        let cmd = mock.sendTmuxCommandCalls.first ?? ""
+        XCTAssertTrue(cmd.contains("\\$100"),
+                      "Dollar signs should be escaped: got \(cmd)")
+        XCTAssertTrue(cmd.contains("\\`command\\`"),
+                      "Backticks should be escaped: got \(cmd)")
+        let unescapedDollarRange = cmd.range(of: #"(?<!\\)\$"#,
+                                             options: .regularExpression)
+        XCTAssertNil(unescapedDollarRange,
+                     "Unescaped dollar sign must not appear: got \(cmd)")
     }
 
     /// pasteTmuxBuffer should bail out when no pane is focused.
@@ -4170,7 +4243,7 @@ extension TmuxSessionManagerTests {
         defer { UIPasteboard.general.string = savedClipboard }
 
         UIPasteboard.general.string = "something"
-        mgr.setFocusedPane("0")
+        mgr.setFocusedPane("%0")
         mgr.pasteTmuxBuffer()
 
         // Simulate error on set-buffer
@@ -4871,6 +4944,46 @@ extension TmuxSessionManagerTests {
         mgr.handleFocusedPaneChanged(windowId: 1, paneId: 0)
         mgr.handleFocusedPaneChanged(windowId: 0, paneId: 0)
         mgr.handleFocusedPaneChanged(windowId: UInt32.max, paneId: UInt32.max)
+    }
+
+    /// When the window matches focusedWindowId, handleFocusedPaneChanged
+    /// should update focusedPaneId via setFocusedPane.
+    @MainActor
+    func testHandleFocusedPaneChangedUpdatesFocusForMatchingWindow() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Set focusedWindowId to "@1" so the handler recognizes window 1
+        mgr.setFocusedWindowIdForTesting("@1")
+        mgr.setFocusedPane("%0") // initial focus
+
+        // Trigger pane change for matching window
+        mgr.handleFocusedPaneChanged(windowId: 1, paneId: 5)
+        XCTAssertEqual(mgr.focusedPaneId, "%5",
+                       "focusedPaneId should be updated to %5 for matching window")
+    }
+
+    /// When the window does NOT match focusedWindowId, handleFocusedPaneChanged
+    /// should leave focusedPaneId unchanged.
+    @MainActor
+    func testHandleFocusedPaneChangedIgnoresNonMatchingWindow() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Set focusedWindowId to "@1"
+        mgr.setFocusedWindowIdForTesting("@1")
+        mgr.setFocusedPane("%0") // initial focus
+
+        // Trigger pane change for a different window
+        mgr.handleFocusedPaneChanged(windowId: 2, paneId: 9)
+        XCTAssertEqual(mgr.focusedPaneId, "%0",
+                       "focusedPaneId should remain %0 for non-matching window")
     }
 
     @MainActor
