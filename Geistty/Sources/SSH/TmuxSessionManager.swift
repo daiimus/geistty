@@ -52,6 +52,9 @@ class TmuxSessionManager: ObservableObject {
     /// Currently focused window ID (empty until first session-changed/layout event)
     @Published private(set) var focusedWindowId: String = ""
     
+    /// Name of the attached tmux session, updated on `%session-renamed` notifications
+    @Published private(set) var sessionName: String = ""
+    
     /// Connection state (legacy bool for compatibility)
     @Published private(set) var isConnected: Bool = false
     
@@ -314,6 +317,7 @@ class TmuxSessionManager: ObservableObject {
         availableSessions.removeAll()
         tmuxOptions.removeAll()
         pendingResponseHandlers.removeAll()
+        sessionName = ""
         
         // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
@@ -413,6 +417,7 @@ class TmuxSessionManager: ObservableObject {
         // on the new connection. We keep focusedWindowId and focusedPaneId so the
         // UI doesn't flash to a different window/pane during the brief reconnect.
         currentSession = nil
+        sessionName = ""
         sessions.removeAll()
         windows.removeAll()
         windowSplitTrees.removeAll()
@@ -1213,7 +1218,10 @@ class TmuxSessionManager: ObservableObject {
     
     /// Close a specific window by ID
     func closeWindow(windowId: String) {
-        // Window IDs are system-generated (@N format) — no user input to escape
+        guard TmuxId.isValidWindowId(windowId) else {
+            logger.warning("closeWindow: invalid window ID '\(windowId)'")
+            return
+        }
         sendCommandFireAndForget("kill-window -t '\(windowId)'")
     }
     
@@ -1226,6 +1234,10 @@ class TmuxSessionManager: ObservableObject {
     
     /// Rename a specific window by ID
     func renameWindow(windowId: String, name: String) {
+        guard TmuxId.isValidWindowId(windowId) else {
+            logger.warning("renameWindow: invalid window ID '\(windowId)'")
+            return
+        }
         // Escape single quotes in name to prevent command injection
         let safeName = name.replacingOccurrences(of: "'", with: "'\\''")
         sendCommandFireAndForget("rename-window -t '\(windowId)' '\(safeName)'")
@@ -1233,7 +1245,11 @@ class TmuxSessionManager: ObservableObject {
     
     /// Select a window by ID
     func selectWindow(_ windowId: String) {
-        logger.info("📑 selectWindow: \(windowId)")
+        guard TmuxId.isValidWindowId(windowId) else {
+            logger.warning("selectWindow: invalid window ID '\(windowId)'")
+            return
+        }
+        logger.info("selectWindow: \(windowId)")
         logger.info("📑   Current windows: \(windows.keys.sorted().joined(separator: ", "))")
         logger.info("📑   Current split trees: \(windowSplitTrees.keys.sorted().joined(separator: ", "))")
         
@@ -1341,6 +1357,10 @@ class TmuxSessionManager: ObservableObject {
     
     /// Select a pane by ID
     func selectPane(_ paneId: String) {
+        guard TmuxId.isValidPaneId(paneId) else {
+            logger.warning("selectPane: invalid pane ID '\(paneId)'")
+            return
+        }
         sendCommandFireAndForget("select-pane -t '\(paneId)'")
         focusedPaneId = paneId
         
@@ -1577,6 +1597,48 @@ class TmuxSessionManager: ObservableObject {
         handler(content, isError)
     }
     
+    /// Handle a tmux `%session-renamed` notification from the Zig viewer.
+    /// Fired when the attached session is renamed. Updates the published
+    /// `sessionName` property so the UI can reflect the new name.
+    func handleSessionRenamed(name: String) {
+        logger.info("tmux session renamed: \(name)")
+        sessionName = name
+    }
+    
+    /// Handle a tmux `%window-pane-changed` notification from the Zig viewer.
+    /// Fired when the focused pane within a window changes (e.g., via select-pane).
+    /// If the window matches our focused window, update input routing to the new pane
+    /// so that keystrokes are sent to the correct pane via send-keys.
+    func handleFocusedPaneChanged(windowId: UInt32, paneId: UInt32) {
+        logger.info("tmux focused pane changed: @\(windowId) %\(paneId)")
+        
+        // Only update focus if this is our currently focused window.
+        // focusedWindowId has "@" prefix (e.g. "@0"), so format windowId to match.
+        if "@\(windowId)" == focusedWindowId {
+            setFocusedPane("%\(paneId)")
+        }
+    }
+
+    /// Handle a tmux `%subscription-changed` notification from the Zig viewer.
+    /// Fired when a format subscription value changes (registered via refresh-client -B).
+    /// The name identifies the subscription and the value is the new format expansion.
+    func handleSubscriptionChanged(name: String, value: String) {
+        logger.debug("tmux subscription changed: \(name), valueLength=\(value.count)")
+        
+        switch name {
+        case "status_left":
+            statusLeft = value
+        case "status_right":
+            statusRight = value
+        default:
+            break
+        }
+    }
+
+    // MARK: - Stub Handlers (log-only, future work)
+    // These handlers receive tmux notifications but only log them.
+    // They are kept as extension points for future features.
+
     /// Handle a tmux `%message` notification from the Zig viewer.
     /// These are informational messages from the tmux server (e.g., session
     /// created/destroyed notices). Currently log-only; future work may surface
@@ -1611,43 +1673,6 @@ class TmuxSessionManager: ObservableObject {
     /// Currently log-only; future work may update pane mode indicators.
     func handlePaneModeChanged(paneId: UInt32) {
         logger.info("tmux pane mode changed: %\(paneId)")
-    }
-
-    /// Handle a tmux `%session-renamed` notification from the Zig viewer.
-    /// Fired when the attached session is renamed.
-    /// Currently log-only; future work may update the session title in the UI.
-    func handleSessionRenamed(name: String) {
-        logger.info("tmux session renamed: \(name)")
-    }
-
-    /// Handle a tmux `%window-pane-changed` notification from the Zig viewer.
-    /// Fired when the focused pane within a window changes (e.g., via select-pane).
-    /// If the window matches our focused window, update input routing to the new pane
-    /// so that keystrokes are sent to the correct pane via send-keys.
-    func handleFocusedPaneChanged(windowId: UInt32, paneId: UInt32) {
-        logger.info("tmux focused pane changed: @\(windowId) %\(paneId)")
-        
-        // Only update focus if this is our currently focused window.
-        // focusedWindowId has "@" prefix (e.g. "@0"), so format windowId to match.
-        if "@\(windowId)" == focusedWindowId {
-            setFocusedPane("%\(paneId)")
-        }
-    }
-
-    /// Handle a tmux `%subscription-changed` notification from the Zig viewer.
-    /// Fired when a format subscription value changes (registered via refresh-client -B).
-    /// The name identifies the subscription and the value is the new format expansion.
-    func handleSubscriptionChanged(name: String, value: String) {
-        logger.debug("tmux subscription changed: \(name), valueLength=\(value.count)")
-        
-        switch name {
-        case "status_left":
-            statusLeft = value
-        case "status_right":
-            statusRight = value
-        default:
-            break
-        }
     }
 
     /// Copy the tmux paste buffer to the iOS clipboard.
@@ -1690,8 +1715,8 @@ class TmuxSessionManager: ObservableObject {
             return
         }
         
-        guard !focusedPaneId.isEmpty else {
-            logger.warning("pasteTmuxBuffer: no focused pane ID — cannot target paste-buffer")
+        guard TmuxId.isValidPaneId(focusedPaneId) else {
+            logger.warning("pasteTmuxBuffer: invalid focused pane ID '\(focusedPaneId)' — cannot target paste-buffer")
             return
         }
         
@@ -2056,6 +2081,7 @@ class TmuxSessionManager: ObservableObject {
         connectionState = .disconnected
         focusedPaneId = ""
         focusedWindowId = ""
+        sessionName = ""
         
         // Reset resize tracking
         lastResizeCols = 0
