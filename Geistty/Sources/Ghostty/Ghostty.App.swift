@@ -190,6 +190,27 @@ extension Ghostty {
         
         // MARK: - Runtime Callbacks
         
+        /// Extract the SurfaceView from a ghostty_surface_t's userdata pointer.
+        /// Returns nil if the surface has no userdata set.
+        private static func surfaceView(from surface: ghostty_surface_t) -> SurfaceView? {
+            ghostty_surface_userdata(surface).map {
+                Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
+            }
+        }
+        
+        /// Decode a C data/len pair into a Swift String (UTF-8).
+        /// Returns an empty string if data is nil or len is 0.
+        private static func decodePayload(data: UnsafePointer<CChar>?, len: Int) -> String {
+            guard len > 0, let ptr = data else { return "" }
+            return String(
+                decoding: UnsafeRawBufferPointer(
+                    start: UnsafeRawPointer(ptr),
+                    count: len
+                ),
+                as: UTF8.self
+            )
+        }
+        
         private static func wakeup(_ userdata: UnsafeMutableRawPointer?) {
             guard let userdata = userdata else { return }
             let app = Unmanaged<App>.fromOpaque(userdata).takeUnretainedValue()
@@ -211,8 +232,7 @@ extension Ghostty {
                 let titleData = action.action.set_title
                 guard let titlePtr = titleData.title else { return false }
                 let title = String(cString: titlePtr)
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         surfaceView.title = title
                     }
@@ -239,8 +259,7 @@ extension Ghostty {
                 
                 // Find the SurfaceView associated with this surface
                 // The surface userdata points to the SurfaceView
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         surfaceView.updateScrollIndicator(
                             total: scrollbar.total,
@@ -263,8 +282,7 @@ extension Ghostty {
                 
                 let linkData = action.action.mouse_over_link
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         if linkData.len > 0, let urlPtr = linkData.url {
                             let urlData = Data(bytes: urlPtr, count: linkData.len)
@@ -315,8 +333,7 @@ extension Ghostty {
                 
                 let pwdData = action.action.pwd
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         if let pwdPtr = pwdData.pwd {
                             let pwdString = String(cString: pwdPtr)
@@ -336,8 +353,7 @@ extension Ghostty {
                 
                 let cellSizeData = action.action.cell_size
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         // IMPORTANT: cellSizeData is in backing pixels (physical pixels on retina).
                         // SwiftUI's GeometryReader returns points (logical units).
@@ -362,8 +378,7 @@ extension Ghostty {
                 
                 let shape = action.action.mouse_shape
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         surfaceView.currentMouseShape = shape
                     }
@@ -384,8 +399,7 @@ extension Ghostty {
                 
                 let health = action.action.renderer_health
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         surfaceView.healthy = (health == GHOSTTY_RENDERER_HEALTH_HEALTHY)
                         if health != GHOSTTY_RENDERER_HEALTH_HEALTHY {
@@ -442,8 +456,7 @@ extension Ghostty {
                 
                 let searchData = action.action.start_search
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         // Initialize search state with the initial needle from the action
                         let initialNeedle: String
@@ -471,8 +484,7 @@ extension Ghostty {
                     return false
                 }
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         surfaceView.searchState = nil
                         logger.debug("🔍 Search ended")
@@ -489,8 +501,7 @@ extension Ghostty {
                 
                 let totalData = action.action.search_total
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     let total: UInt? = totalData.total >= 0 ? UInt(totalData.total) : nil
                     DispatchQueue.main.async {
                         surfaceView.searchState?.total = total
@@ -508,8 +519,7 @@ extension Ghostty {
                 
                 let selectedData = action.action.search_selected
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     let selected: UInt? = selectedData.selected >= 0 ? UInt(selectedData.selected) : nil
                     DispatchQueue.main.async {
                         surfaceView.searchState?.selected = selected
@@ -527,8 +537,7 @@ extension Ghostty {
                 
                 let keyTableData = action.action.key_table
                 
-                if let userdata = ghostty_surface_userdata(surface) {
-                    let surfaceView = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                if let surfaceView = surfaceView(from: surface) {
                     DispatchQueue.main.async {
                         switch keyTableData.tag {
                         case GHOSTTY_KEY_TABLE_ACTIVATE:
@@ -584,9 +593,7 @@ extension Ghostty {
                 // by identity (notification.object as? SurfaceView === self.ghosttySurface).
                 // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
                 // the multi-surface identity guard.
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 // Post synchronously — we're already on main thread (via tick()),
                 // and eliminating the async hop reduces the window between viewer
@@ -595,8 +602,8 @@ extension Ghostty {
                     name: .tmuxStateChanged,
                     object: surfaceView,
                     userInfo: [
-                        "windowCount": tmuxState.window_count,
-                        "paneCount": tmuxState.pane_count
+                        TmuxNotificationKey.windowCount: tmuxState.window_count,
+                        TmuxNotificationKey.paneCount: tmuxState.pane_count
                     ]
                 )
                 return true
@@ -624,9 +631,7 @@ extension Ghostty {
                 
                 // Extract the SurfaceView from userdata so observers can filter
                 // by identity (notification.object as? SurfaceView === self.ghosttySurface).
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 // Post synchronously — already on main thread via tick().
                 // Forward the reason so observers can differentiate voluntary
@@ -634,7 +639,7 @@ extension Ghostty {
                 NotificationCenter.default.post(
                     name: .tmuxExited,
                     object: surfaceView,
-                    userInfo: ["reason": reason]
+                    userInfo: [TmuxNotificationKey.reason: reason]
                 )
                 return true
                 
@@ -651,9 +656,7 @@ extension Ghostty {
                 
                 // Extract the SurfaceView from userdata so observers can filter
                 // by identity (notification.object as? SurfaceView === self.ghosttySurface).
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 // Post synchronously — already on main thread via tick().
                 // This ensures activateFirstTmuxPane() runs immediately,
@@ -672,33 +675,20 @@ extension Ghostty {
                 }
                 
                 let resp = action.action.tmux_command_response
-                let content: String
-                if resp.len > 0, let ptr = resp.data {
-                    content = String(
-                        decoding: UnsafeRawBufferPointer(
-                            start: UnsafeRawPointer(ptr),
-                            count: resp.len
-                        ),
-                        as: UTF8.self
-                    )
-                } else {
-                    content = ""
-                }
+                let content = decodePayload(data: resp.data, len: resp.len)
                 
                 logger.info("tmux command response: \(resp.is_error ? "ERROR" : "OK") len=\(resp.len)")
                 
                 // Extract the SurfaceView from userdata so observers can filter
                 // by identity (notification.object as? SurfaceView === self.ghosttySurface).
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxCommandResponse,
                     object: surfaceView,
                     userInfo: [
-                        "content": content,
-                        "isError": resp.is_error
+                        TmuxNotificationKey.content: content,
+                        TmuxNotificationKey.isError: resp.is_error
                     ]
                 )
                 return true
@@ -719,15 +709,13 @@ extension Ghostty {
                 // by identity (notification.object as? SurfaceView === self.ghosttySurface).
                 // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
                 // the multi-surface identity guard.
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 // Post synchronously — already on main thread via tick().
                 NotificationCenter.default.post(
                     name: .tmuxActiveWindowChanged,
                     object: surfaceView,
-                    userInfo: ["windowId": windowId]
+                    userInfo: [TmuxNotificationKey.windowId: windowId]
                 )
                 return true
                 
@@ -738,18 +726,7 @@ extension Ghostty {
                 }
                 
                 let msg = action.action.tmux_message
-                let text: String
-                if msg.len > 0, let ptr = msg.data {
-                    text = String(
-                        decoding: UnsafeRawBufferPointer(
-                            start: UnsafeRawPointer(ptr),
-                            count: msg.len
-                        ),
-                        as: UTF8.self
-                    )
-                } else {
-                    text = ""
-                }
+                let text = decodePayload(data: msg.data, len: msg.len)
                 
                 logger.info("tmux message: len=\(msg.len)")
                 
@@ -757,14 +734,12 @@ extension Ghostty {
                 // by identity (notification.object as? SurfaceView === self.ghosttySurface).
                 // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
                 // the multi-surface identity guard.
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxMessage,
                     object: surfaceView,
-                    userInfo: ["text": text]
+                    userInfo: [TmuxNotificationKey.text: text]
                 )
                 return true
                 
@@ -775,29 +750,16 @@ extension Ghostty {
                 }
                 
                 let payload = action.action.tmux_paste_buffer_changed
-                let name: String
-                if payload.len > 0, let ptr = payload.data {
-                    name = String(
-                        decoding: UnsafeRawBufferPointer(
-                            start: UnsafeRawPointer(ptr),
-                            count: payload.len
-                        ),
-                        as: UTF8.self
-                    )
-                } else {
-                    name = ""
-                }
+                let name = decodePayload(data: payload.data, len: payload.len)
                 
                 logger.info("tmux paste buffer changed: len=\(payload.len)")
                 
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxPasteBufferChanged,
                     object: surfaceView,
-                    userInfo: ["name": name]
+                    userInfo: [TmuxNotificationKey.name: name]
                 )
                 return true
                 
@@ -808,29 +770,16 @@ extension Ghostty {
                 }
                 
                 let payload = action.action.tmux_paste_buffer_deleted
-                let name: String
-                if payload.len > 0, let ptr = payload.data {
-                    name = String(
-                        decoding: UnsafeRawBufferPointer(
-                            start: UnsafeRawPointer(ptr),
-                            count: payload.len
-                        ),
-                        as: UTF8.self
-                    )
-                } else {
-                    name = ""
-                }
+                let name = decodePayload(data: payload.data, len: payload.len)
                 
                 logger.info("tmux paste buffer deleted: len=\(payload.len)")
                 
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxPasteBufferDeleted,
                     object: surfaceView,
-                    userInfo: ["name": name]
+                    userInfo: [TmuxNotificationKey.name: name]
                 )
                 return true
                 
@@ -842,9 +791,7 @@ extension Ghostty {
                 
                 logger.info("tmux sessions changed")
                 
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxSessionsChanged,
@@ -861,14 +808,12 @@ extension Ghostty {
                 let paneId = action.action.tmux_pane_mode_changed.pane_id
                 logger.info("tmux pane mode changed: %\(paneId)")
                 
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxPaneModeChanged,
                     object: surfaceView,
-                    userInfo: ["paneId": paneId]
+                    userInfo: [TmuxNotificationKey.paneId: paneId]
                 )
                 return true
                 
@@ -879,29 +824,16 @@ extension Ghostty {
                 }
                 
                 let payload = action.action.tmux_session_renamed
-                let name: String
-                if payload.len > 0, let ptr = payload.data {
-                    name = String(
-                        decoding: UnsafeRawBufferPointer(
-                            start: UnsafeRawPointer(ptr),
-                            count: payload.len
-                        ),
-                        as: UTF8.self
-                    )
-                } else {
-                    name = ""
-                }
+                let name = decodePayload(data: payload.data, len: payload.len)
                 
                 logger.info("tmux session renamed: len=\(payload.len)")
                 
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxSessionRenamed,
                     object: surfaceView,
-                    userInfo: ["name": name]
+                    userInfo: [TmuxNotificationKey.name: name]
                 )
                 return true
                 
@@ -914,14 +846,12 @@ extension Ghostty {
                 let payload = action.action.tmux_focused_pane_changed
                 logger.info("tmux focused pane changed: @\(payload.window_id) %\(payload.pane_id)")
                 
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxFocusedPaneChanged,
                     object: surfaceView,
-                    userInfo: ["windowId": payload.window_id, "paneId": payload.pane_id]
+                    userInfo: [TmuxNotificationKey.windowId: payload.window_id, TmuxNotificationKey.paneId: payload.pane_id]
                 )
                 return true
                 
@@ -941,14 +871,12 @@ extension Ghostty {
                 
                 logger.debug("tmux subscription changed: name=\(name)")
                 
-                let surfaceView: SurfaceView? = ghostty_surface_userdata(surface).map {
-                    Unmanaged<SurfaceView>.fromOpaque($0).takeUnretainedValue()
-                }
+                let surfaceView = surfaceView(from: surface)
                 
                 NotificationCenter.default.post(
                     name: .tmuxSubscriptionChanged,
                     object: surfaceView,
-                    userInfo: ["name": name, "value": value]
+                    userInfo: [TmuxNotificationKey.name: name, TmuxNotificationKey.value: value]
                 )
                 return true
                 

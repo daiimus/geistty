@@ -499,8 +499,8 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            let windowCount = notification.userInfo?["windowCount"] as? UInt ?? 0
-            let paneCount = notification.userInfo?["paneCount"] as? UInt ?? 0
+            let windowCount = notification.userInfo?[TmuxNotificationKey.windowCount] as? UInt ?? 0
+            let paneCount = notification.userInfo?[TmuxNotificationKey.paneCount] as? UInt ?? 0
             
             logger.info("tmux state changed: \(windowCount) windows, \(paneCount) panes, current state=\(self.controlModeState)")
             
@@ -544,7 +544,7 @@ class SSHSession: ObservableObject, Identifiable {
             // Extract the exit reason forwarded from Ghostty's tmux viewer.
             // Known reasons: "detached" (voluntary), "server-exited" (crash),
             // "" (empty, e.g. session destroyed).
-            let reason = notification.userInfo?["reason"] as? String ?? ""
+            let reason = notification.userInfo?[TmuxNotificationKey.reason] as? String ?? ""
             logger.info("tmux control mode exited via TMUX_EXIT, reason: \(reason.isEmpty ? "(none)" : reason)")
             
             self.controlModeState = .inactive
@@ -610,8 +610,8 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            let content = notification.userInfo?["content"] as? String ?? ""
-            let isError = notification.userInfo?["isError"] as? Bool ?? false
+            let content = notification.userInfo?[TmuxNotificationKey.content] as? String ?? ""
+            let isError = notification.userInfo?[TmuxNotificationKey.isError] as? Bool ?? false
             
             self.tmuxSessionManager?.handleCommandResponse(content: content, isError: isError)
         }
@@ -628,7 +628,7 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let windowId = notification.userInfo?["windowId"] as? UInt32 else {
+            guard let windowId = notification.userInfo?[TmuxNotificationKey.windowId] as? UInt32 else {
                 return
             }
             
@@ -647,7 +647,7 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let text = notification.userInfo?["text"] as? String else {
+            guard let text = notification.userInfo?[TmuxNotificationKey.text] as? String else {
                 return
             }
             
@@ -665,7 +665,7 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let name = notification.userInfo?["name"] as? String else {
+            guard let name = notification.userInfo?[TmuxNotificationKey.name] as? String else {
                 return
             }
             
@@ -683,7 +683,7 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let name = notification.userInfo?["name"] as? String else {
+            guard let name = notification.userInfo?[TmuxNotificationKey.name] as? String else {
                 return
             }
             
@@ -715,7 +715,7 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let paneId = notification.userInfo?["paneId"] as? UInt32 else {
+            guard let paneId = notification.userInfo?[TmuxNotificationKey.paneId] as? UInt32 else {
                 return
             }
             
@@ -733,7 +733,7 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let name = notification.userInfo?["name"] as? String else {
+            guard let name = notification.userInfo?[TmuxNotificationKey.name] as? String else {
                 return
             }
             
@@ -751,8 +751,8 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let windowId = notification.userInfo?["windowId"] as? UInt32,
-                  let paneId = notification.userInfo?["paneId"] as? UInt32 else {
+            guard let windowId = notification.userInfo?[TmuxNotificationKey.windowId] as? UInt32,
+                  let paneId = notification.userInfo?[TmuxNotificationKey.paneId] as? UInt32 else {
                 return
             }
             
@@ -770,8 +770,8 @@ class SSHSession: ObservableObject, Identifiable {
                 guard notifSurface === self.ghosttySurface else { return }
             }
             
-            guard let name = notification.userInfo?["name"] as? String,
-                  let value = notification.userInfo?["value"] as? String else {
+            guard let name = notification.userInfo?[TmuxNotificationKey.name] as? String,
+                  let value = notification.userInfo?[TmuxNotificationKey.value] as? String else {
                 return
             }
             
