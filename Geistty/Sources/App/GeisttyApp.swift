@@ -282,6 +282,25 @@ extension Notification.Name {
     static let showTmuxSessions = Notification.Name("showTmuxSessions")
 }
 
+// MARK: - Typed Keys for tmux Notification userInfo
+
+/// Typed constants for tmux notification `userInfo` dictionary keys.
+/// Eliminates raw string literals scattered across posting (Ghostty.App.swift)
+/// and consuming (SSHSession.swift) code. All tmux notifications use these
+/// keys to pass payload data through NotificationCenter.
+enum TmuxNotificationKey {
+    static let windowCount = "windowCount"
+    static let paneCount = "paneCount"
+    static let reason = "reason"
+    static let content = "content"
+    static let isError = "isError"
+    static let windowId = "windowId"
+    static let text = "text"
+    static let name = "name"
+    static let paneId = "paneId"
+    static let value = "value"
+}
+
 /// Global application state
 @MainActor
 class AppState: ObservableObject {

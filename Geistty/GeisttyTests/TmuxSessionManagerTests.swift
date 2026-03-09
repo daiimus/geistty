@@ -2024,7 +2024,7 @@ extension TmuxSessionManagerTests {
     /// selectPane() with a non-numeric pane ID should still set focusedPaneId
     /// but NOT call setActiveTmuxPaneInputOnly (TmuxId.numericPaneId returns nil).
     @MainActor
-    func testSelectPaneWithInvalidPaneIdDoesNotCallSetActive() {
+    func testSelectPaneWithInvalidPaneIdDoesNotSendCommand() {
         let (mgr, log) = managerWithCommandLog()
         let mock = MockTmuxSurface()
 
@@ -2034,13 +2034,14 @@ extension TmuxSessionManagerTests {
 
         mgr.selectPane("invalid")
 
-        // Command still sent (tmux will reject it, but we send it)
-        XCTAssertEqual(log.commands, ["select-pane -t 'invalid'\n"])
-        // focusedPaneId still updated (local state)
-        XCTAssertEqual(mgr.focusedPaneId, "invalid")
-        // No setActiveTmuxPaneInputOnly call — numeric conversion failed
+        // Validation guard rejects malformed pane ID — no command sent
+        XCTAssertTrue(log.commands.isEmpty,
+                      "No command should be sent for invalid pane ID")
+        // focusedPaneId unchanged (guard returned early)
+        XCTAssertEqual(mgr.focusedPaneId, "")
+        // No setActiveTmuxPaneInputOnly call
         XCTAssertTrue(mock.setActiveTmuxPaneInputOnlyCalls.isEmpty,
-                      "setActiveTmuxPaneInputOnly should not be called for non-numeric pane IDs")
+                      "setActiveTmuxPaneInputOnly should not be called for invalid pane IDs")
     }
 
     /// selectPane() without a tmuxQuerySurface should still send the command
@@ -2247,10 +2248,10 @@ extension TmuxSessionManagerTests {
 
     /// selectPane() with a pane ID that has no numeric component should still
     /// send the tmux command (fire-and-forget) but NOT call setActiveTmuxPaneInputOnly.
-    /// This is a pre-existing test (testSelectPaneWithInvalidPaneIdDoesNotCallSetActive)
+    /// This is a pre-existing test (testSelectPaneWithInvalidPaneIdDoesNotSendCommand)
     /// but we re-verify it in the onPaneTap context.
     @MainActor
-    func testOnPaneTapWithMalformedPaneIdSendsCommandOnly() {
+    func testOnPaneTapWithMalformedPaneIdIsRejected() {
         let (mgr, log) = managerWithCommandLog()
         let mock = MockTmuxSurface()
 
@@ -2258,14 +2259,14 @@ extension TmuxSessionManagerTests {
         mgr.tmuxQuerySurfaceOverride = mock
         #endif
 
-        // Simulate tap with a pane ID that can't be parsed as numeric
+        // Simulate tap with a pane ID that fails validation
         let onPaneTap = { mgr.selectPane("invalid") }
         onPaneTap()
 
-        XCTAssertEqual(log.commands, ["select-pane -t 'invalid'\n"],
-                       "Command should still be sent even with invalid pane ID")
+        XCTAssertTrue(log.commands.isEmpty,
+                       "No command should be sent for invalid pane ID")
         XCTAssertTrue(mock.setActiveTmuxPaneInputOnlyCalls.isEmpty,
-                      "setActiveTmuxPaneInputOnly should NOT be called for non-numeric pane ID")
+                      "setActiveTmuxPaneInputOnly should NOT be called for invalid pane ID")
     }
 }
 
@@ -3375,6 +3376,8 @@ extension TmuxSessionManagerTests {
         #if DEBUG
         mgr.setPendingOutputForTesting(["%15": [Data([0x41])]])
         #endif
+        mgr.handleSessionRenamed(name: "my-session")
+        XCTAssertEqual(mgr.sessionName, "my-session")
         
         mgr.prepareForReattach()
         
@@ -3382,6 +3385,7 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.connectionState, .disconnected)
         XCTAssertTrue(mgr.pendingOutput.isEmpty)
         XCTAssertNil(mgr.currentSession)
+        XCTAssertEqual(mgr.sessionName, "")
         XCTAssertTrue(mgr.windows.isEmpty)
         XCTAssertFalse(mgr.viewerReady)
         // focusedWindowId and focusedPaneId are preserved for UI continuity
@@ -4086,7 +4090,7 @@ extension TmuxSessionManagerTests {
         // Set clipboard content
         UIPasteboard.general.string = "clipboard text"
 
-        // Set focused pane (with % prefix, as in production)
+        // Set focused pane (must use %N format to pass validation)
         mgr.setFocusedPane("%5")
 
         mgr.pasteTmuxBuffer()
@@ -4929,12 +4933,23 @@ extension TmuxSessionManagerTests {
     }
 
     @MainActor
-    func testHandleSessionRenamedDoesNotCrash() {
+    func testHandleSessionRenamedUpdatesSessionName() {
         let mgr = TmuxSessionManager()
 
+        // Initially empty
+        XCTAssertEqual(mgr.sessionName, "")
+
+        // Updates to new name
         mgr.handleSessionRenamed(name: "my-session")
-        mgr.handleSessionRenamed(name: "")
+        XCTAssertEqual(mgr.sessionName, "my-session")
+
+        // Updates to name with special characters
         mgr.handleSessionRenamed(name: "session with spaces and 'quotes'")
+        XCTAssertEqual(mgr.sessionName, "session with spaces and 'quotes'")
+
+        // Handles empty rename (clears name)
+        mgr.handleSessionRenamed(name: "")
+        XCTAssertEqual(mgr.sessionName, "")
     }
 
     @MainActor
