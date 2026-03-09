@@ -1470,10 +1470,17 @@ class TmuxSessionManager: ObservableObject {
     ) -> (direction: TmuxSplitTree.Direction, ratio: Double, totalSize: Int)? {
         guard case .split(let split) = node else { return nil }
         
-        if split.left.leftmostPaneId == paneId {
-            // Found the split - calculate total size based on direction
-            let totalSize = split.direction == .horizontal ? totalCols : totalRows
-            return (split.direction, split.ratio, totalSize)
+        // Check if the target pane is a direct child of this split (on either side).
+        // The old code only checked split.left.leftmostPaneId, which missed panes
+        // that are a right child or not the leftmost leaf in a subtree.
+        if split.left.contains(paneId: paneId) || split.right.contains(paneId: paneId) {
+            // Verify that the pane is an immediate child (leaf), not deeper in a subtree.
+            // If it's deeper, we need to recurse to find the innermost containing split.
+            let isDirectChild = split.left.isPane(paneId) || split.right.isPane(paneId)
+            if isDirectChild {
+                let totalSize = split.direction == .horizontal ? totalCols : totalRows
+                return (split.direction, split.ratio, totalSize)
+            }
         }
         
         // Recurse into children with adjusted sizes
@@ -1610,9 +1617,16 @@ class TmuxSessionManager: ObservableObject {
 
     /// Handle a tmux `%window-pane-changed` notification from the Zig viewer.
     /// Fired when the focused pane within a window changes (e.g., via select-pane).
-    /// Currently log-only; future work may update pane focus indicators.
+    /// If the window matches our focused window, update input routing to the new pane
+    /// so that keystrokes are sent to the correct pane via send-keys.
     func handleFocusedPaneChanged(windowId: UInt32, paneId: UInt32) {
         logger.info("tmux focused pane changed: @\(windowId) %\(paneId)")
+        
+        // Only update focus if this is our currently focused window.
+        // focusedWindowId has "@" prefix (e.g. "@0"), so format windowId to match.
+        if "@\(windowId)" == focusedWindowId {
+            setFocusedPane("%\(paneId)")
+        }
     }
 
     /// Handle a tmux `%subscription-changed` notification from the Zig viewer.
@@ -1682,9 +1696,13 @@ class TmuxSessionManager: ObservableObject {
         // - Newlines and carriage returns must be escaped to prevent breaking
         //   the tmux control-mode command framing (one command per line)
         // - Use -- to prevent content starting with - from being parsed as flags
+        // Also escape $ (tmux format variables) and backtick (shell expansion)
+        // to prevent injection when the content is passed to set-buffer.
         let escaped = clipboardContent
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
         
@@ -1698,8 +1716,9 @@ class TmuxSessionManager: ObservableObject {
                 logger.warning("set-buffer failed: \(content)")
                 return
             }
-            // Buffer set successfully — now paste it into the focused pane
-            self.sendCommandFireAndForget("paste-buffer -t %\(paneId)")
+            // Buffer set successfully — now paste it into the focused pane.
+            // paneId already has the "%" prefix (e.g. "%0"), so don't add another.
+            self.sendCommandFireAndForget("paste-buffer -t \(paneId)")
             logger.info("Pasted clipboard to tmux pane %\(paneId) (\(clipboardContent.count) chars)")
         }
         
