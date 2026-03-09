@@ -4201,8 +4201,10 @@ extension TmuxSessionManagerTests {
                       "Dollar signs should be escaped: got \(cmd)")
         XCTAssertTrue(cmd.contains("\\`command\\`"),
                       "Backticks should be escaped: got \(cmd)")
-        XCTAssertFalse(cmd.contains("$100") && !cmd.contains("\\$100"),
-                       "Unescaped dollar sign must not appear: got \(cmd)")
+        let unescapedDollarRange = cmd.range(of: #"(?<!\\)\$"#,
+                                             options: .regularExpression)
+        XCTAssertNil(unescapedDollarRange,
+                     "Unescaped dollar sign must not appear: got \(cmd)")
     }
 
     /// pasteTmuxBuffer should bail out when no pane is focused.
