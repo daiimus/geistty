@@ -1719,7 +1719,7 @@ class TmuxSessionManager: ObservableObject {
             // Buffer set successfully — now paste it into the focused pane.
             // paneId already has the "%" prefix (e.g. "%0"), so don't add another.
             self.sendCommandFireAndForget("paste-buffer -t \(paneId)")
-            logger.info("Pasted clipboard to tmux pane %\(paneId) (\(clipboardContent.count) chars)")
+            logger.info("Pasted clipboard to tmux pane \(paneId) (\(clipboardContent.count) chars)")
         }
         
         if !surface.sendTmuxCommand("set-buffer -- \"\(escaped)\"") {
