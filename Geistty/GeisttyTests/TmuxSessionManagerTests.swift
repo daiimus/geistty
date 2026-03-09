@@ -4042,8 +4042,8 @@ extension TmuxSessionManagerTests {
         // Set clipboard content
         UIPasteboard.general.string = "clipboard text"
 
-        // Set focused pane
-        mgr.setFocusedPane("5")
+        // Set focused pane (with % prefix, as in production)
+        mgr.setFocusedPane("%5")
 
         mgr.pasteTmuxBuffer()
 
@@ -4096,7 +4096,7 @@ extension TmuxSessionManagerTests {
         defer { UIPasteboard.general.string = savedClipboard }
 
         UIPasteboard.general.string = "line with \\backslash and \"quotes\""
-        mgr.setFocusedPane("0")
+        mgr.setFocusedPane("%0")
 
         mgr.pasteTmuxBuffer()
 
@@ -4121,7 +4121,7 @@ extension TmuxSessionManagerTests {
         defer { UIPasteboard.general.string = savedClipboard }
 
         UIPasteboard.general.string = "line1\nline2\rline3"
-        mgr.setFocusedPane("0")
+        mgr.setFocusedPane("%0")
 
         mgr.pasteTmuxBuffer()
 
@@ -4170,7 +4170,7 @@ extension TmuxSessionManagerTests {
         defer { UIPasteboard.general.string = savedClipboard }
 
         UIPasteboard.general.string = "something"
-        mgr.setFocusedPane("0")
+        mgr.setFocusedPane("%0")
         mgr.pasteTmuxBuffer()
 
         // Simulate error on set-buffer
