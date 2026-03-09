@@ -2021,8 +2021,9 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mock.setActiveTmuxPaneInputOnlyCalls, [7])
     }
 
-    /// selectPane() with a non-numeric pane ID should still set focusedPaneId
-    /// but NOT call setActiveTmuxPaneInputOnly (TmuxId.numericPaneId returns nil).
+    /// selectPane() with an invalid pane ID should reject the call:
+    /// no command is sent, focusedPaneId is unchanged, and
+    /// setActiveTmuxPaneInputOnly is not called.
     @MainActor
     func testSelectPaneWithInvalidPaneIdDoesNotSendCommand() {
         let (mgr, log) = managerWithCommandLog()
