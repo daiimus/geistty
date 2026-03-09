@@ -3796,6 +3796,50 @@ extension TmuxSessionManagerTests {
         XCTAssertTrue(cmd.contains("11\n"),
                       "resize-pane should target 11 rows (23 * 0.5), got: \(cmd)")
     }
+
+    /// syncSplitRatioToTmux should correctly find and resize the RIGHT child pane.
+    /// This validates finding #14: the old code only checked split.left.leftmostPaneId,
+    /// which would miss panes that are the right child of a split.
+    @MainActor
+    func testSyncSplitRatioRightChildPaneSendsResizePane() {
+        let (mgr, log) = managerWithCommandLog()
+        let mock = MockTmuxSurface()
+        let layout = horizontalSplitLayout(paneA: 0, paneB: 1, totalCols: 80, rows: 24)
+        mock.stubbedWindows = [TmuxWindowInfo(id: 0, width: 80, height: 24, name: "bash")]
+        mock.stubbedWindowLayouts = [layout]
+        mock.stubbedActiveWindowId = 0
+        mock.stubbedPaneIds = [0, 1]
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        mgr.controlModeActivated()
+        mgr.viewerBecameReady()
+        mgr.configureSurfaceManagement(
+            factory: { _ in nil },
+            inputHandler: { _, _ in },
+            resizeHandler: { _, _ in }
+        )
+        mgr.handleTmuxStateChanged(windowCount: 1, paneCount: 2)
+
+        // Set lastRefreshSize AFTER controlModeActivated (which resets it to nil)
+        #if DEBUG
+        mgr.setLastRefreshSizeForTesting(cols: 80, rows: 24)
+        #endif
+
+        log.commands.removeAll()
+        // Resize pane 1 (the RIGHT child) — this was broken before finding #14 fix
+        mgr.syncSplitRatioToTmux(forPaneId: 1, ratio: 0.6)
+
+        // Should send a resize-pane -x command targeting pane 1
+        XCTAssertEqual(log.commands.count, 1, "Exactly one resize command should be sent for right-child pane")
+        let cmd = log.commands.first ?? ""
+        XCTAssertTrue(cmd.hasPrefix("resize-pane -t %1 -x "),
+                      "Command should target pane 1 with -x flag, got: \(cmd)")
+        // Expected: available = 80 - 1 (divider) = 79, new size = max(1, Int(79 * 0.6)) = 47
+        XCTAssertTrue(cmd.contains("47\n"),
+                      "resize-pane should target 47 columns (79 * 0.6), got: \(cmd)")
+    }
 }
 
 // MARK: - Pending Input Display Tests
@@ -4130,8 +4174,8 @@ extension TmuxSessionManagerTests {
                        "Newlines should be escaped: got \(cmd)")
         XCTAssertTrue(cmd.contains("\\r"),
                        "Carriage returns should be escaped: got \(cmd)")
-         XCTAssertFalse(cmd.contains("\n"),
-                        "Raw newlines must not appear in command: got \(cmd)")
+        XCTAssertFalse(cmd.contains("\n"),
+                       "Raw newlines must not appear in command: got \(cmd)")
     }
 
     /// Dollar signs and backticks must be escaped as defense-in-depth
