@@ -4130,8 +4130,35 @@ extension TmuxSessionManagerTests {
                        "Newlines should be escaped: got \(cmd)")
         XCTAssertTrue(cmd.contains("\\r"),
                        "Carriage returns should be escaped: got \(cmd)")
-        XCTAssertFalse(cmd.contains("\n"),
-                       "Raw newlines must not appear in command: got \(cmd)")
+         XCTAssertFalse(cmd.contains("\n"),
+                        "Raw newlines must not appear in command: got \(cmd)")
+    }
+
+    /// Dollar signs and backticks must be escaped as defense-in-depth
+    /// against potential expansion when passed to set-buffer.
+    @MainActor
+    func testPasteTmuxBufferEscapesDollarAndBacktick() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        let savedClipboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = savedClipboard }
+
+        UIPasteboard.general.string = "price is $100 and `command`"
+        mgr.setFocusedPane("%0")
+
+        mgr.pasteTmuxBuffer()
+
+        let cmd = mock.sendTmuxCommandCalls.first ?? ""
+        XCTAssertTrue(cmd.contains("\\$100"),
+                      "Dollar signs should be escaped: got \(cmd)")
+        XCTAssertTrue(cmd.contains("\\`command\\`"),
+                      "Backticks should be escaped: got \(cmd)")
+        XCTAssertFalse(cmd.contains("$100") && !cmd.contains("\\$100"),
+                       "Unescaped dollar sign must not appear: got \(cmd)")
     }
 
     /// pasteTmuxBuffer should bail out when no pane is focused.
@@ -4871,6 +4898,46 @@ extension TmuxSessionManagerTests {
         mgr.handleFocusedPaneChanged(windowId: 1, paneId: 0)
         mgr.handleFocusedPaneChanged(windowId: 0, paneId: 0)
         mgr.handleFocusedPaneChanged(windowId: UInt32.max, paneId: UInt32.max)
+    }
+
+    /// When the window matches focusedWindowId, handleFocusedPaneChanged
+    /// should update focusedPaneId via setFocusedPane.
+    @MainActor
+    func testHandleFocusedPaneChangedUpdatesFocusForMatchingWindow() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Set focusedWindowId to "@1" so the handler recognizes window 1
+        mgr.setFocusedWindowIdForTesting("@1")
+        mgr.setFocusedPane("%0") // initial focus
+
+        // Trigger pane change for matching window
+        mgr.handleFocusedPaneChanged(windowId: 1, paneId: 5)
+        XCTAssertEqual(mgr.focusedPaneId, "%5",
+                       "focusedPaneId should be updated to %5 for matching window")
+    }
+
+    /// When the window does NOT match focusedWindowId, handleFocusedPaneChanged
+    /// should leave focusedPaneId unchanged.
+    @MainActor
+    func testHandleFocusedPaneChangedIgnoresNonMatchingWindow() {
+        let mgr = TmuxSessionManager()
+        let mock = MockTmuxSurface()
+        #if DEBUG
+        mgr.tmuxQuerySurfaceOverride = mock
+        #endif
+
+        // Set focusedWindowId to "@1"
+        mgr.setFocusedWindowIdForTesting("@1")
+        mgr.setFocusedPane("%0") // initial focus
+
+        // Trigger pane change for a different window
+        mgr.handleFocusedPaneChanged(windowId: 2, paneId: 9)
+        XCTAssertEqual(mgr.focusedPaneId, "%0",
+                       "focusedPaneId should remain %0 for non-matching window")
     }
 
     @MainActor

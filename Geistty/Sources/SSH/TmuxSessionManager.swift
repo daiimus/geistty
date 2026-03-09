@@ -143,6 +143,11 @@ class TmuxSessionManager: ObservableObject {
     
     // ARCHIVED: Session 127 — needsReattach + needsReattachForTesting removed
     // (destroy-and-recreate approach). See docs/archive/REATTACH_PRESERVED_SURFACES_FEB_2026.swift
+    
+    /// Test-only: set focusedWindowId to test window-matching logic
+    func setFocusedWindowIdForTesting(_ windowId: String) {
+        focusedWindowId = windowId
+    }
     #endif
     
     /// Cell size from the primary surface (for calculating terminal dimensions)
@@ -1696,8 +1701,8 @@ class TmuxSessionManager: ObservableObject {
         // - Newlines and carriage returns must be escaped to prevent breaking
         //   the tmux control-mode command framing (one command per line)
         // - Use -- to prevent content starting with - from being parsed as flags
-        // Also escape $ (tmux format variables) and backtick (shell expansion)
-        // to prevent injection when the content is passed to set-buffer.
+        // Also escape $ and backtick as defense-in-depth against potential
+        // expansion in edge cases when the content is passed to set-buffer.
         let escaped = clipboardContent
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
