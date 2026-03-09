@@ -2044,6 +2044,51 @@ extension TmuxSessionManagerTests {
                       "setActiveTmuxPaneInputOnly should not be called for invalid pane IDs")
     }
 
+    /// closeWindow() with an invalid window ID should not send any command.
+    @MainActor
+    func testCloseWindowWithInvalidWindowIdDoesNotSendCommand() {
+        let (mgr, log) = managerWithCommandLog()
+
+        mgr.closeWindow(windowId: "invalid")
+        XCTAssertTrue(log.commands.isEmpty,
+                      "No command should be sent for invalid window ID")
+
+        mgr.closeWindow(windowId: "2")
+        XCTAssertTrue(log.commands.isEmpty,
+                      "Window ID without @ prefix should be rejected")
+    }
+
+    /// renameWindow(windowId:name:) with an invalid window ID should not send any command.
+    @MainActor
+    func testRenameWindowWithInvalidWindowIdDoesNotSendCommand() {
+        let (mgr, log) = managerWithCommandLog()
+
+        mgr.renameWindow(windowId: "bad", name: "test")
+        XCTAssertTrue(log.commands.isEmpty,
+                      "No command should be sent for invalid window ID")
+
+        mgr.renameWindow(windowId: "3", name: "test")
+        XCTAssertTrue(log.commands.isEmpty,
+                      "Window ID without @ prefix should be rejected")
+    }
+
+    /// selectWindow() with an invalid window ID should not send any command
+    /// or update focusedWindowId.
+    @MainActor
+    func testSelectWindowWithInvalidWindowIdDoesNotSendCommand() {
+        let (mgr, log) = managerWithCommandLog()
+
+        mgr.selectWindow("notawindow")
+        XCTAssertTrue(log.commands.isEmpty,
+                      "No command should be sent for invalid window ID")
+        XCTAssertEqual(mgr.focusedWindowId, "",
+                       "focusedWindowId should not be updated for invalid window ID")
+
+        mgr.selectWindow("0")
+        XCTAssertTrue(log.commands.isEmpty,
+                      "Window ID without @ prefix should be rejected")
+    }
+
     /// selectPane() without a tmuxQuerySurface should still send the command
     /// and update focusedPaneId (graceful nil handling).
     @MainActor

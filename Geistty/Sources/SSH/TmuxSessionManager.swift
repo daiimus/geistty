@@ -317,6 +317,7 @@ class TmuxSessionManager: ObservableObject {
         availableSessions.removeAll()
         tmuxOptions.removeAll()
         pendingResponseHandlers.removeAll()
+        sessionName = ""
         
         // Clear output buffers and deferred surface creation
         pendingOutput.removeAll()
@@ -1604,6 +1605,36 @@ class TmuxSessionManager: ObservableObject {
         sessionName = name
     }
     
+    /// Handle a tmux `%window-pane-changed` notification from the Zig viewer.
+    /// Fired when the focused pane within a window changes (e.g., via select-pane).
+    /// If the window matches our focused window, update input routing to the new pane
+    /// so that keystrokes are sent to the correct pane via send-keys.
+    func handleFocusedPaneChanged(windowId: UInt32, paneId: UInt32) {
+        logger.info("tmux focused pane changed: @\(windowId) %\(paneId)")
+        
+        // Only update focus if this is our currently focused window.
+        // focusedWindowId has "@" prefix (e.g. "@0"), so format windowId to match.
+        if "@\(windowId)" == focusedWindowId {
+            setFocusedPane("%\(paneId)")
+        }
+    }
+
+    /// Handle a tmux `%subscription-changed` notification from the Zig viewer.
+    /// Fired when a format subscription value changes (registered via refresh-client -B).
+    /// The name identifies the subscription and the value is the new format expansion.
+    func handleSubscriptionChanged(name: String, value: String) {
+        logger.debug("tmux subscription changed: \(name), valueLength=\(value.count)")
+        
+        switch name {
+        case "status_left":
+            statusLeft = value
+        case "status_right":
+            statusRight = value
+        default:
+            break
+        }
+    }
+
     // MARK: - Stub Handlers (log-only, future work)
     // These handlers receive tmux notifications but only log them.
     // They are kept as extension points for future features.
@@ -1642,36 +1673,6 @@ class TmuxSessionManager: ObservableObject {
     /// Currently log-only; future work may update pane mode indicators.
     func handlePaneModeChanged(paneId: UInt32) {
         logger.info("tmux pane mode changed: %\(paneId)")
-    }
-
-    /// Handle a tmux `%window-pane-changed` notification from the Zig viewer.
-    /// Fired when the focused pane within a window changes (e.g., via select-pane).
-    /// If the window matches our focused window, update input routing to the new pane
-    /// so that keystrokes are sent to the correct pane via send-keys.
-    func handleFocusedPaneChanged(windowId: UInt32, paneId: UInt32) {
-        logger.info("tmux focused pane changed: @\(windowId) %\(paneId)")
-        
-        // Only update focus if this is our currently focused window.
-        // focusedWindowId has "@" prefix (e.g. "@0"), so format windowId to match.
-        if "@\(windowId)" == focusedWindowId {
-            setFocusedPane("%\(paneId)")
-        }
-    }
-
-    /// Handle a tmux `%subscription-changed` notification from the Zig viewer.
-    /// Fired when a format subscription value changes (registered via refresh-client -B).
-    /// The name identifies the subscription and the value is the new format expansion.
-    func handleSubscriptionChanged(name: String, value: String) {
-        logger.debug("tmux subscription changed: \(name), valueLength=\(value.count)")
-        
-        switch name {
-        case "status_left":
-            statusLeft = value
-        case "status_right":
-            statusRight = value
-        default:
-            break
-        }
     }
 
     /// Copy the tmux paste buffer to the iOS clipboard.
@@ -2080,6 +2081,7 @@ class TmuxSessionManager: ObservableObject {
         connectionState = .disconnected
         focusedPaneId = ""
         focusedWindowId = ""
+        sessionName = ""
         
         // Reset resize tracking
         lastResizeCols = 0
