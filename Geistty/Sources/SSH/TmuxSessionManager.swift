@@ -144,9 +144,6 @@ class TmuxSessionManager: ObservableObject {
         pendingResponseHandlers.count
     }
     
-    // ARCHIVED: Session 127 — needsReattach + needsReattachForTesting removed
-    // (destroy-and-recreate approach). See docs/archive/REATTACH_PRESERVED_SURFACES_FEB_2026.swift
-    
     /// Test-only: set focusedWindowId to test window-matching logic
     func setFocusedWindowIdForTesting(_ windowId: String) {
         focusedWindowId = windowId
@@ -1634,30 +1631,6 @@ class TmuxSessionManager: ObservableObject {
             break
         }
     }
-
-    // MARK: - ARCHIVED Stub Handlers (2026-03-09)
-    // These handlers were log-only stubs for tmux notifications whose C API actions
-    // were removed during the upstream rebase. Restore when upstream re-adds them.
-    //
-    // func handleTmuxMessage(text: String) {
-    //     logger.info("tmux message: \(text)")
-    // }
-    //
-    // func handlePasteBufferChanged(name: String) {
-    //     logger.info("tmux paste buffer changed: \(name)")
-    // }
-    //
-    // func handlePasteBufferDeleted(name: String) {
-    //     logger.info("tmux paste buffer deleted: \(name)")
-    // }
-    //
-    // func handleSessionsChanged() {
-    //     logger.info("tmux sessions changed")
-    // }
-    //
-    // func handlePaneModeChanged(paneId: UInt32) {
-    //     logger.info("tmux pane mode changed: %\(paneId)")
-    // }
 
     /// Copy the tmux paste buffer to the iOS clipboard.
     /// Sends `show-buffer` through the Zig viewer's command queue and

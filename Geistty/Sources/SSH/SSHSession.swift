@@ -635,12 +635,6 @@ class SSHSession: ObservableObject, Identifiable {
             self.tmuxSessionManager?.handleActiveWindowChanged(windowId: Int(windowId))
         }
         
-        // ARCHIVED (2026-03-09): 5 tmux notification observers removed — their C API actions
-        // no longer exist in ghostty.h after upstream rebase. Restore when upstream re-adds:
-        //   .tmuxMessage, .tmuxPasteBufferChanged, .tmuxPasteBufferDeleted,
-        //   .tmuxSessionsChanged, .tmuxPaneModeChanged
-        // The corresponding TmuxSessionManager handlers are also archived.
-        
         let sessionRenamedObserver = NotificationCenter.default.addObserver(
             forName: .tmuxSessionRenamed,
             object: nil,

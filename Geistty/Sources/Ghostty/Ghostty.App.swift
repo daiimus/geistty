@@ -719,22 +719,6 @@ extension Ghostty {
                 )
                 return true
                 
-            // MARK: - ARCHIVED (2026-03-09): 5 tmux action cases removed from Ghostty C API
-            // The following C API actions were removed during the rebase onto upstream Ghostty main
-            // (commit f8a0a4596). They no longer exist in ghostty.h. When upstream re-adds these
-            // actions (likely during their tmux control mode work), restore these cases.
-            //
-            // Removed actions:
-            //   GHOSTTY_ACTION_TMUX_MESSAGE
-            //   GHOSTTY_ACTION_TMUX_PASTE_BUFFER_CHANGED
-            //   GHOSTTY_ACTION_TMUX_PASTE_BUFFER_DELETED
-            //   GHOSTTY_ACTION_TMUX_SESSIONS_CHANGED
-            //   GHOSTTY_ACTION_TMUX_PANE_MODE_CHANGED
-            //
-            // See: SSHSession.swift (observers), TmuxSessionManager.swift (handlers),
-            //      GeisttyApp.swift (Notification.Name extensions) — all archived in parallel.
-            // END ARCHIVED
-                
             case GHOSTTY_ACTION_TMUX_SESSION_RENAMED:
                 guard target.tag == GHOSTTY_TARGET_SURFACE,
                       let surface = target.target.surface else {
