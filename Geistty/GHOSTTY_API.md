@@ -197,6 +197,11 @@ All action callbacks are handled in `App.action(_:target:action:)`:
 | `GHOSTTY_ACTION_TMUX_STATE_CHANGED` | ✅ | tmux window/pane count changed |
 | `GHOSTTY_ACTION_TMUX_EXIT` | ✅ | tmux control mode exited |
 | `GHOSTTY_ACTION_TMUX_READY` | ✅ | tmux viewer ready (capture-pane complete) |
+| `GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE` | ✅ | tmux command response (begin/end/error) |
+| `GHOSTTY_ACTION_TMUX_ACTIVE_WINDOW_CHANGED` | ✅ | Active tmux window changed |
+| `GHOSTTY_ACTION_TMUX_SESSION_RENAMED` | ✅ | tmux session was renamed |
+| `GHOSTTY_ACTION_TMUX_FOCUSED_PANE_CHANGED` | ✅ | Focused pane changed within a window |
+| `GHOSTTY_ACTION_TMUX_SUBSCRIPTION_CHANGED` | ✅ | tmux subscription variable changed |
 | `GHOSTTY_ACTION_TOGGLE_BACKGROUND_OPACITY` | ✅ | Toggle background opacity |
 
 ## Helper Types

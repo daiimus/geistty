@@ -38,6 +38,7 @@ Key architectural decisions are documented in `docs/decisions/`:
 | [ADR-002](docs/decisions/ADR-002-multi-pane-observer-architecture.md) | Multi-pane: primary + observer surface architecture |
 | [ADR-003](docs/decisions/ADR-003-fork-philosophy.md) | Fork philosophy: minimize divergence, keep it in Swift |
 | [ADR-004](docs/decisions/ADR-004-config-ghostty-conf.md) | Config: ghostty.conf as source of truth, not UserDefaults |
+| [ADR-005](docs/decisions/ADR-005-lazy-pull-tmux-architecture.md) | Lazy/pull tmux state: viewer owns state, Swift queries via C API |
 
 ---
 
@@ -45,7 +46,7 @@ Key architectural decisions are documented in `docs/decisions/`:
 
 | Task | Priority | Notes |
 |------|----------|-------|
-| Split `TmuxSessionManager.swift` (~1550 lines) | Medium | Extract user actions/commands, surface management, split resize helpers |
+| Split `TmuxSessionManager.swift` (~2062 lines) | Medium | Extract user actions/commands, surface management, split resize helpers |
 | Migrate callback bridges to async/await in TmuxSessionManager | Medium | 6 closure-based callbacks from pre-Ghostty architecture |
 | Extract magic numbers to constants | Low | Timeouts, marker strings |
 | Review and standardize naming conventions | Low | |
@@ -76,7 +77,7 @@ Key architectural decisions are documented in `docs/decisions/`:
 | Architecture | TmuxGateway actor migration, Swift-native SSH | Dec 2024-2025 |
 | Cleanup | Dead code removal, debug code cleanup | Dec 2025-Feb 2026 |
 | Docs | ARCHITECTURE.md and README.md rewrite | Feb 2026 |
-| Infra | Rebase Ghostty fork on upstream, rebuild GhosttyKit | Feb 2026 |
+| Infra | Rebase Ghostty fork on upstream (1.3.0), rebuild GhosttyKit | Feb-Mar 2026 |
 | Refactor | Theme system, config introspection, font mapping, ControlModeState enum | Feb 2026 |
 | Feature | Command palette, Jump to Prompt, per-pane pinch-to-zoom | Feb 2026 |
 | Fix | tmux DCS passthrough freeze, 6-agent code review (63 findings) | Feb 2026 |
