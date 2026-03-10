@@ -46,12 +46,13 @@ Everything else:
 
 ## Current Fork Footprint
 
-As of Session 133, the fork adds:
-- `src/termio/External.zig` — External backend
-- `src/config/CApi.zig` — Config loading extensions
-- tmux C API functions (pane/window queries, active pane switching)
+As of the March 2026 rebase (94 commits onto Ghostty 1.3.0), the fork adds:
+- `src/termio/External.zig` — External backend (terminal emulation without PTY)
+- `src/termio/backend.zig` — `external` variant registered in `Kind`, `Config`, `Backend`, `ThreadData` enums/unions
+- `src/termio.zig` — `pub const External` export
+- `src/config/CApi.zig` — Config loading extensions (`load_file`, `load_string`)
+- tmux C API: 8 action types, pane/window query functions, active pane switching
 - `TMUX_READY` action (signals capture-pane completion)
-- `resetAllObservers` UAF fix
 - Debug logging additions (planned for cleanup — see Issue #8)
 
-Total: ~15 files modified, ~1500 lines of additions across the fork.
+Total: ~15 files modified across the fork.

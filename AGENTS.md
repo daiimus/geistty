@@ -19,7 +19,7 @@ These are behavioral rules established by the user. Follow them strictly.
 3. **Analysis first.** Don't bolt on diagnostics. Understand the problem before writing code.
 4. **What would Mitchell Hashimoto do?** When stuck, study upstream macOS Ghostty patterns.
 5. **Minimize fork divergence.** Ask "does this need to go in the fork, or can it live in Swift?" The less we touch the fork, the easier. See `docs/decisions/ADR-003-fork-philosophy.md`.
-6. **Archive over deletion.** When removing dead code, archive it rather than delete it.
+6. **Delete dead code cleanly.** Git history is sufficient for recovery. No commented-out code blocks, no ARCHIVED markers. Clean code for people to read.
 7. **Slow down.** Diagnose thoroughly, validate assumptions on device, and check with the user before making big architectural moves. Don't charge ahead without stopping to look around.
 8. **Leverage tooling.** Use `idevicecrashreport`, `xcrun devicectl device copy from --domain-type systemCrashLogs`, crash log analysis, and `ci.sh test` to verify things programmatically. Don't force manual testing.
 9. **Prefer simplicity.** Think about simple, standard iOS patterns before diving into complex Zig-level solutions.
@@ -94,10 +94,10 @@ done
 Geistty/
 ├── Sources/
 │   ├── App/              # App entry point, main views (2 files)
-│   ├── Auth/             # SSH authentication, credentials, keychain (5 files)
-│   ├── Ghostty/          # Ghostty integration, terminal surface (10 files)
-│   ├── SSH/              # SSH connection management, tmux control mode (8 files)
-│   ├── Terminal/         # Terminal session, view models, tmux pane UI (13 files)
+│   ├── Auth/             # SSH authentication, credentials, keychain (6 files)
+│   ├── Ghostty/          # Ghostty integration, terminal surface (12 files)
+│   ├── SSH/              # SSH connection management, tmux control mode (9 files)
+│   ├── Terminal/         # Terminal session, view models, tmux pane UI (16 files)
 │   └── UI/               # Connection list/editor, settings (4 files)
 ├── Frameworks/
 │   └── GhosttyKit.xcframework/  # Ghostty static library
@@ -106,11 +106,11 @@ Geistty/
 └── Assets.xcassets/      # App icons, colors
 ```
 
-43 Swift source files across 6 directories.
+49 Swift source files across 6 directories.
 
 ## Key Files
 
-- `Sources/Ghostty/Ghostty.swift` - SurfaceView (~2558 lines): Metal rendering, keyboard input, gestures, write callback, tmux action notifications, multi-pane observer management
+- `Sources/Ghostty/Ghostty.swift` - SurfaceView (~2837 lines): Metal rendering, keyboard input, gestures, write callback, tmux action notifications, multi-pane observer management
 - `Sources/Ghostty/Ghostty.App.swift` - App lifecycle, runtime init, action callback dispatch
 - `Sources/Ghostty/Ghostty.Config.swift` - Config wrapper (create, load, finalize)
 - `Sources/Ghostty/Ghostty.SearchState.swift` - Search overlay state model
@@ -125,7 +125,7 @@ Geistty/
 - `Sources/Terminal/TmuxSplitView.swift` - Recursive split tree rendering
 - `Sources/Terminal/TmuxWindowPickerView.swift` - tmux window tab bar
 - `Sources/Terminal/CommandPaletteView.swift` - Command palette (Cmd+Shift+P) with fuzzy search
-- `Sources/Terminal/KeyTableIndicatorView.swift` - Vim-style key table indicator
+- `Sources/UI/KeyTableIndicatorView.swift` - Vim-style key table indicator
 - `Sources/SSH/NIOSSHConnection.swift` - SwiftNIO-SSH connection with Network.framework
 - `Sources/SSH/SSHSession.swift` - SSH session wrapper, tmux notification observer, data flow
 - `Sources/SSH/TmuxSessionManager.swift` - Multi-pane state management, surface ownership, layout reconciliation
@@ -165,6 +165,7 @@ The `ios-external-backend` branch adds:
 1. **External Backend** (`src/termio/External.zig`)
    - Terminal emulation without PTY
    - Write callback for bidirectional I/O
+   - Registered as `external` variant in `src/termio/backend.zig` (`Kind`, `Config`, `Backend`, `ThreadData` enums/unions)
 
 2. **Config APIs** (`src/config/CApi.zig`)
    - `ghostty_config_load_file(config, path, len)` - Load config from file
@@ -176,6 +177,11 @@ The `ios-external-backend` branch adds:
    - `GHOSTTY_ACTION_TMUX_STATE_CHANGED` - Action with window_count, pane_count
    - `GHOSTTY_ACTION_TMUX_EXIT` - Action when tmux control mode exits
    - `GHOSTTY_ACTION_TMUX_READY` - Action when tmux viewer is ready (capture-pane complete)
+   - `GHOSTTY_ACTION_TMUX_COMMAND_RESPONSE` - Response to a tmux command (begin/end/error)
+   - `GHOSTTY_ACTION_TMUX_ACTIVE_WINDOW_CHANGED` - Active tmux window changed
+   - `GHOSTTY_ACTION_TMUX_SESSION_RENAMED` - tmux session was renamed
+   - `GHOSTTY_ACTION_TMUX_FOCUSED_PANE_CHANGED` - Focused pane changed within a window
+   - `GHOSTTY_ACTION_TMUX_SUBSCRIPTION_CHANGED` - tmux subscription variable changed (e.g., status bar)
 
    **Pane-level queries:**
    - `ghostty_surface_tmux_pane_count()` - Get number of panes
@@ -212,7 +218,7 @@ Live font updates use `ghostty_surface_update_config()` with a new config.
 ## Dependencies
 
 - **Ghostty** - Terminal emulator (custom fork with External backend)
-- **libxev** - Event loop (used by Ghostty internally, upstream mitchellh/libxev)
+- **libxev** - Event loop (used by Ghostty internally, upstream mitchellh/libxev — no fork needed, upstream includes iOS mach_port support since PR #204, Dec 2025)
 - **SwiftNIO-SSH** - SSH protocol (via daiimus/swift-nio-ssh fork with RSA support)
 
 ## tmux Integration
@@ -237,7 +243,7 @@ SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
                               viewer.zig parses %output/%begin/%end/%layout-change/etc.
                               Routes output to per-pane Terminal instances
                                         ↓
-                              Action callback → TMUX_STATE_CHANGED / TMUX_EXIT / TMUX_READY
+                              Action callback → TMUX_STATE_CHANGED / TMUX_EXIT / TMUX_READY / TMUX_COMMAND_RESPONSE / TMUX_ACTIVE_WINDOW_CHANGED / TMUX_SESSION_RENAMED / TMUX_FOCUSED_PANE_CHANGED / TMUX_SUBSCRIPTION_CHANGED
                                         ↓
                               NotificationCenter → SSHSession.observeTmuxNotifications()
                                         ↓
@@ -267,7 +273,7 @@ User Input → Ghostty encodes keystroke → Termio.queueWrite()
 | `Termio.zig` (Ghostty) | `queueWrite()` intercepts writes when tmux viewer is active, calls `viewer.sendKeys()` for send-keys wrapping |
 | `External.zig` (Ghostty) | Pure pass-through: `queueWrite()` → `write_callback` → Swift |
 | `Ghostty.swift` | SurfaceView: Metal rendering, keyboard, gestures, write callback; tmux action notifications via NotificationCenter |
-| `Ghostty.App.swift` | Action callback dispatch handles `TMUX_STATE_CHANGED`/`TMUX_EXIT`/`TMUX_READY`; posts notifications |
+| `Ghostty.App.swift` | Action callback dispatch handles all 8 tmux actions (`STATE_CHANGED`, `EXIT`, `READY`, `COMMAND_RESPONSE`, `ACTIVE_WINDOW_CHANGED`, `SESSION_RENAMED`, `FOCUSED_PANE_CHANGED`, `SUBSCRIPTION_CHANGED`); posts notifications |
 | `SSHSession.swift` | Observes tmux notifications, forwards to TmuxSessionManager, manages connection state |
 | `TmuxSessionManager` | Multi-pane state, surface ownership, layout reconciliation via window-level C API queries |
 | `TmuxLayout.swift` | Parses tmux layout geometry strings for split pane UI |
@@ -314,6 +320,12 @@ Octal escapes: Characters <32 and `\` are encoded as `\NNN` (e.g., `\033` for ES
 2. **Metal Renderer** - iOS uses Metal, not OpenGL
 3. **CoreText Fonts** - Font discovery via CoreText on iOS
 4. **Module Map Naming** - GhosttyKit uses `GhosttyKit.modulemap` (renamed from `module.modulemap`)
+5. **24-byte CValue constraint** - Ghostty's `Action.CValue` is a C extern union that must be exactly 24 bytes on 64-bit (comptime assertion at `action.zig:485`). Every action's `.C` extern struct must fit within this budget. Three patterns exist for string data:
+   - **Sentinel pointer** (`[*:0]const u8` / `const char*`) — for naturally null-terminated strings
+   - **Pointer + length** (`[*]const u8` + `usize` / `const char*` + `size_t`) — for non-null-terminated data
+   - **Inline buffer** (`[N]u8` + `u8` len) — for short bounded data with lifetime concerns
+   - Core Ghostty always uses `usize` (not `u32`) for length fields. No exceptions.
+6. **C API pointer lifetime / null-termination** - Not all `const char*` fields in Ghostty C structs are null-terminated. Check the Zig source: `[*:0]const u8` is null-terminated (safe for `String(cString:)`), but `[*]const u8` with a separate `_len` field is NOT null-terminated — must use `UnsafeRawBufferPointer` with explicit length. Using `String(cString:)` on non-null-terminated data causes garbled text (U+FFFD replacement characters).
 
 ## Do NOT
 
@@ -410,7 +422,7 @@ SSH Server → NIOSSHConnection → SSHSession.handleReceivedData()
                               control.zig parses %output/%begin/%end/etc.
                               viewer.zig routes output to per-pane Terminal
                                         ↓
-                              Action: TMUX_STATE_CHANGED → NotificationCenter
+                              Action: TMUX_STATE_CHANGED / etc. → NotificationCenter
                                         ↓
                               SSHSession → TmuxSessionManager (UI state updates)
                                         ↓
@@ -518,7 +530,7 @@ xcrun devicectl device process launch --device <device-id> --console com.geistty
 - `ghostty` (daiimus/ghostty, branch: ios-external-backend)
   - External termio backend for SSH/iOS
   - C API extensions for config loading
-  - tmux C API: state change actions (including TMUX_READY), pane queries, active pane switching, window queries (count, info, layout, focused pane)
+  - tmux C API: 8 action types (state_changed, exit, ready, command_response, active_window_changed, session_renamed, focused_pane_changed, subscription_changed), pane queries, active pane switching, window queries (count, info, layout, focused pane)
   
 - `swift-nio-ssh` (daiimus/swift-nio-ssh, branch: add-rsa-support)
   - Fork with RSA key support added
