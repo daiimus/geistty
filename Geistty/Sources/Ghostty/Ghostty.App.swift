@@ -719,103 +719,21 @@ extension Ghostty {
                 )
                 return true
                 
-            case GHOSTTY_ACTION_TMUX_MESSAGE:
-                guard target.tag == GHOSTTY_TARGET_SURFACE,
-                      let surface = target.target.surface else {
-                    return false
-                }
-                
-                let msg = action.action.tmux_message
-                let text = decodePayload(data: msg.data, len: msg.len)
-                
-                logger.info("tmux message: len=\(msg.len)")
-                
-                // Extract the SurfaceView from userdata so observers can filter
-                // by identity (notification.object as? SurfaceView === self.ghosttySurface).
-                // Posting the raw ghostty_surface_t would fail the as? cast, bypassing
-                // the multi-surface identity guard.
-                let surfaceView = surfaceView(from: surface)
-                
-                NotificationCenter.default.post(
-                    name: .tmuxMessage,
-                    object: surfaceView,
-                    userInfo: [TmuxNotificationKey.text: text]
-                )
-                return true
-                
-            case GHOSTTY_ACTION_TMUX_PASTE_BUFFER_CHANGED:
-                guard target.tag == GHOSTTY_TARGET_SURFACE,
-                      let surface = target.target.surface else {
-                    return false
-                }
-                
-                let payload = action.action.tmux_paste_buffer_changed
-                let name = decodePayload(data: payload.data, len: payload.len)
-                
-                logger.info("tmux paste buffer changed: len=\(payload.len)")
-                
-                let surfaceView = surfaceView(from: surface)
-                
-                NotificationCenter.default.post(
-                    name: .tmuxPasteBufferChanged,
-                    object: surfaceView,
-                    userInfo: [TmuxNotificationKey.name: name]
-                )
-                return true
-                
-            case GHOSTTY_ACTION_TMUX_PASTE_BUFFER_DELETED:
-                guard target.tag == GHOSTTY_TARGET_SURFACE,
-                      let surface = target.target.surface else {
-                    return false
-                }
-                
-                let payload = action.action.tmux_paste_buffer_deleted
-                let name = decodePayload(data: payload.data, len: payload.len)
-                
-                logger.info("tmux paste buffer deleted: len=\(payload.len)")
-                
-                let surfaceView = surfaceView(from: surface)
-                
-                NotificationCenter.default.post(
-                    name: .tmuxPasteBufferDeleted,
-                    object: surfaceView,
-                    userInfo: [TmuxNotificationKey.name: name]
-                )
-                return true
-                
-            case GHOSTTY_ACTION_TMUX_SESSIONS_CHANGED:
-                guard target.tag == GHOSTTY_TARGET_SURFACE,
-                      let surface = target.target.surface else {
-                    return false
-                }
-                
-                logger.info("tmux sessions changed")
-                
-                let surfaceView = surfaceView(from: surface)
-                
-                NotificationCenter.default.post(
-                    name: .tmuxSessionsChanged,
-                    object: surfaceView
-                )
-                return true
-                
-            case GHOSTTY_ACTION_TMUX_PANE_MODE_CHANGED:
-                guard target.tag == GHOSTTY_TARGET_SURFACE,
-                      let surface = target.target.surface else {
-                    return false
-                }
-                
-                let paneId = action.action.tmux_pane_mode_changed.pane_id
-                logger.info("tmux pane mode changed: %\(paneId)")
-                
-                let surfaceView = surfaceView(from: surface)
-                
-                NotificationCenter.default.post(
-                    name: .tmuxPaneModeChanged,
-                    object: surfaceView,
-                    userInfo: [TmuxNotificationKey.paneId: paneId]
-                )
-                return true
+            // MARK: - ARCHIVED (2026-03-09): 5 tmux action cases removed from Ghostty C API
+            // The following C API actions were removed during the rebase onto upstream Ghostty main
+            // (commit f8a0a4596). They no longer exist in ghostty.h. When upstream re-adds these
+            // actions (likely during their tmux control mode work), restore these cases.
+            //
+            // Removed actions:
+            //   GHOSTTY_ACTION_TMUX_MESSAGE
+            //   GHOSTTY_ACTION_TMUX_PASTE_BUFFER_CHANGED
+            //   GHOSTTY_ACTION_TMUX_PASTE_BUFFER_DELETED
+            //   GHOSTTY_ACTION_TMUX_SESSIONS_CHANGED
+            //   GHOSTTY_ACTION_TMUX_PANE_MODE_CHANGED
+            //
+            // See: SSHSession.swift (observers), TmuxSessionManager.swift (handlers),
+            //      GeisttyApp.swift (Notification.Name extensions) — all archived in parallel.
+            // END ARCHIVED
                 
             case GHOSTTY_ACTION_TMUX_SESSION_RENAMED:
                 guard target.tag == GHOSTTY_TARGET_SURFACE,
@@ -862,12 +780,24 @@ extension Ghostty {
                 }
                 
                 let payload = action.action.tmux_subscription_changed
-                guard let namePtr = payload.name, let valuePtr = payload.value else {
-                    logger.error("tmux subscription changed: missing name or value pointer")
+                guard let namePtr = payload.name else {
+                    logger.error("tmux subscription changed: missing name pointer")
                     return false
                 }
                 let name = String(cString: namePtr)
-                let value = String(cString: valuePtr)
+                // value is NOT null-terminated — must use value_len
+                let value: String
+                if payload.value_len > 0, let valPtr = payload.value {
+                    value = String(
+                        decoding: UnsafeRawBufferPointer(
+                            start: UnsafeRawPointer(valPtr),
+                            count: payload.value_len
+                        ),
+                        as: UTF8.self
+                    )
+                } else {
+                    value = ""
+                }
                 
                 logger.debug("tmux subscription changed: name=\(name)")
                 

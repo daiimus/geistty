@@ -1635,45 +1635,29 @@ class TmuxSessionManager: ObservableObject {
         }
     }
 
-    // MARK: - Stub Handlers (log-only, future work)
-    // These handlers receive tmux notifications but only log them.
-    // They are kept as extension points for future features.
-
-    /// Handle a tmux `%message` notification from the Zig viewer.
-    /// These are informational messages from the tmux server (e.g., session
-    /// created/destroyed notices). Currently log-only; future work may surface
-    /// them in the UI.
-    func handleTmuxMessage(text: String) {
-        logger.info("tmux message: \(text)")
-    }
-
-    /// Handle a tmux `%paste-buffer-changed` notification from the Zig viewer.
-    /// Fired when a paste buffer is created or its content changes (tmux 3.4+).
-    /// Currently log-only; future work may auto-sync with iOS clipboard.
-    func handlePasteBufferChanged(name: String) {
-        logger.info("tmux paste buffer changed: \(name)")
-    }
-
-    /// Handle a tmux `%paste-buffer-deleted` notification from the Zig viewer.
-    /// Fired when a paste buffer is deleted (tmux 3.4+).
-    /// Currently log-only.
-    func handlePasteBufferDeleted(name: String) {
-        logger.info("tmux paste buffer deleted: \(name)")
-    }
-
-    /// Handle a tmux `%sessions-changed` notification from the Zig viewer.
-    /// Fired when a session is created or destroyed.
-    /// Currently log-only; future work may refresh a session picker UI.
-    func handleSessionsChanged() {
-        logger.info("tmux sessions changed")
-    }
-
-    /// Handle a tmux `%pane-mode-changed` notification from the Zig viewer.
-    /// Fired when a pane enters or exits copy mode, view mode, etc.
-    /// Currently log-only; future work may update pane mode indicators.
-    func handlePaneModeChanged(paneId: UInt32) {
-        logger.info("tmux pane mode changed: %\(paneId)")
-    }
+    // MARK: - ARCHIVED Stub Handlers (2026-03-09)
+    // These handlers were log-only stubs for tmux notifications whose C API actions
+    // were removed during the upstream rebase. Restore when upstream re-adds them.
+    //
+    // func handleTmuxMessage(text: String) {
+    //     logger.info("tmux message: \(text)")
+    // }
+    //
+    // func handlePasteBufferChanged(name: String) {
+    //     logger.info("tmux paste buffer changed: \(name)")
+    // }
+    //
+    // func handlePasteBufferDeleted(name: String) {
+    //     logger.info("tmux paste buffer deleted: \(name)")
+    // }
+    //
+    // func handleSessionsChanged() {
+    //     logger.info("tmux sessions changed")
+    // }
+    //
+    // func handlePaneModeChanged(paneId: UInt32) {
+    //     logger.info("tmux pane mode changed: %\(paneId)")
+    // }
 
     /// Copy the tmux paste buffer to the iOS clipboard.
     /// Sends `show-buffer` through the Zig viewer's command queue and

@@ -227,7 +227,7 @@ extension Ghostty {
             if isAlternateScreen {
                 logger.info("🔍 Search on alternate screen (tmux/vim) - limited to visible rows only")
             }
-            logger.info("🔍 ghostty_surface_search_start returned: success=\(result.success), total=\(result.total), selected=\(result.selected), screen_type=\(result.screen_type), has_scrollback=\(result.has_scrollback)")
+            logger.info("🔍 ghostty_surface_search_start returned: success=\(result.success), total=\(result.total), selected=\(result.selected), screen_type=\(result.screen_type), total_rows=\(result.total_rows), visible_rows=\(result.visible_rows)")
             
             if result.success {
                 self.searchState?.total = result.total >= 0 ? UInt(result.total) : nil

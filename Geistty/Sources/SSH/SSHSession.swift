@@ -635,92 +635,11 @@ class SSHSession: ObservableObject, Identifiable {
             self.tmuxSessionManager?.handleActiveWindowChanged(windowId: Int(windowId))
         }
         
-        let messageObserver = NotificationCenter.default.addObserver(
-            forName: .tmuxMessage,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            
-            // H8: Only process notifications for our surface
-            if let notifSurface = notification.object as? Ghostty.SurfaceView {
-                guard notifSurface === self.ghosttySurface else { return }
-            }
-            
-            guard let text = notification.userInfo?[TmuxNotificationKey.text] as? String else {
-                return
-            }
-            
-            self.tmuxSessionManager?.handleTmuxMessage(text: text)
-        }
-        
-        let pasteBufferChangedObserver = NotificationCenter.default.addObserver(
-            forName: .tmuxPasteBufferChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            
-            if let notifSurface = notification.object as? Ghostty.SurfaceView {
-                guard notifSurface === self.ghosttySurface else { return }
-            }
-            
-            guard let name = notification.userInfo?[TmuxNotificationKey.name] as? String else {
-                return
-            }
-            
-            self.tmuxSessionManager?.handlePasteBufferChanged(name: name)
-        }
-        
-        let pasteBufferDeletedObserver = NotificationCenter.default.addObserver(
-            forName: .tmuxPasteBufferDeleted,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            
-            if let notifSurface = notification.object as? Ghostty.SurfaceView {
-                guard notifSurface === self.ghosttySurface else { return }
-            }
-            
-            guard let name = notification.userInfo?[TmuxNotificationKey.name] as? String else {
-                return
-            }
-            
-            self.tmuxSessionManager?.handlePasteBufferDeleted(name: name)
-        }
-        
-        let sessionsChangedObserver = NotificationCenter.default.addObserver(
-            forName: .tmuxSessionsChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            
-            if let notifSurface = notification.object as? Ghostty.SurfaceView {
-                guard notifSurface === self.ghosttySurface else { return }
-            }
-            
-            self.tmuxSessionManager?.handleSessionsChanged()
-        }
-        
-        let paneModeChangedObserver = NotificationCenter.default.addObserver(
-            forName: .tmuxPaneModeChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            
-            if let notifSurface = notification.object as? Ghostty.SurfaceView {
-                guard notifSurface === self.ghosttySurface else { return }
-            }
-            
-            guard let paneId = notification.userInfo?[TmuxNotificationKey.paneId] as? UInt32 else {
-                return
-            }
-            
-            self.tmuxSessionManager?.handlePaneModeChanged(paneId: paneId)
-        }
+        // ARCHIVED (2026-03-09): 5 tmux notification observers removed — their C API actions
+        // no longer exist in ghostty.h after upstream rebase. Restore when upstream re-adds:
+        //   .tmuxMessage, .tmuxPasteBufferChanged, .tmuxPasteBufferDeleted,
+        //   .tmuxSessionsChanged, .tmuxPaneModeChanged
+        // The corresponding TmuxSessionManager handlers are also archived.
         
         let sessionRenamedObserver = NotificationCenter.default.addObserver(
             forName: .tmuxSessionRenamed,
@@ -778,7 +697,7 @@ class SSHSession: ObservableObject, Identifiable {
             self.tmuxSessionManager?.handleSubscriptionChanged(name: name, value: value)
         }
         
-        tmuxNotificationObservers = [stateObserver, exitObserver, readyObserver, commandResponseObserver, activeWindowObserver, messageObserver, pasteBufferChangedObserver, pasteBufferDeletedObserver, sessionsChangedObserver, paneModeChangedObserver, sessionRenamedObserver, focusedPaneChangedObserver, subscriptionChangedObserver]
+        tmuxNotificationObservers = [stateObserver, exitObserver, readyObserver, commandResponseObserver, activeWindowObserver, sessionRenamedObserver, focusedPaneChangedObserver, subscriptionChangedObserver]
     }
     
     /// Remove tmux notification observers
