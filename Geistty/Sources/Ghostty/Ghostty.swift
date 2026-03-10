@@ -1468,26 +1468,6 @@ extension Ghostty {
         private static let keyRepeatInitialDelay: TimeInterval = 0.4
         private static let keyRepeatInterval: TimeInterval = 0.05
         
-        /// Edit menu interaction for copy/paste (iOS 16+)
-        /// ARCHIVED: Superseded by SelectionOverlay which provides handles + context menu.
-        /// Kept for reference. See SelectionOverlay.swift for the replacement.
-        // private var editMenuInteraction: UIEditMenuInteraction?
-        
-        /// Show a copy menu at the given point using modern UIEditMenuInteraction
-        /// ARCHIVED: Superseded by SelectionOverlay.showSelection().
-        /// This was dead code (never called). See SelectionOverlay.swift.
-        // private func showCopyMenu(at point: CGPoint) {
-        //     // Create edit menu interaction if needed
-        //     if editMenuInteraction == nil {
-        //         let interaction = UIEditMenuInteraction(delegate: nil)
-        //         editMenuInteraction = interaction
-        //         addInteraction(interaction)
-        //     }
-        //
-        //     let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
-        //     editMenuInteraction?.presentEditMenu(with: config)
-        // }
-        
         // MARK: - Edit Actions
         
         /// Override canPerformAction to enable copy/paste.
