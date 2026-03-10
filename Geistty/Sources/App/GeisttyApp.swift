@@ -269,11 +269,13 @@ extension Notification.Name {
     static let tmuxReady = Notification.Name("tmuxReady")
     static let tmuxCommandResponse = Notification.Name("tmuxCommandResponse")
     static let tmuxActiveWindowChanged = Notification.Name("tmuxActiveWindowChanged")
-    static let tmuxMessage = Notification.Name("tmuxMessage")
-    static let tmuxPasteBufferChanged = Notification.Name("tmuxPasteBufferChanged")
-    static let tmuxPasteBufferDeleted = Notification.Name("tmuxPasteBufferDeleted")
-    static let tmuxSessionsChanged = Notification.Name("tmuxSessionsChanged")
-    static let tmuxPaneModeChanged = Notification.Name("tmuxPaneModeChanged")
+    // ARCHIVED (2026-03-09): Removed from Ghostty C API during upstream rebase.
+    // Restore when upstream re-adds these tmux actions.
+    // static let tmuxMessage = Notification.Name("tmuxMessage")
+    // static let tmuxPasteBufferChanged = Notification.Name("tmuxPasteBufferChanged")
+    // static let tmuxPasteBufferDeleted = Notification.Name("tmuxPasteBufferDeleted")
+    // static let tmuxSessionsChanged = Notification.Name("tmuxSessionsChanged")
+    // static let tmuxPaneModeChanged = Notification.Name("tmuxPaneModeChanged")
     static let tmuxSessionRenamed = Notification.Name("tmuxSessionRenamed")
     static let tmuxFocusedPaneChanged = Notification.Name("tmuxFocusedPaneChanged")
     static let tmuxSubscriptionChanged = Notification.Name("tmuxSubscriptionChanged")
