@@ -398,6 +398,7 @@ If revisiting, start fresh from the archive branch and read the learnings doc fi
 | send-keys wrapping | In tmux control mode, ALL stdin is tmux commands; user input wrapped in `send-keys -H` by Ghostty's Zig-side `viewer.sendKeys()` in `Termio.queueWrite()` |
 | libxev (via Ghostty) | Ghostty uses upstream mitchellh/libxev internally |
 | Custom module.modulemap name | Renamed to avoid Xcode module conflicts |
+| Lazy/pull tmux state | Viewer owns state, Swift queries via C API on notification — native to Ghostty's apprt architecture. See `docs/decisions/ADR-005-lazy-pull-tmux-architecture.md` |
 
 ## Data Flow
 
