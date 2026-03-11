@@ -893,11 +893,11 @@ typedef struct {
 
 
 // apprt.action.TmuxSessionRenamed
-// Pointer lifetime: data is valid only for the duration of the action
-// callback invocation. The consumer must copy data if needed beyond that.
+// Session name stored inline to avoid dangling-pointer risk.
+// Names longer than 23 characters are truncated.
 typedef struct {
-  const char* data;
-  size_t len;
+  char name[23];
+  uint8_t name_len;
 } ghostty_action_tmux_session_renamed_s;
 
 // apprt.action.TmuxFocusedPaneChanged

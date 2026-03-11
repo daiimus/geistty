@@ -726,9 +726,17 @@ extension Ghostty {
                 }
                 
                 let payload = action.action.tmux_session_renamed
-                let name = decodePayload(data: payload.data, len: payload.len)
+                let name = withUnsafePointer(to: payload.name) { ptr in
+                    let rawPtr = UnsafeRawPointer(ptr)
+                    let len = Int(payload.name_len)
+                    guard len > 0 else { return "" }
+                    return String(
+                        decoding: UnsafeRawBufferPointer(start: rawPtr, count: len),
+                        as: UTF8.self
+                    )
+                }
                 
-                logger.info("tmux session renamed: len=\(payload.len)")
+                logger.info("tmux session renamed: len=\(payload.name_len)")
                 
                 let surfaceView = surfaceView(from: surface)
                 
