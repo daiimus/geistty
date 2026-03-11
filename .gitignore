@@ -7,6 +7,10 @@
 *.o
 *.dylib
 
+# GhosttyKit xcframework — generated artifact, built from sibling ghostty repo.
+# Run ./ci.sh sync-ghostty or ./ci.sh local-validate to produce it locally.
+Geistty/Frameworks/GhosttyKit.xcframework/
+
 # Xcode
 build/
 DerivedData/
