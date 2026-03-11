@@ -59,6 +59,30 @@ ghostty/macos/GhosttyKit.xcframework/  (built by zig, gitignored)
 3. `gh issue list --repo daiimus/geistty` to orient
 4. Check that hooks are installed: `git config core.hooksPath` should show `.githooks`
 
+### CI Status: Frozen (Local-Only Validation)
+
+CI is **disabled** — the workflow at `.github/workflows/ci.yml` only triggers on `workflow_dispatch` (manual). It will not run on push or PR.
+
+**Why:** The old CI fetched pre-built `.a` files via Git LFS. LFS has been removed from this repo, so those downloads return empty files and the build fails. A source-build CI pipeline (checkout ghostty, `zig build`, copy xcframework, then build Geistty) has not been implemented yet.
+
+**Local validation workflow (use until CI is re-enabled):**
+```bash
+# 1. Build GhosttyKit from source (if Ghostty changed)
+cd /Users/daiimus/Repositories/ghostty
+zig build -Demit-xcframework=true -Dxcframework-target=universal
+cp -R macos/GhosttyKit.xcframework /Users/daiimus/Repositories/geistty/Geistty/Frameworks/
+for dir in /Users/daiimus/Repositories/geistty/Geistty/Frameworks/GhosttyKit.xcframework/*/Headers/; do
+    [ -f "${dir}module.modulemap" ] && mv "${dir}module.modulemap" "${dir}GhosttyKit.modulemap"
+done
+
+# 2. Build and test Geistty
+cd /Users/daiimus/Repositories/geistty/Geistty
+./ci.sh build   # simulator build, no signing
+./ci.sh test    # unit tests
+```
+
+**Re-enable trigger:** When the tmux C API surface and core behavior stabilize (fewer breaking changes per week), implement the source-build CI pipeline. Track progress via the "CI freeze" issue on GitHub.
+
 ## Project Management
 
 - **GitHub Issues** are the source of truth for bugs and features: `gh issue list --repo daiimus/geistty`
