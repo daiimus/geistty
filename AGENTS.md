@@ -44,12 +44,11 @@ These are behavioral rules established by the user. Follow them strictly.
 
 ### Build Output Flow
 
-The xcframework build produces artifacts that flow from ghostty to geistty:
+The xcframework is a **generated artifact** — entirely gitignored, built from source locally:
 ```
 ghostty/macos/GhosttyKit.xcframework/  (built by zig, gitignored)
-    → copy to geistty/Geistty/Frameworks/GhosttyKit.xcframework/
-    → headers (.h, .modulemap, Info.plist) are tracked in Git
-    → static libraries (.a) are gitignored — build locally
+    → copy to geistty/Geistty/Frameworks/GhosttyKit.xcframework/  (gitignored)
+    → rebuild via: ./ci.sh sync-ghostty  or  ./ci.sh local-validate
 ```
 
 ### Session-Start Checklist
@@ -71,13 +70,12 @@ cd /Users/daiimus/Repositories/geistty/Geistty
 ./ci.sh local-validate
 ```
 
-This is the **safe default**. It rebuilds GhosttyKit from the ghostty fork into a temp staging directory, temporarily swaps it into the tracked framework path for the build/test cycle, then restores the original via an EXIT trap. **`git status` stays clean** after completion — Xcode's PBXFileReference requires the xcframework at a fixed path, so a swap-and-restore is the only viable approach. It also auto-creates `TestConfig.local.swift` from the example template if missing, so fresh clones can build without manual setup.
+This rebuilds GhosttyKit from the sibling ghostty repo, builds Geistty, and runs tests. GhosttyKit is a generated artifact (gitignored) — it is built from source locally and never committed. The command also auto-creates `TestConfig.local.swift` from the example template if missing, so fresh clones can build without manual setup.
 
-To **intentionally update the tracked framework** (e.g., after a ghostty fork change you want to commit):
+To rebuild GhosttyKit without running tests:
 ```bash
 ./ci.sh sync-ghostty
 ```
-This writes directly into `Geistty/Frameworks/GhosttyKit.xcframework/` and will show changes in `git diff`. Use this when you intend to commit the updated framework headers/plist.
 
 For granular steps, use `./ci.sh build` and `./ci.sh test` individually.
 

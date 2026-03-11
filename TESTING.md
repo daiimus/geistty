@@ -7,8 +7,7 @@ This document explains how to build, test, and debug Geistty.
 ```bash
 cd Geistty
 
-# Full local pipeline: rebuild GhosttyKit + build + test (recommended during CI freeze)
-# Git-safe: temporarily swaps framework, restores via EXIT trap
+# Full local pipeline: rebuild GhosttyKit from source + build + test
 ./ci.sh local-validate
 
 # Or run individual steps:
@@ -19,10 +18,12 @@ cd Geistty
 
 ### `local-validate` vs `sync-ghostty`
 
-| Command | Mutates tracked files? | Use when |
-|---------|----------------------|----------|
-| `local-validate` | **No** (swap-and-restore via EXIT trap) | Routine validation, fresh clones, CI-like checks |
-| `sync-ghostty` | **Yes** — writes into `Frameworks/GhosttyKit.xcframework/` | Intentionally updating the committed framework |
+| Command | What it does | Use when |
+|---------|-------------|----------|
+| `local-validate` | Rebuild GhosttyKit + build + test (full pipeline) | Routine validation, fresh clones |
+| `sync-ghostty` | Rebuild GhosttyKit only (no tests) | Quick framework rebuild |
+
+GhosttyKit is a generated artifact (gitignored). Both commands build it from the sibling ghostty repo into `Geistty/Frameworks/GhosttyKit.xcframework/`.
 
 ### Fresh Clone Bootstrap
 
@@ -41,8 +42,8 @@ The `ci.sh` script provides automated build and test capabilities:
 | `./ci.sh ui-test` | Run UI tests on simulator |
 | `./ci.sh lint` | Analyze code for warnings |
 | `./ci.sh all` | Run all CI checks |
-| `./ci.sh sync-ghostty` | Sync GhosttyKit xcframework from ghostty repo (mutates tracked files) |
-| `./ci.sh local-validate` | Full pipeline: build GhosttyKit + build + test (git-safe) |
+| `./ci.sh sync-ghostty` | Rebuild GhosttyKit xcframework from ghostty repo |
+| `./ci.sh local-validate` | Full pipeline: rebuild GhosttyKit + build + test |
 
 ## Building Without Code Signing
 
