@@ -15,6 +15,7 @@
 #   ./ci.sh screenshots        - Extract screenshots from the latest xcresult bundle
 #   ./ci.sh lint               - Check for Swift warnings/errors
 #   ./ci.sh sync-ghostty       - Rebuild and sync GhosttyKit from ghostty fork
+#   ./ci.sh local-validate     - Full pipeline: sync-ghostty + build + test (CI freeze workflow)
 #   ./ci.sh all                - Run all checks (build + test + lint)
 #   ./ci.sh device-build       - Build for device (uses CI keychain for signing)
 #   ./ci.sh install DEVICE     - Install and run on device
@@ -576,6 +577,15 @@ for name, ref_id in find_attachments(data):
     fi
 }
 
+# Full local validation: rebuild GhosttyKit from source, then build + test Geistty.
+# This is the primary workflow while CI is frozen (no LFS, no remote artifacts).
+local_validate() {
+    log_info "=== Local Validate: full pipeline ==="
+    sync_ghostty
+    run_tests
+    log_info "=== Local Validate: all steps passed ==="
+}
+
 # Run all checks
 run_all() {
     resolve_packages
@@ -604,6 +614,7 @@ show_help() {
     echo "  screenshots [PATH] Extract screenshots from xcresult bundle"
     echo "  lint               Analyze code for warnings"
     echo "  sync-ghostty       Rebuild and sync GhosttyKit xcframework from ghostty fork"
+    echo "  local-validate     Full pipeline: sync-ghostty + build + test (use during CI freeze)"
     echo "  all                Run all CI checks"
     echo "  help               Show this help"
     echo ""
@@ -613,7 +624,8 @@ show_help() {
     echo "  $0 ui-test-ipad             # Run UI tests on iPad Pro 13-inch"
     echo "  $0 visual-test              # Run visual regression tests"
     echo "  $0 update-snapshots         # Record new reference screenshots"
-    echo "  $0 deploy                   # Full deploy to default device"
+    echo "  $0 sync-ghostty             # Rebuild GhosttyKit from ghostty fork"
+    echo "  $0 local-validate           # Full local pipeline (CI freeze workflow)"
     echo "  $0 all                      # Full CI run"
 }
 
@@ -662,6 +674,9 @@ case "${1:-help}" in
         ;;
     sync-ghostty)
         sync_ghostty
+        ;;
+    local-validate)
+        local_validate
         ;;
     all)
         run_all

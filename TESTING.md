@@ -7,14 +7,13 @@ This document explains how to build, test, and debug Geistty.
 ```bash
 cd Geistty
 
-# Build for simulator (no signing required)
-./ci.sh build
+# Full local pipeline: rebuild GhosttyKit + build + test (recommended during CI freeze)
+./ci.sh local-validate
 
-# Run unit tests
-./ci.sh test
-
-# Run all CI checks (build + lint)
-./ci.sh all
+# Or run individual steps:
+./ci.sh build              # Build for simulator (no signing required)
+./ci.sh test               # Run unit tests
+./ci.sh all                # Build + test + lint (skips GhosttyKit rebuild)
 ```
 
 ## CI Script Commands
@@ -31,6 +30,7 @@ The `ci.sh` script provides automated build and test capabilities:
 | `./ci.sh lint` | Analyze code for warnings |
 | `./ci.sh all` | Run all CI checks |
 | `./ci.sh sync-ghostty` | Sync GhosttyKit xcframework from ghostty repo |
+| `./ci.sh local-validate` | Full pipeline: sync-ghostty + build + test |
 
 ## Building Without Code Signing
 
