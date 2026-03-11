@@ -14,8 +14,8 @@
 #   ./ci.sh update-snapshots   - Record new reference screenshots
 #   ./ci.sh screenshots        - Extract screenshots from the latest xcresult bundle
 #   ./ci.sh lint               - Check for Swift warnings/errors
-#   ./ci.sh sync-ghostty       - Rebuild and sync GhosttyKit from ghostty fork (MUTATES tracked files)
-#   ./ci.sh local-validate     - Full pipeline: build GhosttyKit + build + test (git-safe, restores tracked files)
+#   ./ci.sh sync-ghostty       - Rebuild and sync GhosttyKit from ghostty fork
+#   ./ci.sh local-validate     - Full pipeline: rebuild GhosttyKit + build + test
 #   ./ci.sh all                - Run all checks (build + test + lint)
 #   ./ci.sh device-build       - Build for device (uses CI keychain for signing)
 #   ./ci.sh install DEVICE     - Install and run on device
@@ -389,60 +389,6 @@ ensure_test_config() {
     log_info "Created $LOCAL_CONFIG"
 }
 
-# Build GhosttyKit xcframework to a temp staging directory.
-# Returns the temp path via stdout — caller must capture it.
-# All log output goes to stderr so it doesn't pollute the return value.
-# Does NOT write into the tracked Frameworks/ tree.
-# Caller is responsible for cleanup (use trap or explicit rm -rf).
-prep_ghosttykit_temp() {
-    local GHOSTTY_DIR="$SCRIPT_DIR/../../ghostty"
-
-    if [ ! -d "$GHOSTTY_DIR" ]; then
-        log_error "Ghostty repo not found at $GHOSTTY_DIR"
-        return 1
-    fi
-
-    log_info "Building GhosttyKit xcframework..." >&2
-    (cd "$GHOSTTY_DIR" && zig build -Demit-xcframework=true -Dxcframework-target=universal 2>&1) | tail -20 >&2
-
-    if [ ! -d "$GHOSTTY_DIR/macos/GhosttyKit.xcframework" ]; then
-        log_error "xcframework not found after build"
-        return 1
-    fi
-
-    local TEMP_DIR
-    TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ghosttykit_validate.XXXXXX")
-
-    log_info "Staging xcframework to temp path: $TEMP_DIR" >&2
-    cp -R "$GHOSTTY_DIR/macos/GhosttyKit.xcframework" "$TEMP_DIR/"
-
-    # Remove the macOS slice — Geistty is iOS-only
-    log_info "Removing macOS slice (iOS-only app)..." >&2
-    rm -rf "$TEMP_DIR/GhosttyKit.xcframework/macos-arm64_x86_64"
-    python3 -c "
-import plistlib, pathlib
-p = pathlib.Path('$TEMP_DIR/GhosttyKit.xcframework/Info.plist')
-d = plistlib.loads(p.read_bytes())
-d['AvailableLibraries'] = [l for l in d['AvailableLibraries'] if 'macos' not in l.get('LibraryIdentifier', '')]
-p.write_bytes(plistlib.dumps(d))
-"
-
-    # Strip debug symbols
-    log_info "Stripping debug symbols from .a files..." >&2
-    find "$TEMP_DIR/GhosttyKit.xcframework" -name '*.a' -exec strip -S {} \;
-
-    # Rename module maps
-    log_info "Renaming module maps (module.modulemap -> GhosttyKit.modulemap)..." >&2
-    for dir in "$TEMP_DIR/GhosttyKit.xcframework"/*/Headers/; do
-        if [ -f "${dir}module.modulemap" ]; then
-            mv "${dir}module.modulemap" "${dir}GhosttyKit.modulemap"
-        fi
-    done
-
-    # Return the temp path (only this goes to stdout)
-    echo "$TEMP_DIR"
-}
-
 # Sync GhosttyKit xcframework from ghostty fork
 sync_ghostty() {
     local GHOSTTY_DIR="$SCRIPT_DIR/../../ghostty"
@@ -464,8 +410,7 @@ sync_ghostty() {
     rm -rf "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework"
     cp -R "$GHOSTTY_DIR/macos/GhosttyKit.xcframework" "$SCRIPT_DIR/Frameworks/"
 
-    # Remove the macOS slice — Geistty is iOS-only and the macOS slice
-    # doubles LFS storage cost for no benefit.
+    # Remove the macOS slice — Geistty is iOS-only.
     log_info "Removing macOS slice (iOS-only app)..."
     rm -rf "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework/macos-arm64_x86_64"
     # Update Info.plist to remove the macOS library entry
@@ -477,9 +422,8 @@ d['AvailableLibraries'] = [l for l in d['AvailableLibraries'] if 'macos' not in 
 p.write_bytes(plistlib.dumps(d))
 "
 
-    # Strip debug symbols to reduce LFS size (~195MB -> ~89MB per slice).
-    # Debug symbols are not needed for crash symbolication in the committed
-    # framework; developers who need symbols can rebuild locally.
+    # Strip debug symbols to reduce binary size.
+    # Developers who need symbols can rebuild locally without -S.
     log_info "Stripping debug symbols from .a files..."
     find "$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework" -name '*.a' -exec strip -S {} \;
 
@@ -656,64 +600,21 @@ for name, ref_id in find_attachments(data):
 
 # Full local validation: rebuild GhosttyKit from source, then build + test Geistty.
 # This is the primary workflow while CI is frozen (no LFS, no remote artifacts).
-#
-# IMPORTANT: This command preserves git state — it temporarily swaps the tracked
-# framework with a freshly-built copy for the build/test cycle, then restores
-# the original via an EXIT trap. git status is unchanged after completion.
-# Xcode's PBXFileReference requires the xcframework at a fixed path, so a pure
-# build-setting override is not possible.
-#
-# Use sync-ghostty instead if you want to intentionally update the tracked framework.
+# GhosttyKit is a generated artifact (gitignored), so building in-place is safe.
 local_validate() {
     log_info "=== Local Validate: full pipeline ==="
-    log_info "This is a git-safe validation — tracked files are restored after completion."
 
     # Step 1: Ensure TestConfig.local.swift exists
-    log_info "--- Step 1/5: Ensure test config ---"
+    log_info "--- Step 1/3: Ensure test config ---"
     ensure_test_config
 
-    # Step 2: Build GhosttyKit to temp staging
-    log_info "--- Step 2/5: Build GhosttyKit (temp staging) ---"
-    local TEMP_DIR
-    TEMP_DIR=$(prep_ghosttykit_temp)
+    # Step 2: Build GhosttyKit from sibling ghostty repo, resolve, and build
+    # sync_ghostty handles: zig build → copy → strip → modulemap rename → resolve → build
+    log_info "--- Step 2/3: Build and sync GhosttyKit ---"
+    sync_ghostty
 
-    # Step 3: Swap framework for build, with restore-on-exit guarantee.
-    # Xcode's PBXFileReference requires the xcframework at a fixed path
-    # ($(PROJECT_DIR)/Frameworks/GhosttyKit.xcframework). We swap it with
-    # the freshly-built temp copy for the duration of the build/test cycle,
-    # then restore the original. The EXIT trap ensures restoration even on
-    # failure (set -e, Ctrl-C, etc.).
-    log_info "--- Step 3/5: Resolve packages ---"
-    local FRAMEWORK_DIR="$SCRIPT_DIR/Frameworks/GhosttyKit.xcframework"
-    local BACKUP_DIR=""
-
-    if [ -d "$FRAMEWORK_DIR" ]; then
-        BACKUP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ghosttykit_backup.XXXXXX")
-        mv "$FRAMEWORK_DIR" "$BACKUP_DIR/GhosttyKit.xcframework"
-    fi
-
-    # Set restore trap BEFORE the copy — if cp fails, we still restore.
-    trap "
-        rm -rf \"$FRAMEWORK_DIR\"
-        if [ -n \"$BACKUP_DIR\" ] && [ -d \"$BACKUP_DIR/GhosttyKit.xcframework\" ]; then
-            mv \"$BACKUP_DIR/GhosttyKit.xcframework\" \"$FRAMEWORK_DIR\"
-            rm -rf \"$BACKUP_DIR\"
-        fi
-        rm -rf \"$TEMP_DIR\"
-        log_info 'Restored original framework and cleaned up temp staging.'
-    " EXIT
-
-    # Place temp-built framework where Xcode expects it
-    cp -R "$TEMP_DIR/GhosttyKit.xcframework" "$FRAMEWORK_DIR"
-
-    resolve_packages
-
-    # Step 4: Build
-    log_info "--- Step 4/5: Build for simulator ---"
-    build_simulator
-
-    # Step 5: Run tests
-    log_info "--- Step 5/5: Run tests ---"
+    # Step 3: Run tests
+    log_info "--- Step 3/3: Run tests ---"
     run_tests
 
     log_info "=== Local Validate: all steps passed ==="
@@ -746,8 +647,8 @@ show_help() {
     echo "  update-snapshots   Record new reference screenshots for visual tests"
     echo "  screenshots [PATH] Extract screenshots from xcresult bundle"
     echo "  lint               Analyze code for warnings"
-    echo "  sync-ghostty       Rebuild and sync GhosttyKit xcframework (MUTATES tracked framework files)"
-    echo "  local-validate     Full pipeline: build GhosttyKit + build + test (git-safe, restores tracked files)"
+    echo "  sync-ghostty       Rebuild and sync GhosttyKit xcframework from ghostty fork"
+    echo "  local-validate     Full pipeline: rebuild GhosttyKit + build + test"
     echo "  all                Run all CI checks"
     echo "  help               Show this help"
     echo ""
@@ -757,8 +658,8 @@ show_help() {
     echo "  $0 ui-test-ipad             # Run UI tests on iPad Pro 13-inch"
     echo "  $0 visual-test              # Run visual regression tests"
     echo "  $0 update-snapshots         # Record new reference screenshots"
-    echo "  $0 sync-ghostty             # Update tracked GhosttyKit (creates git diff)"
-    echo "  $0 local-validate           # Full pipeline, git-safe (safe default)"
+    echo "  $0 sync-ghostty             # Rebuild GhosttyKit from ghostty fork"
+    echo "  $0 local-validate           # Full pipeline (rebuild + build + test)"
     echo "  $0 all                      # Full CI run"
 }
 
