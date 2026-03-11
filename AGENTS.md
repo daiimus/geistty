@@ -71,9 +71,15 @@ cd /Users/daiimus/Repositories/geistty/Geistty
 ./ci.sh local-validate
 ```
 
-This single command rebuilds GhosttyKit from the ghostty fork, copies the xcframework, then builds and tests Geistty on the simulator. It fails fast on the first error.
+This is the **safe default**. It rebuilds GhosttyKit from the ghostty fork into a temp staging directory, temporarily swaps it into the tracked framework path for the build/test cycle, then restores the original via an EXIT trap. **`git status` stays clean** after completion — Xcode's PBXFileReference requires the xcframework at a fixed path, so a swap-and-restore is the only viable approach. It also auto-creates `TestConfig.local.swift` from the example template if missing, so fresh clones can build without manual setup.
 
-For granular steps, use `./ci.sh sync-ghostty`, `./ci.sh build`, and `./ci.sh test` individually.
+To **intentionally update the tracked framework** (e.g., after a ghostty fork change you want to commit):
+```bash
+./ci.sh sync-ghostty
+```
+This writes directly into `Geistty/Frameworks/GhosttyKit.xcframework/` and will show changes in `git diff`. Use this when you intend to commit the updated framework headers/plist.
+
+For granular steps, use `./ci.sh build` and `./ci.sh test` individually.
 
 **Re-enable trigger:** When the tmux C API surface and core behavior stabilize (fewer breaking changes per week), implement the source-build CI pipeline. Track progress via the "CI freeze" issue on GitHub.
 
