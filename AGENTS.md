@@ -67,19 +67,13 @@ CI is **disabled** — the workflow at `.github/workflows/ci.yml` only triggers 
 
 **Local validation workflow (use until CI is re-enabled):**
 ```bash
-# 1. Build GhosttyKit from source (if Ghostty changed)
-cd /Users/daiimus/Repositories/ghostty
-zig build -Demit-xcframework=true -Dxcframework-target=universal
-cp -R macos/GhosttyKit.xcframework /Users/daiimus/Repositories/geistty/Geistty/Frameworks/
-for dir in /Users/daiimus/Repositories/geistty/Geistty/Frameworks/GhosttyKit.xcframework/*/Headers/; do
-    [ -f "${dir}module.modulemap" ] && mv "${dir}module.modulemap" "${dir}GhosttyKit.modulemap"
-done
-
-# 2. Build and test Geistty
 cd /Users/daiimus/Repositories/geistty/Geistty
-./ci.sh build   # simulator build, no signing
-./ci.sh test    # unit tests
+./ci.sh local-validate
 ```
+
+This single command rebuilds GhosttyKit from the ghostty fork, copies the xcframework, then builds and tests Geistty on the simulator. It fails fast on the first error.
+
+For granular steps, use `./ci.sh sync-ghostty`, `./ci.sh build`, and `./ci.sh test` individually.
 
 **Re-enable trigger:** When the tmux C API surface and core behavior stabilize (fewer breaking changes per week), implement the source-build CI pipeline. Track progress via the "CI freeze" issue on GitHub.
 

@@ -113,6 +113,15 @@ Full architecture documentation with Mermaid diagrams: **[ARCHITECTURE.md](ARCHI
 
 ### Build GhosttyKit from Ghostty fork
 
+The easiest way to rebuild GhosttyKit and validate everything locally:
+
+```bash
+cd path/to/geistty/Geistty
+./ci.sh local-validate    # rebuild GhosttyKit + build Geistty + run tests
+```
+
+Or run the steps manually:
+
 ```bash
 cd path/to/ghostty
 zig build -Demit-xcframework=true -Dxcframework-target=universal
@@ -132,7 +141,10 @@ done
 ```bash
 cd path/to/geistty/Geistty
 
-# CI build + tests (simulator, no signing)
+# Full local pipeline (rebuild GhosttyKit + build + test)
+./ci.sh local-validate
+
+# Or just build + test without rebuilding GhosttyKit
 ./ci.sh all
 
 # Build for device
