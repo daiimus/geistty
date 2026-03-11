@@ -1,0 +1,111 @@
+#!/bin/bash
+#
+# Pre-commit hook: block compiled artifacts, large files, and sensitive data.
+#
+# Install: ./scripts/install-hooks.sh
+# Override: git commit --no-verify (use sparingly)
+
+set -euo pipefail
+
+MAX_FILE_SIZE=$((8 * 1024 * 1024))  # 8 MB
+
+# Forbidden binary extensions (build artifacts)
+FORBIDDEN_EXTENSIONS=(
+    "\.a$"
+    "\.o$"
+    "\.dylib$"
+    "\.app$"
+    "\.ipa$"
+    "\.dSYM$"
+    "\.xcarchive$"
+    "\.xcresult$"
+)
+
+# Forbidden paths (generated directories)
+FORBIDDEN_PATHS=(
+    "^DerivedData/"
+    "^build/"
+    "^\.build/"
+    "Pods/"
+)
+
+ERRORS=0
+
+# Get list of staged files (excluding deletes)
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null || true)
+
+if [ -z "$STAGED_FILES" ]; then
+    exit 0
+fi
+
+echo "Running pre-commit checks..."
+
+# Check forbidden extensions
+for pattern in "${FORBIDDEN_EXTENSIONS[@]}"; do
+    MATCHES=$(echo "$STAGED_FILES" | grep -iE "$pattern" || true)
+    if [ -n "$MATCHES" ]; then
+        echo ""
+        echo "BLOCKED: Compiled artifact staged for commit:"
+        echo "$MATCHES" | sed 's/^/  /'
+        echo ""
+        echo "  Fix: git reset HEAD <file>"
+        echo "  These files should be in .gitignore, not in Git."
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+
+# Check forbidden paths
+for pattern in "${FORBIDDEN_PATHS[@]}"; do
+    MATCHES=$(echo "$STAGED_FILES" | grep -E "$pattern" || true)
+    if [ -n "$MATCHES" ]; then
+        echo ""
+        echo "BLOCKED: Generated directory content staged for commit:"
+        echo "$MATCHES" | sed 's/^/  /'
+        echo ""
+        echo "  Fix: git reset HEAD <file>"
+        echo "  Add this path to .gitignore."
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+
+# Check file sizes
+while IFS= read -r file; do
+    if [ -f "$file" ]; then
+        FILE_SIZE=$(wc -c < "$file" 2>/dev/null | tr -d ' ')
+        if [ "$FILE_SIZE" -gt "$MAX_FILE_SIZE" ]; then
+            SIZE_MB=$(echo "scale=1; $FILE_SIZE / 1048576" | bc)
+            echo ""
+            echo "BLOCKED: File exceeds ${MAX_FILE_SIZE} byte limit (${SIZE_MB} MB):"
+            echo "  $file"
+            echo ""
+            echo "  Fix: git reset HEAD $file"
+            echo "  Large files belong in /Users/daiimus/Artifacts, not in Git."
+            ERRORS=$((ERRORS + 1))
+        fi
+    fi
+done <<< "$STAGED_FILES"
+
+# Check for LFS pointer files being committed (should not happen anymore)
+while IFS= read -r file; do
+    if [ -f "$file" ]; then
+        FIRST_LINE=$(head -1 "$file" 2>/dev/null || true)
+        if [ "$FIRST_LINE" = "version https://git-lfs.github.com/spec/v1" ]; then
+            echo ""
+            echo "BLOCKED: LFS pointer file staged for commit:"
+            echo "  $file"
+            echo ""
+            echo "  Fix: git reset HEAD $file"
+            echo "  LFS is disabled. This file should be gitignored or replaced with real content."
+            ERRORS=$((ERRORS + 1))
+        fi
+    fi
+done <<< "$STAGED_FILES"
+
+if [ "$ERRORS" -gt 0 ]; then
+    echo ""
+    echo "Commit blocked: $ERRORS violation(s) found."
+    echo "Use 'git commit --no-verify' to override (not recommended)."
+    exit 1
+fi
+
+echo "Pre-commit checks passed."

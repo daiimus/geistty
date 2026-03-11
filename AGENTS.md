@@ -25,6 +25,40 @@ These are behavioral rules established by the user. Follow them strictly.
 9. **Prefer simplicity.** Think about simple, standard iOS patterns before diving into complex Zig-level solutions.
 10. **Reconcile issues every session.** At session start, run `gh issue list` to orient. At session end, close any issues that were resolved (with commit link + summary) and note follow-up work on any issues that were touched but not finished.
 
+## Environment & Artifact Policy
+
+### Canonical Paths
+
+| Purpose | Path |
+|---------|------|
+| Geistty repo | `/Users/daiimus/Repositories/geistty` |
+| Ghostty fork | `/Users/daiimus/Repositories/ghostty` |
+| Build artifacts (local only) | `/Users/daiimus/Artifacts` |
+
+### Rules
+
+1. **Generated artifacts are never committed.** Static libraries (`.a`), xcframeworks, app bundles, dSYMs, DerivedData — none of these belong in Git. They live in `/Users/daiimus/Artifacts` or are ephemeral build outputs.
+2. **Git LFS is disabled.** Do not re-enable it. The `.gitattributes` marks binary types for diff/merge purposes only.
+3. **Pre-commit hooks are active.** They block forbidden extensions, oversized files (>8MB), and LFS pointer files. Override with `--no-verify` only when you understand what you're committing.
+4. **To install hooks after a fresh clone:** `./scripts/install-hooks.sh`
+
+### Build Output Flow
+
+The xcframework build produces artifacts that flow from ghostty to geistty:
+```
+ghostty/macos/GhosttyKit.xcframework/  (built by zig, gitignored)
+    → copy to geistty/Geistty/Frameworks/GhosttyKit.xcframework/
+    → headers (.h, .modulemap, Info.plist) are tracked in Git
+    → static libraries (.a) are gitignored — build locally
+```
+
+### Session-Start Checklist
+
+1. `git status` in both repos — should be clean
+2. Verify branches: `ios-external-backend` (ghostty), `main` (geistty)
+3. `gh issue list --repo daiimus/geistty` to orient
+4. Check that hooks are installed: `git config core.hooksPath` should show `.githooks`
+
 ## Project Management
 
 - **GitHub Issues** are the source of truth for bugs and features: `gh issue list --repo daiimus/geistty`

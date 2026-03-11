@@ -1,1 +1,11 @@
-*.a filter=lfs diff=lfs merge=lfs -text
+# Linguist overrides
+*.swift linguist-language=Swift
+
+# Binary files — treat as binary (no diff/merge), but do NOT use LFS.
+# These should be gitignored. This is a safety net.
+*.a binary
+*.o binary
+*.dylib binary
+*.png binary
+*.ttf binary
+*.otf binary
