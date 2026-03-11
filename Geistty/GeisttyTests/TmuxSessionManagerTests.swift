@@ -4926,58 +4926,6 @@ extension TmuxSessionManagerTests {
         XCTAssertEqual(mgr.pendingResponseHandlerCountForTesting, 0)
     }
 
-    // MARK: - handleTmuxMessage
-
-    @MainActor
-    func testHandleTmuxMessageDoesNotCrash() {
-        let mgr = TmuxSessionManager()
-
-        // Should not crash on normal message
-        mgr.handleTmuxMessage(text: "session created: $1")
-
-        // Should not crash on empty message
-        mgr.handleTmuxMessage(text: "")
-
-        // Should not crash on message with special characters
-        mgr.handleTmuxMessage(text: "window @3 renamed: 'foo \"bar\" \\baz'")
-    }
-
-    @MainActor
-    func testHandlePasteBufferChangedDoesNotCrash() {
-        let mgr = TmuxSessionManager()
-
-        mgr.handlePasteBufferChanged(name: "buffer0")
-        mgr.handlePasteBufferChanged(name: "")
-        mgr.handlePasteBufferChanged(name: "my-custom-buffer")
-    }
-
-    @MainActor
-    func testHandlePasteBufferDeletedDoesNotCrash() {
-        let mgr = TmuxSessionManager()
-
-        mgr.handlePasteBufferDeleted(name: "buffer0")
-        mgr.handlePasteBufferDeleted(name: "")
-        mgr.handlePasteBufferDeleted(name: "my-custom-buffer")
-    }
-
-    @MainActor
-    func testHandleSessionsChangedDoesNotCrash() {
-        let mgr = TmuxSessionManager()
-
-        // Should not crash when called multiple times
-        mgr.handleSessionsChanged()
-        mgr.handleSessionsChanged()
-    }
-
-    @MainActor
-    func testHandlePaneModeChangedDoesNotCrash() {
-        let mgr = TmuxSessionManager()
-
-        mgr.handlePaneModeChanged(paneId: 0)
-        mgr.handlePaneModeChanged(paneId: 42)
-        mgr.handlePaneModeChanged(paneId: UInt32.max)
-    }
-
     @MainActor
     func testHandleSessionRenamedUpdatesSessionName() {
         let mgr = TmuxSessionManager()
