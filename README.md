@@ -117,7 +117,15 @@ The easiest way to rebuild GhosttyKit and validate everything locally:
 
 ```bash
 cd path/to/geistty/Geistty
-./ci.sh local-validate    # rebuild GhosttyKit + build Geistty + run tests
+./ci.sh local-validate    # rebuild GhosttyKit + build Geistty + run tests (git-safe)
+```
+
+This builds GhosttyKit into a temp staging directory, temporarily swaps it into the tracked framework path for the build/test cycle, then restores the original via an EXIT trap. **`git status` stays clean** after completion. It also auto-creates `TestConfig.local.swift` if missing, so fresh clones work without manual setup.
+
+To intentionally update the tracked framework (when you want to commit new headers/plist from a ghostty fork change):
+
+```bash
+./ci.sh sync-ghostty      # writes into Frameworks/GhosttyKit.xcframework/ (creates git diff)
 ```
 
 Or run the steps manually:
@@ -141,7 +149,7 @@ done
 ```bash
 cd path/to/geistty/Geistty
 
-# Full local pipeline (rebuild GhosttyKit + build + test)
+# Full local pipeline (rebuild GhosttyKit + build + test, git-safe)
 ./ci.sh local-validate
 
 # Or just build + test without rebuilding GhosttyKit
