@@ -1,3 +1,12 @@
+# ===========================================
+# BUILD ARTIFACTS — NEVER COMMIT
+# ===========================================
+
+# Compiled binaries and static libraries
+*.a
+*.o
+*.dylib
+
 # Xcode
 build/
 DerivedData/
@@ -5,6 +14,14 @@ DerivedData/
 *.xcscmblueprint
 xcuserdata/
 *.xcresult
+*.xcresult/
+
+# Apple build products
+*.app
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
 
 # macOS
 .DS_Store
@@ -30,11 +47,6 @@ Carthage/Build/
 .idea/
 .vscode/
 
-# Archives
-*.ipa
-*.dSYM.zip
-*.dSYM
-
 # Playgrounds
 timeline.xctimeline
 playground.xcworkspace
@@ -48,13 +60,12 @@ fastlane/test_output
 # Test results and screenshots
 test_results/
 Geistty/test_results/
-*.xcresult/
 
 # Code Injection
 iOSInjectionProject/
 
 # ===========================================
-# SENSITIVE FILES - NEVER COMMIT
+# SENSITIVE FILES — NEVER COMMIT
 # ===========================================
 
 # SSH Keys and Certificates
@@ -92,3 +103,8 @@ test_ssh_config
 
 # OpenCode private notes (device IDs, keychain paths, etc.)
 .opencode/
+
+# ===========================================
+# LOGS AND TEMP
+# ===========================================
+*.log
