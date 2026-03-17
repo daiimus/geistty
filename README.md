@@ -1,3 +1,7 @@
+# DISCLAIMER: YOU HAVE ENTER AI SLOP LUNCHLADY LAND.
+
+This project was a proof of concept to determine that a LLM could not produce a shippable app. That objective failed, but this code is not good. I am currently in the process of redo'ing the Ghostty fork to, hopefully, better align with the projects architectural intentions and intend to finish this at some point. However, I would advise against citing this as anything more than functional slop. 
+
 # Geistty
 
 > A native iOS/iPadOS SSH terminal powered by [Ghostty](https://ghostty.org)'s terminal engine
