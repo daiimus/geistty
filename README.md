@@ -2,6 +2,8 @@
 
 > A native iOS/iPadOS SSH terminal powered by [Ghostty](https://ghostty.org)'s terminal engine
 
+## DISCLAIMER: This is a AI/LLM driven project as a proof of concept. I expected it too fail spectacularly, but it did not. It is still a work-in-progress but is essentially abandonware for the time being as I delve into other projects. It is highly unlikely I will ever submit this to the App Store due to the amount of respect and appreciation I have for real developers.
+
 <p align="center">
   <img src="https://img.shields.io/badge/v0.1--stable-February_2026-green.svg" alt="v0.1-stable"/>
   <img src="https://img.shields.io/badge/iOS-17+-blue.svg" alt="iOS 17+"/>
